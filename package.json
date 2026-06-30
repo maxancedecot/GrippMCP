@@ -12,7 +12,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "build:vercel": "next build",
     "dev": "tsx src/server.ts",
     "start": "node dist/src/server.js",
     "fetch:metadata": "node scripts/fetch-gripp-metadata.mjs",
@@ -24,10 +25,18 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.10",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "next": "^16.2.9",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   },
   "engines": {
     "node": ">=20.10.0"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
   }
 }

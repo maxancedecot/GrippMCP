@@ -50,7 +50,7 @@ After publishing or linking the package, you can also run the `gripp-mcp` binary
 
 ## Vercel Remote MCP
 
-This repo also exposes a Streamable HTTP MCP endpoint for Vercel:
+This repo also exposes a Streamable HTTP MCP endpoint for Vercel through a Next.js route:
 
 ```text
 https://your-vercel-domain.vercel.app/api/mcp

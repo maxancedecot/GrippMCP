@@ -1,5 +1,8 @@
-import rawMetadata from "./generated/gripp_api_metadata.json" with { type: "json" };
+import { createRequire } from "node:module";
 import { GrippClass, GrippMetadata } from "./types.js";
+
+const require = createRequire(import.meta.url);
+const rawMetadata = require("./generated/gripp_api_metadata.json") as GrippMetadata;
 
 export const metadata = rawMetadata as GrippMetadata;
 
