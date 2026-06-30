@@ -59,14 +59,21 @@ export class GrippClient {
 
     return requests.map((request) => {
       const response = byId.get(request.id);
+      const globalError = responses.find((candidate) => isErrorResponse(candidate));
       if (!response) {
         throw new GrippMcpError("missing_response", "Gripp did not return a response for a batch item.", {
-          requestId: request.id
+          requestId: request.id,
+          upstreamError: globalError ?? null,
+          responses
         });
       }
 
-      if ("error" in response) {
-        throw new GrippMcpError("upstream_error", "Gripp returned an error.", response.error);
+      if (isErrorResponse(response)) {
+        throw new GrippMcpError("upstream_error", "Gripp returned an error.", response);
+      }
+
+      if (response.result === undefined) {
+        throw new GrippMcpError("invalid_upstream_shape", "Gripp returned a response without a result.", response);
       }
 
       return response.result;
@@ -124,6 +131,13 @@ export class GrippClient {
       clearTimeout(timeout);
     }
   }
+}
+
+function isErrorResponse(response: GrippRpcResponse): boolean {
+  return (
+    ("error_code" in response && response.error_code !== undefined && response.error_code !== null) ||
+    ("error" in response && response.error !== undefined && response.error !== null)
+  );
 }
 
 export function validateMethodSafety(method: string, confirm: boolean): void {

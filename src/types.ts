@@ -49,11 +49,15 @@ export type GrippRpcRequest = {
 export type GrippRpcSuccess = {
   id?: number;
   result: JsonValue;
+  error?: null;
+  error_code?: never;
 };
 
 export type GrippRpcFailure = {
   id?: number;
   error: JsonValue;
+  error_code?: number;
+  result?: JsonValue;
 };
 
 export type GrippRpcResponse = GrippRpcSuccess | GrippRpcFailure;
