@@ -4,7 +4,7 @@
   "description": "Model Context Protocol server for the Gripp API 3.0 JSON-RPC endpoint.",
   "type": "module",
   "bin": {
-    "gripp-mcp": "dist/src/server.js"
+    "gripp-mcp": "dist/src/cli.js"
   },
   "files": [
     "dist",
@@ -14,8 +14,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:vercel": "next build",
-    "dev": "tsx src/server.ts",
-    "start": "node dist/src/server.js",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/src/cli.js",
     "fetch:metadata": "node scripts/fetch-gripp-metadata.mjs",
     "test": "npm run build && node --test dist/test/*.test.js"
   },

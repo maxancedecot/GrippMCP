@@ -37,7 +37,7 @@ Example stdio config:
   "mcpServers": {
     "gripp": {
       "command": "node",
-      "args": ["/absolute/path/to/MCP Gripp/dist/src/server.js"],
+      "args": ["/absolute/path/to/MCP Gripp/dist/src/cli.js"],
       "env": {
         "GRIPP_API_TOKEN": "your-token"
       }
