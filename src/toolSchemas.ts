@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { JsonValue } from "./types.js";
 
+export const grippMethodNamePattern = /^[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/;
+
 export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
     z.null(),

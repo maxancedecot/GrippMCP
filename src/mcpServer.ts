@@ -3,7 +3,7 @@ import { z } from "zod";
 import { GrippClient, GrippClientOptions } from "./grippClient.js";
 import { GrippMcpError, toErrorPayload } from "./errors.js";
 import { getEntityDetails, hasMethod, listClassSummaries, metadata, methodName, requireMethod } from "./metadata.js";
-import { filterSchema, jsonValueSchema, optionsSchema } from "./toolSchemas.js";
+import { filterSchema, grippMethodNamePattern, jsonValueSchema, optionsSchema } from "./toolSchemas.js";
 import { JsonValue } from "./types.js";
 
 export type CreateGrippMcpServerOptions = {
@@ -144,7 +144,7 @@ export function createGrippMcpServer(options: CreateGrippMcpServerOptions = {}) 
     {
       method: z
         .string()
-        .regex(/^[A-Za-z0-9_]+\\.[A-Za-z0-9_]+$/)
+        .regex(grippMethodNamePattern)
         .describe("Full Gripp method name, for example company.getCompanyByCOC or file.getContent."),
       params: z.array(jsonValueSchema).default([]).describe("Positional JSON-RPC params for the Gripp method."),
       confirm: z.boolean().default(false).describe("Required for methods that may modify Gripp data.")
@@ -170,7 +170,7 @@ export function createGrippMcpServer(options: CreateGrippMcpServerOptions = {}) 
           z.object({
             method: z
               .string()
-              .regex(/^[A-Za-z0-9_]+\\.[A-Za-z0-9_]+$/)
+              .regex(grippMethodNamePattern)
               .describe("Full Gripp method name, for example company.get or tag.create."),
             params: z.array(jsonValueSchema).default([]).describe("Positional JSON-RPC params for this call."),
             confirm: z.boolean().default(false).describe("Required for methods that may modify Gripp data.")
