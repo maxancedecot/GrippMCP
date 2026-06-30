@@ -1,0 +1,33 @@
+{
+  "name": "gripp-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for the Gripp API 3.0 JSON-RPC endpoint.",
+  "type": "module",
+  "bin": {
+    "gripp-mcp": "dist/src/server.js"
+  },
+  "files": [
+    "dist",
+    "src/generated/gripp_api_metadata.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/server.ts",
+    "start": "node dist/src/server.js",
+    "fetch:metadata": "node scripts/fetch-gripp-metadata.mjs",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  }
+}
