@@ -1,6 +1,6 @@
 {
   "name": "gripp-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Model Context Protocol server for the Gripp API 3.0 JSON-RPC endpoint.",
   "type": "module",
   "bin": {
