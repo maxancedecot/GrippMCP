@@ -48,6 +48,24 @@ Example stdio config:
 
 After publishing or linking the package, you can also run the `gripp-mcp` binary.
 
+## Vercel Remote MCP
+
+This repo also exposes a Streamable HTTP MCP endpoint for Vercel:
+
+```text
+https://your-vercel-domain.vercel.app/api/mcp
+```
+
+For Claude custom connectors, use the `/api/mcp` URL. The root URL only returns a health response.
+
+Set this environment variable in Vercel before using Gripp tools:
+
+```bash
+GRIPP_API_TOKEN=your-token
+```
+
+The remote endpoint can also read a Gripp token from `Authorization: Bearer <token>` or `x-gripp-api-token`, but Claude's custom connector UI does not currently provide a simple custom-header field. For Claude, the practical setup is to store `GRIPP_API_TOKEN` in the Vercel project environment.
+
 ## Tools
 
 - `gripp_list_entities`: list available Gripp entities and method names.
