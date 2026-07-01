@@ -3,9 +3,9 @@ import { getGhlInstallUrl } from "../../../../../src/ghl/oauth.js";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export function GET() {
+export function GET(request: Request) {
   try {
-    return Response.redirect(getGhlInstallUrl(), 302);
+    return Response.redirect(getGhlInstallUrl(request.url), 302);
   } catch (error) {
     return Response.json(
       {

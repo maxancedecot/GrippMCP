@@ -17,12 +17,19 @@ export function getGhlRedirectUri(requestUrl?: string) {
   throw new Error("Set GHL_REDIRECT_URI to your GoHighLevel OAuth callback URL.");
 }
 
-export function getGhlInstallUrl() {
-  const url = process.env.GHL_INSTALL_URL;
-  if (!url) {
+export function getGhlInstallUrl(requestUrl?: string) {
+  const rawUrl = process.env.GHL_INSTALL_URL;
+  if (!rawUrl) {
     throw new Error("Set GHL_INSTALL_URL to the installation URL from your HighLevel Marketplace app.");
   }
-  return url;
+
+  const url = new URL(rawUrl);
+  const redirectUri = process.env.GHL_REDIRECT_URI ?? (requestUrl ? getGhlRedirectUri(requestUrl) : undefined);
+  if (redirectUri) {
+    url.searchParams.set("redirect_uri", redirectUri);
+  }
+
+  return url.toString();
 }
 
 export async function exchangeGhlAuthorizationCode(code: string, requestUrl?: string): Promise<GhlTokenRecord> {
