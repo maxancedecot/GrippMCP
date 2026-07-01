@@ -4,9 +4,9 @@ export function GET() {
     status: "ok",
     mcpEndpoint: "/api/mcp",
     goHighLevel: {
-      oauthStart: "/api/highlevel/oauth/start",
-      oauthCallback: "/api/highlevel/oauth/callback",
-      mcpEndpoint: "/api/highlevel/mcp"
+      oauthStart: "/api/connect/start",
+      oauthCallback: "/api/connect/callback",
+      mcpEndpoint: "/api/connect/mcp"
     }
   });
 }
