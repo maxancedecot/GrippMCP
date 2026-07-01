@@ -80,7 +80,7 @@ The remote endpoint can also read a Gripp token from `Authorization: Bearer <tok
 The same Vercel project can also host a GoHighLevel MCP endpoint with OAuth token storage:
 
 ```text
-https://your-vercel-domain.vercel.app/api/ghl/mcp
+https://your-vercel-domain.vercel.app/api/highlevel/mcp
 ```
 
 Set these environment variables in Vercel:
@@ -89,7 +89,7 @@ Set these environment variables in Vercel:
 GHL_CLIENT_ID=your-highlevel-client-id
 GHL_CLIENT_SECRET=your-highlevel-client-secret
 GHL_INSTALL_URL=your-highlevel-installation-url
-GHL_REDIRECT_URI=https://your-vercel-domain.vercel.app/api/ghl/oauth/callback
+GHL_REDIRECT_URI=https://your-vercel-domain.vercel.app/api/highlevel/oauth/callback
 GHL_OAUTH_USER_TYPE=Location
 GHL_MCP_ACCESS_KEY=long-random-secret
 GHL_TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)
@@ -102,19 +102,19 @@ KV_REST_API_TOKEN=your-upstash-or-vercel-kv-rest-token
 In the HighLevel Marketplace app settings, add this redirect URL:
 
 ```text
-https://your-vercel-domain.vercel.app/api/ghl/oauth/callback
+https://your-vercel-domain.vercel.app/api/highlevel/oauth/callback
 ```
 
 Then open the OAuth start URL in your browser:
 
 ```text
-https://your-vercel-domain.vercel.app/api/ghl/oauth/start
+https://your-vercel-domain.vercel.app/api/highlevel/oauth/start
 ```
 
 After HighLevel redirects back, the callback page shows the `install_id`. Use this URL in Claude's custom connector screen:
 
 ```text
-https://your-vercel-domain.vercel.app/api/ghl/mcp?access_key=long-random-secret&install_id=highlevel-install-id
+https://your-vercel-domain.vercel.app/api/highlevel/mcp?access_key=long-random-secret&install_id=highlevel-install-id
 ```
 
 The GoHighLevel MCP fails closed in production if `GHL_MCP_ACCESS_KEY`, encrypted token storage, or OAuth credentials are missing.

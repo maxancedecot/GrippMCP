@@ -11,7 +11,7 @@ export function getGhlRedirectUri(requestUrl?: string) {
 
   if (requestUrl) {
     const url = new URL(requestUrl);
-    return `${url.origin}/api/ghl/oauth/callback`;
+    return `${url.origin}/api/highlevel/oauth/callback`;
   }
 
   throw new Error("Set GHL_REDIRECT_URI to your GoHighLevel OAuth callback URL.");
