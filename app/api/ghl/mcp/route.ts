@@ -47,15 +47,7 @@ async function handleMcpRequest(request: Request) {
   }
 
   const installId = getInstallId(request);
-  if (!installId) {
-    return errorResponse(
-      400,
-      "missing_install_id",
-      "Add install_id to the MCP URL, or send x-ghl-install-id with the GoHighLevel OAuth install ID."
-    );
-  }
-
-  const server = createGhlMcpServer({ installId });
+  const server = createGhlMcpServer({ installId: installId ?? undefined });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true

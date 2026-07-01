@@ -111,17 +111,20 @@ Then open the OAuth start URL in your browser:
 https://your-vercel-domain.vercel.app/api/connect/start
 ```
 
-After HighLevel redirects back, the callback page shows the `install_id`. Use this URL in Claude's custom connector screen:
+After HighLevel redirects back, the callback page stores that subaccount installation. Use one shared URL in Claude's custom connector screen:
 
 ```text
-https://your-vercel-domain.vercel.app/api/connect/mcp?access_key=long-random-secret&install_id=highlevel-install-id
+https://your-vercel-domain.vercel.app/api/connect/mcp?access_key=long-random-secret
 ```
+
+Install the app once per subaccount by reopening `/api/connect/start` and choosing the next location. The MCP keeps an index of all connected installations. In Claude, call `ghl_list_installations` first, then pass the chosen `installId` to the contact, opportunity, or generic API tools.
 
 The GoHighLevel MCP fails closed in production if `GHL_MCP_ACCESS_KEY`, encrypted token storage, or OAuth credentials are missing.
 
 ### GoHighLevel Tools
 
 - `ghl_installation_status`: show the OAuth installation metadata without exposing tokens.
+- `ghl_list_installations`: list all connected subaccounts/installations.
 - `ghl_get_contact`: retrieve one contact by contact ID.
 - `ghl_search_contacts`: search contacts with `/contacts/search`.
 - `ghl_create_contact`: create a contact; requires `confirm: true`.

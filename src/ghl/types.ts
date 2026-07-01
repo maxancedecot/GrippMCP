@@ -31,6 +31,18 @@ export type GhlTokenRecord = {
   updatedAt: number;
 };
 
+export type GhlInstallationSummary = {
+  installId: string;
+  expiresAt: number;
+  scope?: string;
+  userType?: string;
+  companyId?: string;
+  locationId?: string;
+  userId?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type GhlApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export type GhlApiCallInput = {

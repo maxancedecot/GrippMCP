@@ -54,7 +54,7 @@ function successHtml(
     expiresAt: number;
   }
 ) {
-  const mcpUrl = `${origin}/api/connect/mcp?access_key=<GHL_MCP_ACCESS_KEY>&install_id=${encodeURIComponent(record.installId)}`;
+  const mcpUrl = `${origin}/api/connect/mcp?access_key=<GHL_MCP_ACCESS_KEY>`;
   const rows = [
     ["Install ID", record.installId],
     ["User type", record.userType],
