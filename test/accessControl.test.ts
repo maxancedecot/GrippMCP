@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkMcpAccessKey } from "../src/accessControl.js";
+import { checkGhlMcpAccessKey, checkMcpAccessKey } from "../src/accessControl.js";
 
 const originalEnv = { ...process.env };
 
@@ -39,4 +39,12 @@ test("checkMcpAccessKey accepts the configured access key", () => {
   process.env.MCP_ACCESS_KEY = "expected-secret";
 
   assert.deepEqual(checkMcpAccessKey("expected-secret"), { ok: true });
+});
+
+test("checkGhlMcpAccessKey uses the dedicated GoHighLevel access key", () => {
+  process.env.MCP_ACCESS_KEY = "gripp-secret";
+  process.env.GHL_MCP_ACCESS_KEY = "ghl-secret";
+
+  assert.equal(checkGhlMcpAccessKey("gripp-secret").ok, false);
+  assert.deepEqual(checkGhlMcpAccessKey("ghl-secret"), { ok: true });
 });
