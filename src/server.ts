@@ -1,5 +1,6 @@
 import { IncomingMessage, ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { checkMcpAccessKey, MCP_ACCESS_KEY_HEADER, MCP_ACCESS_KEY_QUERY_PARAM } from "./accessControl.js";
 import { createGrippMcpServer } from "./mcpServer.js";
 
 type VercelLikeRequest = IncomingMessage & {
@@ -10,7 +11,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, x-gripp-api-token, mcp-session-id, mcp-protocol-version, last-event-id",
+    "Content-Type, Authorization, x-gripp-api-token, x-mcp-access-key, mcp-session-id, mcp-protocol-version, last-event-id",
   "Access-Control-Expose-Headers": "mcp-session-id"
 };
 
@@ -29,6 +30,17 @@ export default async function handler(req: VercelLikeRequest, res: ServerRespons
       name: "gripp-mcp",
       status: "ok",
       mcpEndpoint: "/api/mcp"
+    });
+    return;
+  }
+
+  const accessCheck = checkMcpAccessKey(getRequestAccessKey(req));
+  if (!accessCheck.ok) {
+    sendJson(res, accessCheck.statusCode, {
+      error: {
+        code: accessCheck.code,
+        message: accessCheck.message
+      }
     });
     return;
   }
@@ -77,12 +89,22 @@ function getPath(req: IncomingMessage) {
   return new URL(req.url ?? "/", `https://${host}`).pathname;
 }
 
+function getRequestAccessKey(req: IncomingMessage) {
+  const url = getUrl(req);
+  return url.searchParams.get(MCP_ACCESS_KEY_QUERY_PARAM) ?? firstHeader(req.headers[MCP_ACCESS_KEY_HEADER]);
+}
+
 function getRequestToken(req: IncomingMessage) {
   return (
     firstHeader(req.headers["x-gripp-api-token"]) ??
     bearerToken(firstHeader(req.headers.authorization)) ??
     process.env.GRIPP_API_TOKEN
   );
+}
+
+function getUrl(req: IncomingMessage) {
+  const host = req.headers.host ?? "localhost";
+  return new URL(req.url ?? "/", `https://${host}`);
 }
 
 function firstHeader(value: string | string[] | undefined) {

@@ -1,4 +1,5 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { checkMcpAccessKey, MCP_ACCESS_KEY_HEADER, MCP_ACCESS_KEY_QUERY_PARAM } from "../../../src/accessControl.js";
 import { createGrippMcpServer } from "../../../src/mcpServer.js";
 
 export const runtime = "nodejs";
@@ -9,7 +10,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, x-gripp-api-token, mcp-session-id, mcp-protocol-version, last-event-id",
+    "Content-Type, Authorization, x-gripp-api-token, x-mcp-access-key, mcp-session-id, mcp-protocol-version, last-event-id",
   "Access-Control-Expose-Headers": "mcp-session-id"
 };
 
@@ -33,6 +34,22 @@ export async function DELETE(request: Request) {
 }
 
 async function handleMcpRequest(request: Request) {
+  const accessCheck = checkMcpAccessKey(getRequestAccessKey(request));
+  if (!accessCheck.ok) {
+    return Response.json(
+      {
+        error: {
+          code: accessCheck.code,
+          message: accessCheck.message
+        }
+      },
+      {
+        status: accessCheck.statusCode,
+        headers: corsHeaders
+      }
+    );
+  }
+
   const token = getRequestToken(request);
   const server = createGrippMcpServer({
     clientOptions: token ? { token } : undefined
@@ -61,6 +78,11 @@ async function handleMcpRequest(request: Request) {
       }
     );
   }
+}
+
+function getRequestAccessKey(request: Request) {
+  const url = new URL(request.url);
+  return url.searchParams.get(MCP_ACCESS_KEY_QUERY_PARAM) ?? request.headers.get(MCP_ACCESS_KEY_HEADER);
 }
 
 function getRequestToken(request: Request) {

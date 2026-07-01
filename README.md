@@ -62,7 +62,16 @@ Set this environment variable in Vercel before using Gripp tools:
 
 ```bash
 GRIPP_API_TOKEN=your-token
+MCP_ACCESS_KEY=long-random-secret
 ```
+
+Use the access key in Claude's custom connector URL:
+
+```text
+https://your-vercel-domain.vercel.app/api/mcp?access_key=long-random-secret
+```
+
+The `/api/mcp` endpoint fails closed in production if `MCP_ACCESS_KEY` is not set. If the URL leaks, rotate `MCP_ACCESS_KEY` in Vercel and redeploy.
 
 The remote endpoint can also read a Gripp token from `Authorization: Bearer <token>` or `x-gripp-api-token`, but Claude's custom connector UI does not currently provide a simple custom-header field. For Claude, the practical setup is to store `GRIPP_API_TOKEN` in the Vercel project environment.
 
