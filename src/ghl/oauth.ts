@@ -37,30 +37,35 @@ export function getGhlInstallUrl(requestUrl?: string) {
 }
 
 export async function exchangeGhlAuthorizationCode(code: string, requestUrl?: string): Promise<GhlTokenRecord> {
+  const body = buildTokenExchangeBody(code, requestUrl);
   const response = await fetch(TOKEN_URL, {
     method: "POST",
     headers: {
       "Accept": "application/json",
-      "Content-Type": "application/json"
+      "Content-Type": "application/x-www-form-urlencoded"
     },
-    body: JSON.stringify({
-      client_id: requiredEnv("GHL_CLIENT_ID"),
-      client_secret: requiredEnv("GHL_CLIENT_SECRET"),
-      grant_type: "authorization_code",
-      code,
-      user_type: process.env.GHL_OAUTH_USER_TYPE ?? "Location",
-      redirect_uri: getGhlRedirectUri(requestUrl)
-    })
+    body
   });
 
   const payload = (await response.json()) as GhlTokenResponse & { message?: string; error?: string };
   if (!response.ok) {
-    throw new Error(`GoHighLevel token exchange failed: ${payload.message ?? payload.error ?? response.statusText}`);
+    throw new Error(`GoHighLevel token exchange failed: ${formatGhlError(response, payload)}`);
   }
 
   const record = tokenResponseToRecord(payload);
   await saveGhlTokenRecord(record);
   return record;
+}
+
+export function buildTokenExchangeBody(code: string, requestUrl?: string) {
+  return new URLSearchParams({
+    client_id: requiredEnv("GHL_CLIENT_ID"),
+    client_secret: requiredEnv("GHL_CLIENT_SECRET"),
+    grant_type: "authorization_code",
+    code,
+    user_type: process.env.GHL_OAUTH_USER_TYPE ?? "Location",
+    redirect_uri: getGhlRedirectUri(requestUrl)
+  });
 }
 
 export async function getFreshGhlTokenRecord(installId: string): Promise<GhlTokenRecord> {
@@ -119,7 +124,7 @@ async function postLocationToken(accessToken: string, body: URLSearchParams): Pr
       return payload;
     }
 
-    lastError = new Error(`GoHighLevel location token exchange failed: ${payload.message ?? payload.error ?? response.statusText}`);
+    lastError = new Error(`GoHighLevel location token exchange failed: ${formatGhlError(response, payload)}`);
     if (response.status !== 404) {
       break;
     }
@@ -149,7 +154,7 @@ async function refreshGhlToken(record: GhlTokenRecord): Promise<GhlTokenRecord> 
 
   const payload = (await response.json()) as GhlTokenResponse & { message?: string; error?: string };
   if (!response.ok) {
-    throw new Error(`GoHighLevel token refresh failed: ${payload.message ?? payload.error ?? response.statusText}`);
+    throw new Error(`GoHighLevel token refresh failed: ${formatGhlError(response, payload)}`);
   }
 
   return {
@@ -198,4 +203,8 @@ function requiredEnv(name: string) {
     throw new Error(`Set ${name} in the Vercel project environment.`);
   }
   return value;
+}
+
+function formatGhlError(response: Response, payload: { message?: string; error?: string; error_description?: string }) {
+  return payload.message ?? payload.error_description ?? payload.error ?? response.statusText;
 }
