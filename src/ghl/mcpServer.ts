@@ -103,19 +103,25 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
       if (companyRecord.userType !== "Company" || !companyRecord.companyId) {
         throw new Error("A Company/Agency OAuth installation is required to list installed locations.");
       }
+      const requestQuery = {
+        skip: 0,
+        limit: 100,
+        isInstalled: true,
+        ...query,
+        companyId: companyRecord.companyId,
+        appId: appId ?? getGhlAppId()
+      };
 
       return {
+        request: {
+          method: "GET",
+          path: "/oauth/installedLocations",
+          query: stripUndefined(requestQuery)
+        },
         result: await (await clientFor(resolvedCompanyInstallId)).call({
           method: "GET",
           path: "/oauth/installedLocations",
-          query: {
-            skip: 0,
-            limit: 100,
-            isInstalled: true,
-            ...query,
-            companyId: companyRecord.companyId,
-            appId: appId ?? getGhlAppId()
-          },
+          query: requestQuery,
           readOnly: true
         })
       };
@@ -284,6 +290,10 @@ async function resolveCompanyInstallId(providedInstallId: string | undefined) {
       ? "No Company/Agency OAuth installation is connected. Set GHL_OAUTH_USER_TYPE=Company and install with an agency admin."
       : "Multiple Company/Agency installations are connected. Pass companyInstallId from ghl_list_installations."
   );
+}
+
+function stripUndefined<T extends Record<string, string | number | boolean | undefined>>(record: T) {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
 }
 
 function listInstallationsForOutput(
