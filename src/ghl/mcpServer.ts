@@ -71,7 +71,7 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
 
   server.tool(
     "ghl_list_locations",
-    "List/search GoHighLevel subaccounts available from an agency/company OAuth installation.",
+    "List/search GoHighLevel subaccounts visible to an agency/company OAuth installation. Visibility does not guarantee the app is installed on the location.",
     {
       companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
       query: z.record(z.union([z.string(), z.number(), z.boolean(), z.undefined()])).default({}).describe("Optional /locations/search query parameters.")
@@ -87,11 +87,28 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
   );
 
   server.tool(
-    "ghl_connect_location",
-    "Create and store a Location token from an agency/company OAuth installation for one subaccount.",
+    "ghl_list_installed_locations",
+    "List GoHighLevel locations where this Marketplace app is installed/authorized. Use this before ghl_connect_location.",
     {
       companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
-      locationId: z.string().describe("Subaccount/location ID to connect.")
+      query: z.record(z.union([z.string(), z.number(), z.boolean(), z.undefined()])).default({}).describe("Optional /oauth/installed-locations query parameters.")
+    },
+    async ({ companyInstallId, query }) => withErrors(async () => ({
+      result: await (await clientFor(companyInstallId)).call({
+        method: "GET",
+        path: "/oauth/installed-locations",
+        query,
+        readOnly: true
+      })
+    }))
+  );
+
+  server.tool(
+    "ghl_connect_location",
+    "Create and store a Location token from an agency/company OAuth installation for one app-installed subaccount.",
+    {
+      companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
+      locationId: z.string().describe("Subaccount/location ID to connect. Use ghl_list_installed_locations to confirm the app is installed there.")
     },
     async ({ companyInstallId, locationId }) => withErrors(async () => ({
       installation: formatInstallationForOutput(await createGhlLocationToken(await resolveCompanyInstallId(companyInstallId), locationId))

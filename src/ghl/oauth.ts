@@ -3,8 +3,8 @@ import { GhlTokenRecord, GhlTokenResponse } from "./types.js";
 
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
 const LOCATION_TOKEN_URLS = [
-  "https://services.leadconnectorhq.com/oauth/locationToken",
-  "https://services.leadconnectorhq.com/oauth/location-token"
+  "https://services.leadconnectorhq.com/oauth/location-token",
+  "https://services.leadconnectorhq.com/oauth/locationToken"
 ];
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
 

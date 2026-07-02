@@ -119,7 +119,7 @@ https://your-vercel-domain.vercel.app/api/connect/mcp?access_key=long-random-sec
 
 Install the app once per subaccount by reopening `/api/connect/start` and choosing the next location. The MCP keeps an index of all connected installations. In Claude, call `ghl_list_installations` first, then pass the chosen `installId` to the contact, opportunity, or generic API tools.
 
-If your Marketplace app can only be installed by an agency admin, set `GHL_OAUTH_USER_TYPE=Company`. After installing once at agency level, use `ghl_list_locations` to find subaccounts and `ghl_connect_location` to create a stored Location installation for the subaccount you want to query.
+If your Marketplace app can only be installed by an agency admin, set `GHL_OAUTH_USER_TYPE=Company`. After installing once at agency level, use `ghl_list_installed_locations` to see where the app is actually installed, then `ghl_connect_location` to create a stored Location installation for the subaccount you want to query. `ghl_list_locations` only lists visible subaccounts and does not prove the app is installed on them.
 
 The GoHighLevel MCP fails closed in production if `GHL_MCP_ACCESS_KEY`, encrypted token storage, or OAuth credentials are missing.
 
@@ -128,6 +128,7 @@ The GoHighLevel MCP fails closed in production if `GHL_MCP_ACCESS_KEY`, encrypte
 - `ghl_installation_status`: show the OAuth installation metadata without exposing tokens.
 - `ghl_list_installations`: list all connected subaccounts/installations.
 - `ghl_list_locations`: list/search subaccounts from a connected agency/company install.
+- `ghl_list_installed_locations`: list locations where this app is installed/authorized.
 - `ghl_connect_location`: create and store a Location token from an agency/company install.
 - `ghl_get_contact`: retrieve one contact by contact ID.
 - `ghl_search_contacts`: search contacts with `/contacts/search`.

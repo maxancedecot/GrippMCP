@@ -138,7 +138,7 @@ test("createGhlLocationToken stores a location token from a company token", asyn
     assert.equal(record.installId, "location_123");
     assert.equal(record.userType, "Location");
     assert.equal(record.accessToken, "location-access");
-    assert.match((calls[0] as { url: string }).url, /oauth\/locationToken$/);
+    assert.match((calls[0] as { url: string }).url, /oauth\/location-token$/);
   } finally {
     globalThis.fetch = originalFetch;
   }
