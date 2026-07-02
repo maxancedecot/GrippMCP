@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTokenExchangeBody, createGhlLocationToken, exchangeGhlAuthorizationCode, getGhlInstallUrl } from "../src/ghl/oauth.js";
+import {
+  buildTokenExchangeBody,
+  createGhlLocationToken,
+  exchangeGhlAuthorizationCode,
+  getGhlAppId,
+  getGhlInstallUrl
+} from "../src/ghl/oauth.js";
 import { saveGhlTokenRecord } from "../src/ghl/tokenStore.js";
 
 const originalEnv = { ...process.env };
@@ -28,6 +34,17 @@ test("getGhlInstallUrl prefers explicit GHL_REDIRECT_URI", () => {
   const url = new URL(getGhlInstallUrl("https://gripp-mcp-two.vercel.app/api/connect/start"));
 
   assert.equal(url.searchParams.get("redirect_uri"), "https://custom.example/api/connect/callback");
+});
+
+test("getGhlAppId reads explicit env or install URL version_id", () => {
+  process.env.GHL_APP_ID = "app_from_env";
+  process.env.GHL_INSTALL_URL = "https://marketplace.leadconnectorhq.com/v2/oauth/chooselocation?version_id=app_from_url";
+
+  assert.equal(getGhlAppId(), "app_from_env");
+
+  delete process.env.GHL_APP_ID;
+
+  assert.equal(getGhlAppId(), "app_from_url");
 });
 
 test("buildTokenExchangeBody uses form-encoded company OAuth parameters", () => {

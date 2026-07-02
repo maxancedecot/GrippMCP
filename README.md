@@ -88,6 +88,7 @@ Set these environment variables in Vercel:
 ```bash
 GHL_CLIENT_ID=your-highlevel-client-id
 GHL_CLIENT_SECRET=your-highlevel-client-secret
+GHL_APP_ID=your-highlevel-app-or-version-id
 GHL_INSTALL_URL=your-highlevel-installation-url
 GHL_REDIRECT_URI=https://your-vercel-domain.vercel.app/api/connect/callback
 GHL_OAUTH_USER_TYPE=Company

@@ -36,6 +36,23 @@ export function getGhlInstallUrl(requestUrl?: string) {
   return url.toString();
 }
 
+export function getGhlAppId() {
+  if (process.env.GHL_APP_ID) {
+    return process.env.GHL_APP_ID;
+  }
+
+  const rawUrl = process.env.GHL_INSTALL_URL;
+  if (rawUrl) {
+    const url = new URL(rawUrl);
+    const appId = url.searchParams.get("appId") ?? url.searchParams.get("app_id") ?? url.searchParams.get("version_id");
+    if (appId) {
+      return appId;
+    }
+  }
+
+  throw new Error("Set GHL_APP_ID to your HighLevel Marketplace app/version ID.");
+}
+
 export async function exchangeGhlAuthorizationCode(code: string, requestUrl?: string): Promise<GhlTokenRecord> {
   const body = buildTokenExchangeBody(code, requestUrl);
   const response = await fetch(TOKEN_URL, {

@@ -4,7 +4,7 @@ import { toErrorPayload } from "../errors.js";
 import { jsonValueSchema } from "../toolSchemas.js";
 import { JsonValue } from "../types.js";
 import { GhlClient } from "./client.js";
-import { createGhlLocationToken } from "./oauth.js";
+import { createGhlLocationToken, getFreshGhlTokenRecord, getGhlAppId } from "./oauth.js";
 import { getGhlTokenStoreMode, listGhlInstallations } from "./tokenStore.js";
 import { GhlApiMethod } from "./types.js";
 
@@ -91,16 +91,29 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
     "List GoHighLevel locations where this Marketplace app is installed/authorized. Use this before ghl_connect_location.",
     {
       companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
+      appId: z.string().optional().describe("HighLevel Marketplace app/version ID. Defaults to GHL_APP_ID or the version_id in GHL_INSTALL_URL."),
       query: z.record(z.union([z.string(), z.number(), z.boolean(), z.undefined()])).default({}).describe("Optional /oauth/installed-locations query parameters.")
     },
-    async ({ companyInstallId, query }) => withErrors(async () => ({
-      result: await (await clientFor(companyInstallId)).call({
-        method: "GET",
-        path: "/oauth/installed-locations",
-        query,
-        readOnly: true
-      })
-    }))
+    async ({ companyInstallId, appId, query }) => withErrors(async () => {
+      const resolvedCompanyInstallId = await resolveCompanyInstallId(companyInstallId);
+      const companyRecord = await getFreshGhlTokenRecord(resolvedCompanyInstallId);
+      if (companyRecord.userType !== "Company" || !companyRecord.companyId) {
+        throw new Error("A Company/Agency OAuth installation is required to list installed locations.");
+      }
+
+      return {
+        result: await (await clientFor(resolvedCompanyInstallId)).call({
+          method: "GET",
+          path: "/oauth/installed-locations",
+          query: {
+            ...query,
+            companyId: companyRecord.companyId,
+            appId: appId ?? getGhlAppId()
+          },
+          readOnly: true
+        })
+      };
+    })
   );
 
   server.tool(
