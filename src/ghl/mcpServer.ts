@@ -92,7 +92,7 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
     {
       companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
       appId: z.string().optional().describe("HighLevel Marketplace app/version ID. Defaults to GHL_APP_ID or the version_id in GHL_INSTALL_URL."),
-      query: z.record(z.union([z.string(), z.number(), z.boolean(), z.undefined()])).default({}).describe("Optional /oauth/installed-locations query parameters.")
+      query: z.record(z.union([z.string(), z.number(), z.boolean(), z.undefined()])).default({}).describe("Optional /oauth/installedLocations query parameters.")
     },
     async ({ companyInstallId, appId, query }) => withErrors(async () => {
       const resolvedCompanyInstallId = await resolveCompanyInstallId(companyInstallId);
@@ -104,7 +104,7 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
       return {
         result: await (await clientFor(resolvedCompanyInstallId)).call({
           method: "GET",
-          path: "/oauth/installed-locations",
+          path: "/oauth/installedLocations",
           query: {
             ...query,
             companyId: companyRecord.companyId,
