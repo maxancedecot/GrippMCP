@@ -130,10 +130,10 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
 
   server.tool(
     "ghl_connect_location",
-    "Create and store a Location token from an agency/company OAuth installation for one app-installed subaccount.",
+    "Create and store a Location token from an agency/company OAuth installation for one visible subaccount. Use this after ghl_list_locations identifies the target locationId; if HighLevel rejects the exchange, the app is not authorized for that location or oauth.write is missing.",
     {
       companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
-      locationId: z.string().describe("Subaccount/location ID to connect. Use ghl_list_installed_locations to confirm the app is installed there.")
+      locationId: z.string().describe("Subaccount/location ID to connect. Use a locationId returned by ghl_list_locations, for example the target client subaccount.")
     },
     async ({ companyInstallId, locationId }) => withErrors(async () => ({
       installation: formatInstallationForOutput(await createGhlLocationToken(await resolveCompanyInstallId(companyInstallId), locationId))
