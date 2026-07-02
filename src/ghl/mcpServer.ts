@@ -4,6 +4,7 @@ import { toErrorPayload } from "../errors.js";
 import { jsonValueSchema } from "../toolSchemas.js";
 import { JsonValue } from "../types.js";
 import { GhlClient } from "./client.js";
+import { createGhlLocationToken } from "./oauth.js";
 import { getGhlTokenStoreMode, listGhlInstallations } from "./tokenStore.js";
 import { GhlApiMethod } from "./types.js";
 
@@ -65,6 +66,35 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
     async ({ installId }) => withErrors(async () => ({
       tokenStore: getGhlTokenStoreMode(),
       installation: await (await clientFor(installId)).status()
+    }))
+  );
+
+  server.tool(
+    "ghl_list_locations",
+    "List/search GoHighLevel subaccounts available from an agency/company OAuth installation.",
+    {
+      companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
+      query: z.record(z.union([z.string(), z.number(), z.boolean(), z.undefined()])).default({}).describe("Optional /locations/search query parameters.")
+    },
+    async ({ companyInstallId, query }) => withErrors(async () => ({
+      result: await (await clientFor(companyInstallId)).call({
+        method: "GET",
+        path: "/locations/search",
+        query,
+        readOnly: true
+      })
+    }))
+  );
+
+  server.tool(
+    "ghl_connect_location",
+    "Create and store a Location token from an agency/company OAuth installation for one subaccount.",
+    {
+      companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
+      locationId: z.string().describe("Subaccount/location ID to connect.")
+    },
+    async ({ companyInstallId, locationId }) => withErrors(async () => ({
+      installation: formatInstallationForOutput(await createGhlLocationToken(await resolveCompanyInstallId(companyInstallId), locationId))
     }))
   );
 
@@ -202,6 +232,24 @@ async function resolveInstallId(defaultInstallId: string | undefined, providedIn
   );
 }
 
+async function resolveCompanyInstallId(providedInstallId: string | undefined) {
+  const installations = await listGhlInstallations();
+  if (providedInstallId) {
+    return providedInstallId;
+  }
+
+  const companyInstallations = installations.filter((installation) => installation.userType === "Company");
+  if (companyInstallations.length === 1) {
+    return companyInstallations[0]!.installId;
+  }
+
+  throw new Error(
+    companyInstallations.length === 0
+      ? "No Company/Agency OAuth installation is connected. Set GHL_OAUTH_USER_TYPE=Company and install with an agency admin."
+      : "Multiple Company/Agency installations are connected. Pass companyInstallId from ghl_list_installations."
+  );
+}
+
 function listInstallationsForOutput(
   installations: Array<{
     installId: string;
@@ -215,10 +263,24 @@ function listInstallationsForOutput(
     updatedAt: number;
   }>
 ) {
-  return installations.map((installation) => ({
+  return installations.map(formatInstallationForOutput);
+}
+
+function formatInstallationForOutput(installation: {
+  installId: string;
+  expiresAt: number;
+  scope?: string;
+  userType?: string;
+  companyId?: string;
+  locationId?: string;
+  userId?: string;
+  createdAt: number;
+  updatedAt: number;
+}) {
+  return {
     ...installation,
     expiresAt: new Date(installation.expiresAt).toISOString(),
     createdAt: new Date(installation.createdAt).toISOString(),
     updatedAt: new Date(installation.updatedAt).toISOString()
-  }));
+  };
 }

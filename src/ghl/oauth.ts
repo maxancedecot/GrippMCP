@@ -2,6 +2,10 @@ import { getGhlTokenRecord, saveGhlTokenRecord } from "./tokenStore.js";
 import { GhlTokenRecord, GhlTokenResponse } from "./types.js";
 
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
+const LOCATION_TOKEN_URLS = [
+  "https://services.leadconnectorhq.com/oauth/locationToken",
+  "https://services.leadconnectorhq.com/oauth/location-token"
+];
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
 
 export function getGhlRedirectUri(requestUrl?: string) {
@@ -72,6 +76,56 @@ export async function getFreshGhlTokenRecord(installId: string): Promise<GhlToke
   const refreshed = await refreshGhlToken(record);
   await saveGhlTokenRecord(refreshed);
   return refreshed;
+}
+
+export async function createGhlLocationToken(companyInstallId: string, locationId: string): Promise<GhlTokenRecord> {
+  const agencyRecord = await getFreshGhlTokenRecord(companyInstallId);
+  if (agencyRecord.userType !== "Company" || !agencyRecord.companyId) {
+    throw new Error("A Company/Agency OAuth installation is required to create a Location token.");
+  }
+
+  const body = new URLSearchParams({
+    companyId: agencyRecord.companyId,
+    locationId
+  });
+
+  const payload = await postLocationToken(agencyRecord.accessToken, body);
+  const record = tokenResponseToRecord({
+    ...payload,
+    companyId: payload.companyId ?? agencyRecord.companyId,
+    locationId
+  });
+  await saveGhlTokenRecord(record);
+  return record;
+}
+
+async function postLocationToken(accessToken: string, body: URLSearchParams): Promise<GhlTokenResponse & { message?: string; error?: string }> {
+  let lastError: Error | null = null;
+
+  for (const url of LOCATION_TOKEN_URLS) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Version": "2021-07-28"
+      },
+      body
+    });
+    const payload = (await response.json()) as GhlTokenResponse & { message?: string; error?: string };
+
+    if (response.ok) {
+      return payload;
+    }
+
+    lastError = new Error(`GoHighLevel location token exchange failed: ${payload.message ?? payload.error ?? response.statusText}`);
+    if (response.status !== 404) {
+      break;
+    }
+  }
+
+  throw lastError ?? new Error("GoHighLevel location token exchange failed.");
 }
 
 async function refreshGhlToken(record: GhlTokenRecord): Promise<GhlTokenRecord> {
