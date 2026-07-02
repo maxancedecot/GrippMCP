@@ -88,11 +88,14 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
 
   server.tool(
     "ghl_list_installed_locations",
-    "List GoHighLevel locations where this Marketplace app is installed/authorized. Use this before ghl_connect_location.",
+    "List GoHighLevel locations where this Marketplace app is installed/authorized. Defaults to installed-only results; use this before ghl_connect_location.",
     {
       companyInstallId: installIdSchema.describe("Company/Agency installation ID. Use ghl_list_installations to find a userType=Company install."),
       appId: z.string().optional().describe("HighLevel Marketplace app/version ID. Defaults to GHL_APP_ID or the version_id in GHL_INSTALL_URL."),
-      query: z.record(z.union([z.string(), z.number(), z.boolean(), z.undefined()])).default({}).describe("Optional /oauth/installedLocations query parameters.")
+      query: z
+        .record(z.union([z.string(), z.number(), z.boolean(), z.undefined()]))
+        .default({})
+        .describe("Optional /oauth/installedLocations query parameters. Defaults are skip=0, limit=100, isInstalled=true.")
     },
     async ({ companyInstallId, appId, query }) => withErrors(async () => {
       const resolvedCompanyInstallId = await resolveCompanyInstallId(companyInstallId);
@@ -106,6 +109,9 @@ export function createGhlMcpServer(options: CreateGhlMcpServerOptions) {
           method: "GET",
           path: "/oauth/installedLocations",
           query: {
+            skip: 0,
+            limit: 100,
+            isInstalled: true,
             ...query,
             companyId: companyRecord.companyId,
             appId: appId ?? getGhlAppId()
