@@ -113,9 +113,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       </form>
 
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
-        <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / noemer" tone="good" />
+        <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail="Niet geboekt op Intern (1010)" tone="blue" />
-        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven planning" tone="overtime" />
+        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven voorziene uren" tone="overtime" />
         <MetricCard label="Intern (1010)" value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -230,7 +230,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <p className="eyebrow">Proxy</p>
             <h2>Declarabiliteit</h2>
           </div>
-          <span className="panel-total">Niet-318 / noemer</span>
+          <span className="panel-total">Niet-318 / voorziene uren</span>
         </div>
 
         <div className="project-line-list">
@@ -246,7 +246,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="project-line-row">
             <div>
               <span className="row-title">Overuren</span>
-              <span className="cell-muted">Geschreven uren boven planning</span>
+              <span className="cell-muted">Geschreven uren boven voorziene uren</span>
             </div>
             <div className="project-line-metrics">
               <span>{formatHours(dashboard.overtime)} uur</span>
@@ -353,7 +353,7 @@ async function getDashboardData(period: Period): Promise<DashboardData> {
     const dashboard = buildDashboardData(hours, employees, workingHoursByEmployee, effectivePeriod, source);
 
     if (dashboard.total === 0 && dashboard.written > 0) {
-      dashboard.source.message = [dashboard.source.message, "De noemer kon niet worden bepaald en is 0."]
+      dashboard.source.message = [dashboard.source.message, "De voorziene uren konden niet worden bepaald en zijn 0."]
         .filter(Boolean)
         .join(" ");
     } else if (hours.length === 0) {
@@ -478,6 +478,8 @@ function buildDashboardData(
   const employeesById = new Map<number, JsonRecord>();
   const totals = emptyAggregate();
   const employeeMap = new Map<string, EmployeeRow>();
+  const plannedByEmployeeWeek = new Map<string, Map<string, number>>();
+  const writtenByEmployeeWeek = new Map<string, Map<string, number>>();
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -499,6 +501,7 @@ function buildDashboardData(
     employeeRow.total = workingHours.total;
     totals.total += workingHours.total;
     addWorkingHoursToWeeks(weekMap, workingHours, period);
+    addWorkingHoursToEmployeeWeekMap(plannedByEmployeeWeek, employeeRow.id, workingHours, period);
     employeeMap.set(employeeRow.id, employeeRow);
   }
 
@@ -531,7 +534,10 @@ function buildDashboardData(
       weekRow[targetField] += amount;
       weekRow.written += amount;
     }
+    addToNestedNumber(writtenByEmployeeWeek, employeeKey, weekKeyForDate(stringFrom(readField(hour, "date")), period), amount);
   }
+
+  applyOvertimeAndUntracked(totals, employeeMap, weekMap, plannedByEmployeeWeek, writtenByEmployeeWeek);
 
   const employeeRows = Array.from(employeeMap.values())
     .map(finalizeAggregate)
@@ -570,6 +576,56 @@ function addWorkingHoursToWeeks(weekMap: Map<string, WeekRow>, workingHours: Wor
     const weekRow = weekMap.get(weekKeyForDate(date, period));
     if (weekRow) {
       weekRow.total += amount;
+    }
+  }
+}
+
+function addWorkingHoursToEmployeeWeekMap(
+  plannedByEmployeeWeek: Map<string, Map<string, number>>,
+  employeeId: string,
+  workingHours: WorkingHoursSummary,
+  period: Period
+) {
+  for (const [date, amount] of workingHours.byDate) {
+    addToNestedNumber(plannedByEmployeeWeek, employeeId, weekKeyForDate(date, period), amount);
+  }
+}
+
+function applyOvertimeAndUntracked(
+  totals: Aggregate,
+  employeeMap: Map<string, EmployeeRow>,
+  weekMap: Map<string, WeekRow>,
+  plannedByEmployeeWeek: Map<string, Map<string, number>>,
+  writtenByEmployeeWeek: Map<string, Map<string, number>>
+) {
+  const employeeIds = new Set([...plannedByEmployeeWeek.keys(), ...writtenByEmployeeWeek.keys()]);
+
+  for (const employeeId of employeeIds) {
+    const employeeRow = employeeMap.get(employeeId);
+    if (!employeeRow) {
+      continue;
+    }
+
+    const plannedWeeks = plannedByEmployeeWeek.get(employeeId) ?? new Map();
+    const writtenWeeks = writtenByEmployeeWeek.get(employeeId) ?? new Map();
+    const weekKeys = new Set([...plannedWeeks.keys(), ...writtenWeeks.keys()]);
+
+    for (const weekKey of weekKeys) {
+      const planned = plannedWeeks.get(weekKey) ?? 0;
+      const written = writtenWeeks.get(weekKey) ?? 0;
+      const overtime = planned > 0 ? Math.max(0, written - planned) : 0;
+      const untracked = Math.max(0, planned - written);
+
+      employeeRow.overtime += overtime;
+      employeeRow.untracked += untracked;
+      totals.overtime += overtime;
+      totals.untracked += untracked;
+
+      const weekRow = weekMap.get(weekKey);
+      if (weekRow) {
+        weekRow.overtime += overtime;
+        weekRow.untracked += untracked;
+      }
     }
   }
 }
@@ -680,13 +736,7 @@ function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undef
 }
 
 function finalizeAggregate<T extends Aggregate>(aggregate: T) {
-  const untracked = Math.max(0, aggregate.total - aggregate.written);
-  const overtime = Math.max(0, aggregate.written - aggregate.total);
-  return withDeclarability({
-    ...aggregate,
-    untracked,
-    overtime
-  });
+  return withDeclarability(aggregate);
 }
 
 function withDeclarability<T extends Aggregate>(aggregate: T) {
@@ -1069,6 +1119,12 @@ function normalizeNumberString(value: string) {
 
 function sumValues(values: Map<string, number>) {
   return Array.from(values.values()).reduce((total, value) => total + value, 0);
+}
+
+function addToNestedNumber(map: Map<string, Map<string, number>>, outerKey: string, innerKey: string, value: number) {
+  const inner = map.get(outerKey) ?? new Map<string, number>();
+  inner.set(innerKey, (inner.get(innerKey) ?? 0) + value);
+  map.set(outerKey, inner);
 }
 
 function chunk<T>(items: T[], size: number) {
