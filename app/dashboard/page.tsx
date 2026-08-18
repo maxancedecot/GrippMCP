@@ -13,6 +13,7 @@ type Period = {
   label: string;
   shortMonth: string;
   weekBuckets: WeekBucket[];
+  isCustom: boolean;
 };
 
 type WeekBucket = {
@@ -66,6 +67,8 @@ type DashboardData = Aggregate & {
   lastUpdated: string;
 };
 
+type DashboardSearchParams = Record<string, string | string[] | undefined>;
+
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1
@@ -76,8 +79,10 @@ const percentFormatter = new Intl.NumberFormat("nl-NL", {
   maximumFractionDigits: 0
 });
 
-export default async function DashboardPage() {
-  const dashboard = await getDashboardData();
+export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
+  const params = (await searchParams) ?? {};
+  const requestedPeriod = getPeriodFromParams(params);
+  const dashboard = await getDashboardData(requestedPeriod);
   const gaugeStyle = {
     "--gauge": `${dashboard.billability * 3.6}deg`
   } as CSSProperties;
@@ -99,6 +104,18 @@ export default async function DashboardPage() {
       </header>
 
       {dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
+
+      <form className="period-form" action="/dashboard">
+        <label>
+          Van
+          <input type="date" name="start" defaultValue={dashboard.period.start} />
+        </label>
+        <label>
+          Tot
+          <input type="date" name="end" defaultValue={dashboard.period.end} />
+        </label>
+        <button type="submit">Periode laden</button>
+      </form>
 
       <section className="metric-grid" aria-label="Kerncijfers billabelheid">
         <MetricCard label="Billabelheid" value={`${formatPercent(dashboard.billability)}%`} detail="Billabel / totaal geschreven" tone="good" />
@@ -301,9 +318,7 @@ function InlineBar({ aggregate }: { aggregate: Aggregate }) {
   );
 }
 
-async function getDashboardData(): Promise<DashboardData> {
-  const period = getCurrentMonthPeriod();
-
+async function getDashboardData(period: Period): Promise<DashboardData> {
   if (!process.env.GRIPP_API_TOKEN) {
     return buildDashboardData(createDemoHours(period), createDemoEmployees(), createDemoProjectLines(), period, {
       mode: "demo",
@@ -313,46 +328,84 @@ async function getDashboardData(): Promise<DashboardData> {
 
   try {
     const client = new GrippClient();
-    const [hoursResult, employeesResult] = await client.batch([
-      {
-        method: "hour.get",
-        params: [
-          [
-            { field: "hour.date", operator: "greaterequals", value: period.start },
-            { field: "hour.date", operator: "lessequals", value: period.end }
-          ],
-          {
-            paging: { firstresult: 0, maxresults: 250 },
-            orderings: [{ field: "hour.date", direction: "asc" }]
-          }
-        ] as JsonValue[]
-      },
-      {
-        method: "employee.get",
-        params: [
-          [],
-          {
-            paging: { firstresult: 0, maxresults: 250 },
-            orderings: [{ field: "employee.screenname", direction: "asc" }]
-          }
-        ] as JsonValue[]
-      }
-    ]);
+    let hours = await fetchHoursForPeriod(client, period);
+    let effectivePeriod = period;
+    const source: DashboardSource = {
+      mode: "live",
+      message: ""
+    };
 
-    const hours = asRecords(hoursResult);
+    if (hours.length === 0 && !period.isCustom) {
+      const latestHours = await fetchLatestHours(client);
+      if (latestHours.length > 0) {
+        hours = latestHours;
+        effectivePeriod = periodFromHours(latestHours);
+        source.message = `Geen uren gevonden tussen ${formatDate(period.start)} en ${formatDate(
+          period.end
+        )}; toont nu de laatste ${latestHours.length} opgehaalde uren.`;
+      }
+    }
+
+    if (hours.length === 0) {
+      source.message = `Geen uren gevonden tussen ${formatDate(period.start)} en ${formatDate(period.end)}.`;
+    }
+
+    const employeesResult = await client.call("employee.get", [
+      [],
+      {
+        paging: { firstresult: 0, maxresults: 250 },
+        orderings: [{ field: "employee.screenname", direction: "asc" }]
+      }
+    ] as JsonValue[]);
     const employees = asRecords(employeesResult);
     const projectLines = await fetchProjectLines(client, hours);
 
-    return buildDashboardData(hours, employees, projectLines, period, {
-      mode: "live",
-      message: ""
-    });
+    return buildDashboardData(hours, employees, projectLines, effectivePeriod, source);
   } catch (error) {
     return buildDashboardData(createDemoHours(period), createDemoEmployees(), createDemoProjectLines(), period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
     });
   }
+}
+
+async function fetchHoursForPeriod(client: GrippClient, period: Period) {
+  return fetchHourPages(client, [
+    { field: "hour.date", operator: "greaterequals", value: period.start },
+    { field: "hour.date", operator: "lessequals", value: period.end }
+  ]);
+}
+
+async function fetchLatestHours(client: GrippClient) {
+  return fetchHourPages(client, [], [{ field: "hour.date", direction: "desc" }], 1);
+}
+
+async function fetchHourPages(
+  client: GrippClient,
+  filters: JsonValue[],
+  orderings: JsonValue[] = [{ field: "hour.date", direction: "asc" }],
+  maxPages = 8
+) {
+  const pageSize = 250;
+  const records: JsonRecord[] = [];
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await client.call("hour.get", [
+      filters,
+      {
+        paging: { firstresult: page * pageSize, maxresults: pageSize },
+        orderings
+      }
+    ] as JsonValue[]);
+    const pageRecords = asRecords(result);
+    records.push(...pageRecords);
+
+    if (pageRecords.length < pageSize) {
+      break;
+    }
+  }
+
+  return records;
 }
 
 async function fetchProjectLines(client: GrippClient, hours: JsonRecord[]) {
@@ -591,34 +644,112 @@ function getCurrentMonthPeriod(): Period {
     end: dateKey(end),
     label,
     shortMonth,
-    weekBuckets: makeWeekBuckets(end.getDate(), shortMonth)
+    weekBuckets: makeWeekBuckets(start, end, shortMonth),
+    isCustom: false
   };
 }
 
-function makeWeekBuckets(lastDay: number, shortMonth: string) {
+function getPeriodFromParams(params: DashboardSearchParams): Period {
+  const start = firstParam(params.start);
+  const end = firstParam(params.end);
+  if (!isDateKey(start) || !isDateKey(end)) {
+    return getCurrentMonthPeriod();
+  }
+
+  const startDate = parseDateKey(start);
+  const endDate = parseDateKey(end);
+  if (!startDate || !endDate || startDate > endDate) {
+    return getCurrentMonthPeriod();
+  }
+
+  const label = `${formatDate(start)} - ${formatDate(end)}`;
+  const shortMonth = new Intl.DateTimeFormat("nl-NL", { month: "short" }).format(startDate);
+
+  return {
+    start,
+    end,
+    label,
+    shortMonth,
+    weekBuckets: makeWeekBuckets(startDate, endDate, shortMonth),
+    isCustom: true
+  };
+}
+
+function periodFromHours(hours: JsonRecord[]): Period {
+  const dates = hours
+    .map((hour) => stringFrom(readField(hour, "date")))
+    .filter((value): value is string => isDateKey(value))
+    .sort();
+
+  if (dates.length === 0) {
+    return getCurrentMonthPeriod();
+  }
+
+  const start = dates[0];
+  const end = dates[dates.length - 1];
+  const startDate = parseDateKey(start) ?? new Date();
+  const endDate = parseDateKey(end) ?? startDate;
+  const shortMonth = new Intl.DateTimeFormat("nl-NL", { month: "short" }).format(startDate);
+
+  return {
+    start,
+    end,
+    label: `Laatste uren: ${formatDate(start)} - ${formatDate(end)}`,
+    shortMonth,
+    weekBuckets: makeWeekBuckets(startDate, endDate, shortMonth),
+    isCustom: false
+  };
+}
+
+function makeWeekBuckets(startDate: Date, endDate: Date, shortMonth: string) {
   const buckets: WeekBucket[] = [];
-  for (let startDay = 1; startDay <= lastDay; startDay += 7) {
-    const endDay = Math.min(startDay + 6, lastDay);
-    const key = String(Math.floor((startDay - 1) / 7));
+  const cursor = new Date(startDate);
+  cursor.setHours(0, 0, 0, 0);
+  const stop = new Date(endDate);
+  stop.setHours(0, 0, 0, 0);
+
+  while (cursor <= stop) {
+    const bucketStart = new Date(cursor);
+    const bucketEnd = new Date(cursor);
+    bucketEnd.setDate(bucketEnd.getDate() + 6);
+    if (bucketEnd > stop) {
+      bucketEnd.setTime(stop.getTime());
+    }
+
+    const key = dateKey(bucketStart);
+    const label =
+      bucketStart.getMonth() === bucketEnd.getMonth()
+        ? `${bucketStart.getDate()}-${bucketEnd.getDate()} ${shortMonth}`
+        : `${formatShortDate(dateKey(bucketStart))} - ${formatShortDate(dateKey(bucketEnd))}`;
     buckets.push({
       key,
-      label: `${startDay}-${endDay} ${shortMonth}`
+      label
     });
+    cursor.setDate(cursor.getDate() + 7);
   }
+
   return buckets;
 }
 
 function weekKeyForDate(value: string | undefined, period: Period) {
-  if (!value) {
-    return period.weekBuckets[0]?.key ?? "0";
+  const date = value ? parseDateKey(value) : null;
+  if (!date) {
+    return period.weekBuckets[0]?.key ?? period.start;
   }
 
-  const day = Number(value.slice(8, 10));
-  if (!Number.isFinite(day) || day < 1) {
-    return period.weekBuckets[0]?.key ?? "0";
+  for (const bucket of period.weekBuckets) {
+    const bucketStart = parseDateKey(bucket.key);
+    if (!bucketStart) {
+      continue;
+    }
+    const bucketEnd = new Date(bucketStart);
+    bucketEnd.setDate(bucketEnd.getDate() + 6);
+    if (date >= bucketStart && date <= bucketEnd) {
+      return bucket.key;
+    }
   }
 
-  return String(Math.floor((day - 1) / 7));
+  return period.weekBuckets[0]?.key ?? period.start;
 }
 
 function dateKey(date: Date) {
@@ -681,7 +812,24 @@ function createDemoHours(period: Period): JsonRecord[] {
 }
 
 function asRecords(value: JsonValue): JsonRecord[] {
-  return Array.isArray(value) ? value.map(asRecord).filter((record): record is JsonRecord => Boolean(record)) : [];
+  if (Array.isArray(value)) {
+    return value.map(asRecord).filter((record): record is JsonRecord => Boolean(record));
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    return [];
+  }
+
+  for (const key of ["result", "data", "rows", "records", "items", "entities"]) {
+    const nested = record[key];
+    const nestedRecords = asRecords(nested as JsonValue);
+    if (nestedRecords.length > 0) {
+      return nestedRecords;
+    }
+  }
+
+  return looksLikeEntity(record) ? [record] : [];
 }
 
 function asRecord(value: unknown): JsonRecord | undefined {
@@ -693,13 +841,19 @@ function readField(record: JsonRecord | undefined, field: string) {
     return undefined;
   }
 
-  return (
+  const direct =
     record[field] ??
     record[`hour.${field}`] ??
     record[`employee.${field}`] ??
     record[`offerprojectline.${field}`] ??
-    record[`project.${field}`]
-  );
+    record[`project.${field}`];
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  const suffix = `.${field.toLowerCase()}`;
+  const matchingKey = Object.keys(record).find((key) => key.toLowerCase().endsWith(suffix));
+  return matchingKey ? record[matchingKey] : undefined;
 }
 
 function idFrom(value: unknown): number | null {
@@ -712,32 +866,75 @@ function idFrom(value: unknown): number | null {
   }
 
   const record = asRecord(value);
-  const id = record ? numberFrom(readField(record, "id")) : null;
+  const id = record
+    ? numberFrom(record.id ?? record.value ?? record.rawValue ?? record.rawvalue ?? record.key ?? readField(record, "id"))
+    : null;
   return id ?? null;
 }
 
 function numberFrom(value: unknown): number | null {
+  const scalar = scalarFrom(value);
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
 
-  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value.replace(",", ".")))) {
-    return Number(value.replace(",", "."));
+  if (typeof scalar === "number" && Number.isFinite(scalar)) {
+    return scalar;
+  }
+
+  if (typeof scalar === "string") {
+    const normalized = normalizeNumberString(scalar);
+    if (normalized && Number.isFinite(Number(normalized))) {
+      return Number(normalized);
+    }
   }
 
   return null;
 }
 
 function stringFrom(value: unknown): string | undefined {
-  if (typeof value === "string") {
-    return value.trim() || undefined;
+  const scalar = scalarFrom(value);
+  if (typeof scalar === "string") {
+    return scalar.trim() || undefined;
   }
 
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
+  if (typeof scalar === "number" || typeof scalar === "boolean") {
+    return String(scalar);
   }
 
   return undefined;
+}
+
+function scalarFrom(value: unknown): unknown {
+  const record = asRecord(value);
+  if (!record) {
+    return value;
+  }
+
+  for (const key of ["value", "rawValue", "rawvalue", "id", "displayvalue", "displayValue", "label", "name", "searchname", "screenname"]) {
+    if (record[key] !== undefined && record[key] !== null) {
+      return scalarFrom(record[key]);
+    }
+  }
+
+  return value;
+}
+
+function looksLikeEntity(record: JsonRecord) {
+  return ["id", "amount", "date", "searchname", "screenname", "invoicebasis"].some((field) => readField(record, field) !== undefined);
+}
+
+function normalizeNumberString(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (trimmed.includes(",") && trimmed.includes(".")) {
+    return trimmed.replace(/\./g, "").replace(",", ".");
+  }
+
+  return trimmed.replace(",", ".");
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -769,4 +966,38 @@ function formatStatus(status: string) {
   };
 
   return labels[status] ?? status;
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function isDateKey(value: string | undefined): value is string {
+  return Boolean(value?.match(/^\d{4}-\d{2}-\d{2}$/) && parseDateKey(value));
+}
+
+function parseDateKey(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDate(value: string) {
+  const date = parseDateKey(value);
+  return date
+    ? new Intl.DateTimeFormat("nl-NL", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      }).format(date)
+    : value;
+}
+
+function formatShortDate(value: string) {
+  const date = parseDateKey(value);
+  return date
+    ? new Intl.DateTimeFormat("nl-NL", {
+        day: "2-digit",
+        month: "short"
+      }).format(date)
+    : value;
 }
