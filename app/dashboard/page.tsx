@@ -113,9 +113,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       </form>
 
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
-        <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabel / rooster" tone="good" />
+        <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / noemer" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail="Niet geboekt op Intern (1010)" tone="blue" />
-        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven rooster" tone="overtime" />
+        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven planning" tone="overtime" />
         <MetricCard label="Intern (1010)" value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -124,9 +124,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Verdeling</p>
-              <h2>Rooster versus geschreven</h2>
+              <h2>Geschreven uren</h2>
             </div>
-            <span className="panel-total">{formatHours(dashboard.total)} roosteruren</span>
+            <span className="panel-total">{formatHours(dashboard.overtime)} overuren</span>
           </div>
 
           <div className="distribution-layout">
@@ -176,7 +176,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               <thead>
                 <tr>
                   <th>Medewerker</th>
-                  <th>Rooster</th>
+                  <th>Overuren</th>
                   <th>Declarabel</th>
                 </tr>
               </thead>
@@ -187,7 +187,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
                       <span className="row-title">{employee.name}</span>
                       <span className="cell-muted">{formatHours(employee.written)} geschreven</span>
                     </td>
-                    <td>{formatHours(employee.total)}</td>
+                    <td>{formatHours(employee.overtime)}</td>
                     <td>
                       <InlineBar aggregate={employee} />
                       <span className="cell-muted">{formatPercent(employee.declarability)}%</span>
@@ -230,7 +230,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <p className="eyebrow">Proxy</p>
             <h2>Declarabiliteit</h2>
           </div>
-          <span className="panel-total">Niet-318 / rooster</span>
+          <span className="panel-total">Niet-318 / noemer</span>
         </div>
 
         <div className="project-line-list">
@@ -245,11 +245,11 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           </div>
           <div className="project-line-row">
             <div>
-              <span className="row-title">Noemer</span>
-              <span className="cell-muted">employee.getWorkingHours met verlof inbegrepen</span>
+              <span className="row-title">Overuren</span>
+              <span className="cell-muted">Geschreven uren boven planning</span>
             </div>
             <div className="project-line-metrics">
-              <span>{formatHours(dashboard.total)} uur</span>
+              <span>{formatHours(dashboard.overtime)} uur</span>
             </div>
           </div>
         </div>
@@ -291,11 +291,6 @@ function LegendItem({ label, value, className }: { label: string; value: number;
 }
 
 function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: Aggregate; trailing: string }) {
-  const meta = [formatHours(aggregate.total) + " rooster"];
-  if (aggregate.overtime > 0) {
-    meta.push(`${formatHours(aggregate.overtime)} overuren`);
-  }
-
   return (
     <div className="stack-row">
       <div className="stack-label">
@@ -303,7 +298,7 @@ function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: 
         <span>{trailing}</span>
       </div>
       <InlineBar aggregate={aggregate} />
-      <span className="cell-muted">{meta.join(" · ")}</span>
+      <span className="cell-muted">{formatHours(aggregate.overtime)} overuren</span>
     </div>
   );
 }
@@ -358,7 +353,7 @@ async function getDashboardData(period: Period): Promise<DashboardData> {
     const dashboard = buildDashboardData(hours, employees, workingHoursByEmployee, effectivePeriod, source);
 
     if (dashboard.total === 0 && dashboard.written > 0) {
-      dashboard.source.message = [dashboard.source.message, "Roosteruren konden niet worden bepaald; de noemer is 0."]
+      dashboard.source.message = [dashboard.source.message, "De noemer kon niet worden bepaald en is 0."]
         .filter(Boolean)
         .join(" ");
     } else if (hours.length === 0) {
