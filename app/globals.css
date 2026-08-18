@@ -274,16 +274,40 @@ select {
 }
 
 .gauge {
+  position: relative;
   display: grid;
   place-items: center;
   width: 220px;
   aspect-ratio: 1;
   border-radius: 50%;
-  background:
-    conic-gradient(var(--good) 0 var(--gauge), #e4e9e6 var(--gauge) 360deg);
+}
+
+.gauge-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.gauge-ring-track,
+.gauge-ring-fill {
+  fill: none;
+  stroke-width: 16;
+}
+
+.gauge-ring-track {
+  stroke: #e4e9e6;
+}
+
+.gauge-ring-fill {
+  stroke: var(--good);
+  stroke-linecap: round;
 }
 
 .gauge-inner {
+  position: relative;
+  z-index: 1;
   display: grid;
   place-items: center;
   width: 148px;

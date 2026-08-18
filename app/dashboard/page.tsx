@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
 
@@ -80,9 +79,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   const params = (await searchParams) ?? {};
   const requestedPeriod = getPeriodFromParams(params);
   const dashboard = await getDashboardData(requestedPeriod);
-  const gaugeStyle = {
-    "--gauge": `${Math.min(dashboard.declarability, 100) * 3.6}deg`
-  } as CSSProperties;
+  const gaugeProgress = Math.max(0, Math.min(dashboard.declarability, 100));
 
   return (
     <main className="dashboard-shell">
@@ -132,7 +129,11 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           </div>
 
           <div className="distribution-layout">
-            <div className="gauge" style={gaugeStyle} aria-label={`Declarabiliteit ${formatPercent(dashboard.declarability)} procent`}>
+            <div className="gauge" aria-label={`Declarabiliteit ${formatPercent(dashboard.declarability)} procent`}>
+              <svg className="gauge-ring" viewBox="0 0 120 120" aria-hidden="true">
+                <circle className="gauge-ring-track" cx="60" cy="60" r="52" pathLength={100} />
+                <circle className="gauge-ring-fill" cx="60" cy="60" r="52" pathLength={100} strokeDasharray={`${gaugeProgress} ${100 - gaugeProgress}`} />
+              </svg>
               <div className="gauge-inner">
                 <strong>{formatPercent(dashboard.declarability)}%</strong>
                 <span>declarabel</span>
