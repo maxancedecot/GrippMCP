@@ -63,6 +63,7 @@ type WorkingHoursSummary = {
 };
 
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
+const INTERNAL_PROJECT_LABEL = "Ledoux intern";
 const NORMAL_DAILY_HOURS = 8;
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
@@ -115,9 +116,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
 
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
         <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
-        <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail="Niet geboekt op Intern (1010)" tone="blue" />
+        <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Niet geboekt op ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
         <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven 40u per week" tone="overtime" />
-        <MetricCard label="Intern (1010)" value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
+        <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
       <section className="dashboard-grid">
@@ -140,7 +141,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
 
             <dl className="legend-list">
               <LegendItem label="Declarabel" value={dashboard.declarable} className="legend-dot--good" />
-              <LegendItem label="Intern (1010)" value={dashboard.internal} className="legend-dot--warning" />
+              <LegendItem label={INTERNAL_PROJECT_LABEL} value={dashboard.internal} className="legend-dot--warning" />
               <LegendItem label="Niet geschreven" value={dashboard.untracked} className="legend-dot--neutral" />
               <LegendItem label="Overuren" value={dashboard.overtime} className="legend-dot--overtime" formatter={formatOvertimeLabel} />
             </dl>
@@ -204,7 +205,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Intern</p>
-              <h2>Project 318</h2>
+              <h2>{INTERNAL_PROJECT_LABEL}</h2>
             </div>
           </div>
 
@@ -220,7 +221,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               ))}
             </div>
           ) : (
-            <p className="empty-state">Geen interne uren gevonden in deze periode.</p>
+            <p className="empty-state">Geen uren op {INTERNAL_PROJECT_LABEL} gevonden in deze periode.</p>
           )}
         </article>
       </section>
@@ -231,14 +232,16 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <p className="eyebrow">Proxy</p>
             <h2>Declarabiliteit</h2>
           </div>
-          <span className="panel-total">Niet-318 / voorziene uren</span>
+          <span className="panel-total">Excl. {INTERNAL_PROJECT_LABEL} / voorziene uren</span>
         </div>
 
         <div className="project-line-list">
           <div className="project-line-row">
             <div>
               <span className="row-title">Teller</span>
-              <span className="cell-muted">Geschreven uren exclusief offerprojectbase.id {INTERNAL_OFFERPROJECTBASE_ID}</span>
+              <span className="cell-muted">
+                Geschreven uren exclusief {INTERNAL_PROJECT_LABEL} (project {INTERNAL_OFFERPROJECTBASE_ID})
+              </span>
             </div>
             <div className="project-line-metrics">
               <span>{formatHours(dashboard.declarable)} uur</span>
