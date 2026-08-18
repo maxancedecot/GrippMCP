@@ -115,7 +115,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
         <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail="Niet geboekt op Intern (1010)" tone="blue" />
-        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven voorziene uren" tone="overtime" />
+        <MetricCard label="Overuren" value={formatSignedHours(dashboard.overtime)} detail="Totaal geboekt - voorziene uren" tone="overtime" />
         <MetricCard label="Intern (1010)" value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -126,7 +126,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               <p className="eyebrow">Verdeling</p>
               <h2>Geschreven uren</h2>
             </div>
-            <span className="panel-total">{formatHours(dashboard.overtime)} overuren</span>
+            <span className="panel-total">{formatOvertimeLabel(dashboard.overtime)}</span>
           </div>
 
           <div className="distribution-layout">
@@ -141,7 +141,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               <LegendItem label="Declarabel" value={dashboard.declarable} className="legend-dot--good" />
               <LegendItem label="Intern (1010)" value={dashboard.internal} className="legend-dot--warning" />
               <LegendItem label="Niet geschreven" value={dashboard.untracked} className="legend-dot--neutral" />
-              <LegendItem label="Overuren" value={dashboard.overtime} className="legend-dot--overtime" />
+              <LegendItem label="Overuren" value={dashboard.overtime} className="legend-dot--overtime" formatter={formatOvertimeLabel} />
             </dl>
           </div>
         </article>
@@ -187,7 +187,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
                       <span className="row-title">{employee.name}</span>
                       <span className="cell-muted">{formatHours(employee.written)} geschreven</span>
                     </td>
-                    <td>{formatHours(employee.overtime)}</td>
+                    <td>{formatSignedHours(employee.overtime)}</td>
                     <td>
                       <InlineBar aggregate={employee} />
                       <span className="cell-muted">{formatPercent(employee.declarability)}%</span>
@@ -246,10 +246,10 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="project-line-row">
             <div>
               <span className="row-title">Overuren</span>
-              <span className="cell-muted">Geschreven uren boven voorziene uren</span>
+              <span className="cell-muted">Alle geboekte uren min voorziene uren</span>
             </div>
             <div className="project-line-metrics">
-              <span>{formatHours(dashboard.overtime)} uur</span>
+              <span>{formatSignedHours(dashboard.overtime)} uur</span>
             </div>
           </div>
         </div>
@@ -278,14 +278,24 @@ function MetricCard({
   );
 }
 
-function LegendItem({ label, value, className }: { label: string; value: number; className: string }) {
+function LegendItem({
+  label,
+  value,
+  className,
+  formatter = (amount) => `${formatHours(amount)} uur`
+}: {
+  label: string;
+  value: number;
+  className: string;
+  formatter?: (value: number) => string;
+}) {
   return (
     <div>
       <dt>
         <span className={`legend-dot ${className}`} />
         {label}
       </dt>
-      <dd>{formatHours(value)} uur</dd>
+      <dd>{formatter(value)}</dd>
     </div>
   );
 }
@@ -298,7 +308,7 @@ function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: 
         <span>{trailing}</span>
       </div>
       <InlineBar aggregate={aggregate} />
-      <span className="cell-muted">{formatHours(aggregate.overtime)} overuren</span>
+      <span className="cell-muted">{formatOvertimeLabel(aggregate.overtime)}</span>
     </div>
   );
 }
@@ -478,8 +488,6 @@ function buildDashboardData(
   const employeesById = new Map<number, JsonRecord>();
   const totals = emptyAggregate();
   const employeeMap = new Map<string, EmployeeRow>();
-  const plannedByEmployeeWeek = new Map<string, Map<string, number>>();
-  const writtenByEmployeeWeek = new Map<string, Map<string, number>>();
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -501,7 +509,6 @@ function buildDashboardData(
     employeeRow.total = workingHours.total;
     totals.total += workingHours.total;
     addWorkingHoursToWeeks(weekMap, workingHours, period);
-    addWorkingHoursToEmployeeWeekMap(plannedByEmployeeWeek, employeeRow.id, workingHours, period);
     employeeMap.set(employeeRow.id, employeeRow);
   }
 
@@ -534,10 +541,7 @@ function buildDashboardData(
       weekRow[targetField] += amount;
       weekRow.written += amount;
     }
-    addToNestedNumber(writtenByEmployeeWeek, employeeKey, weekKeyForDate(stringFrom(readField(hour, "date")), period), amount);
   }
-
-  applyOvertimeAndUntracked(totals, employeeMap, weekMap, plannedByEmployeeWeek, writtenByEmployeeWeek);
 
   const employeeRows = Array.from(employeeMap.values())
     .map(finalizeAggregate)
@@ -576,56 +580,6 @@ function addWorkingHoursToWeeks(weekMap: Map<string, WeekRow>, workingHours: Wor
     const weekRow = weekMap.get(weekKeyForDate(date, period));
     if (weekRow) {
       weekRow.total += amount;
-    }
-  }
-}
-
-function addWorkingHoursToEmployeeWeekMap(
-  plannedByEmployeeWeek: Map<string, Map<string, number>>,
-  employeeId: string,
-  workingHours: WorkingHoursSummary,
-  period: Period
-) {
-  for (const [date, amount] of workingHours.byDate) {
-    addToNestedNumber(plannedByEmployeeWeek, employeeId, weekKeyForDate(date, period), amount);
-  }
-}
-
-function applyOvertimeAndUntracked(
-  totals: Aggregate,
-  employeeMap: Map<string, EmployeeRow>,
-  weekMap: Map<string, WeekRow>,
-  plannedByEmployeeWeek: Map<string, Map<string, number>>,
-  writtenByEmployeeWeek: Map<string, Map<string, number>>
-) {
-  const employeeIds = new Set([...plannedByEmployeeWeek.keys(), ...writtenByEmployeeWeek.keys()]);
-
-  for (const employeeId of employeeIds) {
-    const employeeRow = employeeMap.get(employeeId);
-    if (!employeeRow) {
-      continue;
-    }
-
-    const plannedWeeks = plannedByEmployeeWeek.get(employeeId) ?? new Map();
-    const writtenWeeks = writtenByEmployeeWeek.get(employeeId) ?? new Map();
-    const weekKeys = new Set([...plannedWeeks.keys(), ...writtenWeeks.keys()]);
-
-    for (const weekKey of weekKeys) {
-      const planned = plannedWeeks.get(weekKey) ?? 0;
-      const written = writtenWeeks.get(weekKey) ?? 0;
-      const overtime = planned > 0 ? Math.max(0, written - planned) : 0;
-      const untracked = Math.max(0, planned - written);
-
-      employeeRow.overtime += overtime;
-      employeeRow.untracked += untracked;
-      totals.overtime += overtime;
-      totals.untracked += untracked;
-
-      const weekRow = weekMap.get(weekKey);
-      if (weekRow) {
-        weekRow.overtime += overtime;
-        weekRow.untracked += untracked;
-      }
     }
   }
 }
@@ -736,7 +690,11 @@ function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undef
 }
 
 function finalizeAggregate<T extends Aggregate>(aggregate: T) {
-  return withDeclarability(aggregate);
+  return withDeclarability({
+    ...aggregate,
+    untracked: Math.max(0, aggregate.total - aggregate.written),
+    overtime: aggregate.written - aggregate.total
+  });
 }
 
 function withDeclarability<T extends Aggregate>(aggregate: T) {
@@ -1121,12 +1079,6 @@ function sumValues(values: Map<string, number>) {
   return Array.from(values.values()).reduce((total, value) => total + value, 0);
 }
 
-function addToNestedNumber(map: Map<string, Map<string, number>>, outerKey: string, innerKey: string, value: number) {
-  const inner = map.get(outerKey) ?? new Map<string, number>();
-  inner.set(innerKey, (inner.get(innerKey) ?? 0) + value);
-  map.set(outerKey, inner);
-}
-
 function chunk<T>(items: T[], size: number) {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -1145,6 +1097,23 @@ function cappedPercent(value: number, total: number) {
 
 function formatHours(value: number) {
   return hoursFormatter.format(value);
+}
+
+function formatSignedHours(value: number) {
+  if (Math.abs(value) < 0.05) {
+    return formatHours(0);
+  }
+
+  const sign = value > 0 ? "+" : "-";
+  return `${sign}${formatHours(Math.abs(value))}`;
+}
+
+function formatOvertimeLabel(value: number) {
+  if (value < -0.05) {
+    return `${formatHours(Math.abs(value))} minder geboekt`;
+  }
+
+  return `${formatSignedHours(value)} overuren`;
 }
 
 function formatPercent(value: number) {
