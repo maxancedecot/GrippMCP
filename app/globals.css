@@ -11,6 +11,8 @@
   --blue-soft: #e5ecff;
   --warning: #b26a00;
   --warning-soft: #fff1d7;
+  --overtime: #8a3ffc;
+  --overtime-soft: #f0e7ff;
   --neutral: #718096;
   --neutral-soft: #edf1f5;
   --danger: #b42318;
@@ -228,6 +230,10 @@ select {
   border-top-color: var(--neutral);
 }
 
+.metric-card--overtime {
+  border-top-color: var(--overtime);
+}
+
 .dashboard-grid,
 .table-grid {
   display: grid;
@@ -350,6 +356,10 @@ select {
 
 .legend-dot--neutral {
   background: var(--neutral);
+}
+
+.legend-dot--overtime {
+  background: var(--overtime);
 }
 
 .weekly-list,

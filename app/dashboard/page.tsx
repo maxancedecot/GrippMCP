@@ -30,6 +30,7 @@ type Aggregate = {
   declarable: number;
   internal: number;
   untracked: number;
+  overtime: number;
   total: number;
   written: number;
 };
@@ -112,9 +113,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       </form>
 
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
-        <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabel / beschikbaar" tone="good" />
+        <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabel / rooster" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail="Niet geboekt op Intern (1010)" tone="blue" />
-        <MetricCard label="Beschikbaar" value={formatHours(dashboard.total)} detail="Rooster via Gripp" tone="neutral" />
+        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven rooster" tone="overtime" />
         <MetricCard label="Intern (1010)" value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -123,9 +124,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Verdeling</p>
-              <h2>Beschikbare uren</h2>
+              <h2>Rooster versus geschreven</h2>
             </div>
-            <span className="panel-total">{formatHours(dashboard.total)} uur</span>
+            <span className="panel-total">{formatHours(dashboard.total)} roosteruren</span>
           </div>
 
           <div className="distribution-layout">
@@ -140,6 +141,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               <LegendItem label="Declarabel" value={dashboard.declarable} className="legend-dot--good" />
               <LegendItem label="Intern (1010)" value={dashboard.internal} className="legend-dot--warning" />
               <LegendItem label="Niet geschreven" value={dashboard.untracked} className="legend-dot--neutral" />
+              <LegendItem label="Overuren" value={dashboard.overtime} className="legend-dot--overtime" />
             </dl>
           </div>
         </article>
@@ -174,7 +176,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               <thead>
                 <tr>
                   <th>Medewerker</th>
-                  <th>Beschikbaar</th>
+                  <th>Rooster</th>
                   <th>Declarabel</th>
                 </tr>
               </thead>
@@ -265,7 +267,7 @@ function MetricCard({
   label: string;
   value: string;
   detail: string;
-  tone: "good" | "blue" | "warning" | "neutral";
+  tone: "good" | "blue" | "warning" | "neutral" | "overtime";
 }) {
   return (
     <article className={`metric-card metric-card--${tone}`}>
@@ -289,6 +291,11 @@ function LegendItem({ label, value, className }: { label: string; value: number;
 }
 
 function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: Aggregate; trailing: string }) {
+  const meta = [formatHours(aggregate.total) + " rooster"];
+  if (aggregate.overtime > 0) {
+    meta.push(`${formatHours(aggregate.overtime)} overuren`);
+  }
+
   return (
     <div className="stack-row">
       <div className="stack-label">
@@ -296,13 +303,13 @@ function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: 
         <span>{trailing}</span>
       </div>
       <InlineBar aggregate={aggregate} />
-      <span className="cell-muted">{formatHours(aggregate.total)} beschikbaar</span>
+      <span className="cell-muted">{meta.join(" · ")}</span>
     </div>
   );
 }
 
 function InlineBar({ aggregate }: { aggregate: Aggregate }) {
-  const denominator = Math.max(aggregate.total, aggregate.declarable + aggregate.internal, 1);
+  const denominator = Math.max(aggregate.total, aggregate.written, 1);
   const declarableWidth = cappedPercent(aggregate.declarable, denominator);
   const internalWidth = cappedPercent(aggregate.internal, denominator);
   const untrackedWidth = Math.max(0, 100 - declarableWidth - internalWidth);
@@ -678,10 +685,12 @@ function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undef
 }
 
 function finalizeAggregate<T extends Aggregate>(aggregate: T) {
-  const untracked = Math.max(0, aggregate.total - aggregate.declarable - aggregate.internal);
+  const untracked = Math.max(0, aggregate.total - aggregate.written);
+  const overtime = Math.max(0, aggregate.written - aggregate.total);
   return withDeclarability({
     ...aggregate,
-    untracked
+    untracked,
+    overtime
   });
 }
 
@@ -697,6 +706,7 @@ function emptyAggregate(): Aggregate {
     declarable: 0,
     internal: 0,
     untracked: 0,
+    overtime: 0,
     total: 0,
     written: 0
   };
