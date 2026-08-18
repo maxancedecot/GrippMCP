@@ -116,7 +116,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
         <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail="Niet geboekt op Intern (1010)" tone="blue" />
-        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven 8u per dag" tone="overtime" />
+        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven 40u per week" tone="overtime" />
         <MetricCard label="Intern (1010)" value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -247,7 +247,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="project-line-row">
             <div>
               <span className="row-title">Overuren</span>
-              <span className="cell-muted">Som van dagtotalen boven 8u</span>
+              <span className="cell-muted">Som van weektotalen boven 40u</span>
             </div>
             <div className="project-line-metrics">
               <span>{formatHours(dashboard.overtime)} uur</span>
@@ -489,7 +489,7 @@ function buildDashboardData(
   const employeesById = new Map<number, JsonRecord>();
   const totals = emptyAggregate();
   const employeeMap = new Map<string, EmployeeRow>();
-  const writtenByEmployeeDate = new Map<string, Map<string, number>>();
+  const writtenByEmployeeWeek = new Map<string, Map<string, number>>();
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -522,7 +522,7 @@ function buildDashboardData(
 
     const employeeId = relationId(hour, "employee");
     const employeeKey = employeeId !== null ? String(employeeId) : "unknown";
-    const hourDate = stringFrom(readField(hour, "date"));
+    const hourDate = dateKeyFromValue(readField(hour, "date"));
     const employeeRow =
       employeeMap.get(employeeKey) ??
       withDeclarability({
@@ -530,7 +530,8 @@ function buildDashboardData(
         id: employeeKey,
         name: employeeName(hour, employeeId !== null ? employeesById.get(employeeId) : undefined)
       });
-    const weekRow = weekMap.get(weekKeyForDate(hourDate, period));
+    const weekKey = weekKeyForDate(hourDate, period);
+    const weekRow = weekMap.get(weekKey);
     const targetField = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID ? "internal" : "declarable";
 
     employeeRow[targetField] += amount;
@@ -545,12 +546,10 @@ function buildDashboardData(
       weekRow.written += amount;
     }
 
-    if (isDateKey(hourDate)) {
-      addToNestedNumber(writtenByEmployeeDate, employeeKey, hourDate, amount);
-    }
+    addToNestedNumber(writtenByEmployeeWeek, employeeKey, weekKey, amount);
   }
 
-  applyDailyOvertime(totals, employeeMap, weekMap, writtenByEmployeeDate, period);
+  applyWeeklyOvertime(totals, employeeMap, weekMap, writtenByEmployeeWeek, period);
 
   const employeeRows = Array.from(employeeMap.values())
     .map(finalizeAggregate)
@@ -593,21 +592,21 @@ function addWorkingHoursToWeeks(weekMap: Map<string, WeekRow>, workingHours: Wor
   }
 }
 
-function applyDailyOvertime(
+function applyWeeklyOvertime(
   totals: Aggregate,
   employeeMap: Map<string, EmployeeRow>,
   weekMap: Map<string, WeekRow>,
-  writtenByEmployeeDate: Map<string, Map<string, number>>,
+  writtenByEmployeeWeek: Map<string, Map<string, number>>,
   period: Period
 ) {
-  for (const [employeeId, writtenByDate] of writtenByEmployeeDate) {
+  for (const [employeeId, writtenByWeek] of writtenByEmployeeWeek) {
     const employeeRow = employeeMap.get(employeeId);
     if (!employeeRow) {
       continue;
     }
 
-    for (const [date, written] of writtenByDate) {
-      const overtime = Math.max(0, written - NORMAL_DAILY_HOURS);
+    for (const [weekKey, written] of writtenByWeek) {
+      const overtime = Math.max(0, written - normalHoursForWeekBucket(weekKey, period));
       if (overtime === 0) {
         continue;
       }
@@ -615,12 +614,38 @@ function applyDailyOvertime(
       employeeRow.overtime += overtime;
       totals.overtime += overtime;
 
-      const weekRow = weekMap.get(weekKeyForDate(date, period));
+      const weekRow = weekMap.get(weekKey);
       if (weekRow) {
         weekRow.overtime += overtime;
       }
     }
   }
+}
+
+function normalHoursForWeekBucket(weekKey: string, period: Period) {
+  const bucketStart = parseDateKey(weekKey);
+  const periodEnd = parseDateKey(period.end);
+  if (!bucketStart || !periodEnd) {
+    return NORMAL_DAILY_HOURS * 5;
+  }
+
+  const bucketEnd = new Date(bucketStart);
+  bucketEnd.setDate(bucketEnd.getDate() + 6);
+  if (bucketEnd > periodEnd) {
+    bucketEnd.setTime(periodEnd.getTime());
+  }
+
+  let workingDays = 0;
+  const cursor = new Date(bucketStart);
+  while (cursor <= bucketEnd) {
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) {
+      workingDays += 1;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return workingDays * NORMAL_DAILY_HOURS;
 }
 
 function parseWorkingHours(value: JsonValue): WorkingHoursSummary {
@@ -860,7 +885,8 @@ function makeWeekBuckets(startDate: Date, endDate: Date, shortMonth: string) {
 }
 
 function weekKeyForDate(value: string | undefined, period: Period) {
-  const date = value ? parseDateKey(value) : null;
+  const normalizedValue = dateKeyFromValue(value);
+  const date = normalizedValue ? parseDateKey(normalizedValue) : null;
   if (!date) {
     return period.weekBuckets[0]?.key ?? period.start;
   }
@@ -901,6 +927,21 @@ function dateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function dateKeyFromValue(value: unknown) {
+  const rawValue = stringFrom(value);
+  if (!rawValue) {
+    return undefined;
+  }
+
+  const dateKeyMatch = rawValue.match(/\d{4}-\d{2}-\d{2}/)?.[0];
+  if (isDateKey(dateKeyMatch)) {
+    return dateKeyMatch;
+  }
+
+  const parsed = new Date(rawValue);
+  return Number.isNaN(parsed.getTime()) ? undefined : dateKey(parsed);
 }
 
 function createDemoEmployees(): JsonRecord[] {
