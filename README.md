@@ -138,6 +138,12 @@ The GoHighLevel MCP fails closed in production if `GHL_MCP_ACCESS_KEY`, encrypte
 - `ghl_search_opportunities`: search opportunities with `/opportunities/search`.
 - `ghl_api_call`: call any relative HighLevel API path; non-GET calls require `confirm: true`.
 
+## Shared Google Ads MCP for Claude
+
+For a shared Google Ads MCP that multiple people can use in Claude, run the official `googleads/google-ads-mcp` server as a separate remote service instead of using a local stdio MCP process.
+
+See [docs/google-ads-mcp-claude.md](docs/google-ads-mcp-claude.md) for the Cloud Run deployment and Claude custom connector setup.
+
 ## Tools
 
 - `gripp_list_entities`: list available Gripp entities and method names.
