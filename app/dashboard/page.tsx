@@ -63,6 +63,7 @@ type WorkingHoursSummary = {
 };
 
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
+const NORMAL_DAILY_HOURS = 8;
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -115,7 +116,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
         <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail="Niet geboekt op Intern (1010)" tone="blue" />
-        <MetricCard label="Overuren" value={formatSignedHours(dashboard.overtime)} detail="Totaal geboekt - voorziene uren" tone="overtime" />
+        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven 8u per dag" tone="overtime" />
         <MetricCard label="Intern (1010)" value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -187,7 +188,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
                       <span className="row-title">{employee.name}</span>
                       <span className="cell-muted">{formatHours(employee.written)} geschreven</span>
                     </td>
-                    <td>{formatSignedHours(employee.overtime)}</td>
+                    <td>{formatHours(employee.overtime)}</td>
                     <td>
                       <InlineBar aggregate={employee} />
                       <span className="cell-muted">{formatPercent(employee.declarability)}%</span>
@@ -246,10 +247,10 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="project-line-row">
             <div>
               <span className="row-title">Overuren</span>
-              <span className="cell-muted">Alle geboekte uren min voorziene uren</span>
+              <span className="cell-muted">Som van dagtotalen boven 8u</span>
             </div>
             <div className="project-line-metrics">
-              <span>{formatSignedHours(dashboard.overtime)} uur</span>
+              <span>{formatHours(dashboard.overtime)} uur</span>
             </div>
           </div>
         </div>
@@ -488,6 +489,7 @@ function buildDashboardData(
   const employeesById = new Map<number, JsonRecord>();
   const totals = emptyAggregate();
   const employeeMap = new Map<string, EmployeeRow>();
+  const writtenByEmployeeDate = new Map<string, Map<string, number>>();
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -520,6 +522,7 @@ function buildDashboardData(
 
     const employeeId = relationId(hour, "employee");
     const employeeKey = employeeId !== null ? String(employeeId) : "unknown";
+    const hourDate = stringFrom(readField(hour, "date"));
     const employeeRow =
       employeeMap.get(employeeKey) ??
       withDeclarability({
@@ -527,7 +530,7 @@ function buildDashboardData(
         id: employeeKey,
         name: employeeName(hour, employeeId !== null ? employeesById.get(employeeId) : undefined)
       });
-    const weekRow = weekMap.get(weekKeyForDate(stringFrom(readField(hour, "date")), period));
+    const weekRow = weekMap.get(weekKeyForDate(hourDate, period));
     const targetField = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID ? "internal" : "declarable";
 
     employeeRow[targetField] += amount;
@@ -541,7 +544,13 @@ function buildDashboardData(
       weekRow[targetField] += amount;
       weekRow.written += amount;
     }
+
+    if (isDateKey(hourDate)) {
+      addToNestedNumber(writtenByEmployeeDate, employeeKey, hourDate, amount);
+    }
   }
+
+  applyDailyOvertime(totals, employeeMap, weekMap, writtenByEmployeeDate, period);
 
   const employeeRows = Array.from(employeeMap.values())
     .map(finalizeAggregate)
@@ -580,6 +589,36 @@ function addWorkingHoursToWeeks(weekMap: Map<string, WeekRow>, workingHours: Wor
     const weekRow = weekMap.get(weekKeyForDate(date, period));
     if (weekRow) {
       weekRow.total += amount;
+    }
+  }
+}
+
+function applyDailyOvertime(
+  totals: Aggregate,
+  employeeMap: Map<string, EmployeeRow>,
+  weekMap: Map<string, WeekRow>,
+  writtenByEmployeeDate: Map<string, Map<string, number>>,
+  period: Period
+) {
+  for (const [employeeId, writtenByDate] of writtenByEmployeeDate) {
+    const employeeRow = employeeMap.get(employeeId);
+    if (!employeeRow) {
+      continue;
+    }
+
+    for (const [date, written] of writtenByDate) {
+      const overtime = Math.max(0, written - NORMAL_DAILY_HOURS);
+      if (overtime === 0) {
+        continue;
+      }
+
+      employeeRow.overtime += overtime;
+      totals.overtime += overtime;
+
+      const weekRow = weekMap.get(weekKeyForDate(date, period));
+      if (weekRow) {
+        weekRow.overtime += overtime;
+      }
     }
   }
 }
@@ -692,8 +731,7 @@ function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undef
 function finalizeAggregate<T extends Aggregate>(aggregate: T) {
   return withDeclarability({
     ...aggregate,
-    untracked: Math.max(0, aggregate.total - aggregate.written),
-    overtime: aggregate.written - aggregate.total
+    untracked: Math.max(0, aggregate.total - aggregate.written)
   });
 }
 
@@ -1079,6 +1117,12 @@ function sumValues(values: Map<string, number>) {
   return Array.from(values.values()).reduce((total, value) => total + value, 0);
 }
 
+function addToNestedNumber(map: Map<string, Map<string, number>>, outerKey: string, innerKey: string, value: number) {
+  const inner = map.get(outerKey) ?? new Map<string, number>();
+  inner.set(innerKey, (inner.get(innerKey) ?? 0) + value);
+  map.set(outerKey, inner);
+}
+
 function chunk<T>(items: T[], size: number) {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -1099,21 +1143,8 @@ function formatHours(value: number) {
   return hoursFormatter.format(value);
 }
 
-function formatSignedHours(value: number) {
-  if (Math.abs(value) < 0.05) {
-    return formatHours(0);
-  }
-
-  const sign = value > 0 ? "+" : "-";
-  return `${sign}${formatHours(Math.abs(value))}`;
-}
-
 function formatOvertimeLabel(value: number) {
-  if (value < -0.05) {
-    return `${formatHours(Math.abs(value))} minder geboekt`;
-  }
-
-  return `${formatSignedHours(value)} overuren`;
+  return `${formatHours(value)} overuren`;
 }
 
 function formatPercent(value: number) {
