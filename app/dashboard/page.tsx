@@ -114,7 +114,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
         <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Niet geboekt op ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
-        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven 40u per week" tone="overtime" />
+        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven 40u per kalenderweek" tone="overtime" />
         <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -251,7 +251,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="project-line-row">
             <div>
               <span className="row-title">Overuren</span>
-              <span className="cell-muted">Som van weektotalen boven 40u</span>
+              <span className="cell-muted">Som van kalenderweken boven 40u</span>
             </div>
             <div className="project-line-metrics">
               <span>{formatHours(dashboard.overtime)} uur</span>
@@ -628,20 +628,23 @@ function applyWeeklyOvertime(
 
 function normalHoursForWeekBucket(weekKey: string, period: Period) {
   const bucketStart = parseDateKey(weekKey);
+  const periodStart = parseDateKey(period.start);
   const periodEnd = parseDateKey(period.end);
-  if (!bucketStart || !periodEnd) {
+  if (!bucketStart || !periodStart || !periodEnd) {
     return NORMAL_DAILY_HOURS * 5;
   }
 
   const bucketEnd = new Date(bucketStart);
   bucketEnd.setDate(bucketEnd.getDate() + 6);
-  if (bucketEnd > periodEnd) {
-    bucketEnd.setTime(periodEnd.getTime());
+  const start = bucketStart < periodStart ? new Date(periodStart) : new Date(bucketStart);
+  const end = bucketEnd > periodEnd ? new Date(periodEnd) : bucketEnd;
+  if (start > end) {
+    return 0;
   }
 
   let workingDays = 0;
-  const cursor = new Date(bucketStart);
-  while (cursor <= bucketEnd) {
+  const cursor = new Date(start);
+  while (cursor <= end) {
     const day = cursor.getDay();
     if (day !== 0 && day !== 6) {
       workingDays += 1;
@@ -834,7 +837,7 @@ function getPeriodFromParams(params: DashboardSearchParams): Period {
 
 function periodFromHours(hours: JsonRecord[]): Period {
   const dates = hours
-    .map((hour) => stringFrom(readField(hour, "date")))
+    .map((hour) => dateKeyFromValue(readField(hour, "date")))
     .filter((value): value is string => isDateKey(value))
     .sort();
 
@@ -860,24 +863,19 @@ function periodFromHours(hours: JsonRecord[]): Period {
 
 function makeWeekBuckets(startDate: Date, endDate: Date, shortMonth: string) {
   const buckets: WeekBucket[] = [];
-  const cursor = new Date(startDate);
-  cursor.setHours(0, 0, 0, 0);
-  const stop = new Date(endDate);
-  stop.setHours(0, 0, 0, 0);
+  const periodStart = startOfDay(startDate);
+  const stop = startOfDay(endDate);
+  const cursor = startOfIsoWeek(periodStart);
 
   while (cursor <= stop) {
     const bucketStart = new Date(cursor);
     const bucketEnd = new Date(cursor);
     bucketEnd.setDate(bucketEnd.getDate() + 6);
-    if (bucketEnd > stop) {
-      bucketEnd.setTime(stop.getTime());
-    }
+    const labelStart = bucketStart < periodStart ? periodStart : bucketStart;
+    const labelEnd = bucketEnd > stop ? stop : bucketEnd;
 
     const key = dateKey(bucketStart);
-    const label =
-      bucketStart.getMonth() === bucketEnd.getMonth()
-        ? `${bucketStart.getDate()}-${bucketEnd.getDate()} ${shortMonth}`
-        : `${formatShortDate(dateKey(bucketStart))} - ${formatShortDate(dateKey(bucketEnd))}`;
+    const label = formatWeekBucketLabel(labelStart, labelEnd, shortMonth);
     buckets.push({
       key,
       label
@@ -886,6 +884,28 @@ function makeWeekBuckets(startDate: Date, endDate: Date, shortMonth: string) {
   }
 
   return buckets;
+}
+
+function formatWeekBucketLabel(startDate: Date, endDate: Date, fallbackMonth: string) {
+  if (startDate.getMonth() === endDate.getMonth() && startDate.getFullYear() === endDate.getFullYear()) {
+    const month = new Intl.DateTimeFormat("nl-NL", { month: "short" }).format(startDate) || fallbackMonth;
+    return `${startDate.getDate()}-${endDate.getDate()} ${month}`;
+  }
+
+  return `${formatShortDate(dateKey(startDate))} - ${formatShortDate(dateKey(endDate))}`;
+}
+
+function startOfIsoWeek(date: Date) {
+  const start = startOfDay(date);
+  const daysSinceMonday = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - daysSinceMonday);
+  return start;
+}
+
+function startOfDay(date: Date) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return start;
 }
 
 function weekKeyForDate(value: string | undefined, period: Period) {
