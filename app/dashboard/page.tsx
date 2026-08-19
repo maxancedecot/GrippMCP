@@ -26,7 +26,6 @@ type DashboardSource = {
 };
 
 type Aggregate = {
-  billabilityBase: number;
   declarable: number;
   internal: number;
   revenue: number;
@@ -181,8 +180,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       {activeTab === "declarability" ? (
         <>
           <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
-            <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
-            <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Niet geboekt op ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
+            <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / geschreven uren" tone="good" />
+            <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Uren buiten ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
             <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven 8u per werkdag vanaf startdatum" tone="overtime" />
             <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
           </section>
@@ -284,10 +283,10 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">Proxy</p>
+                <p className="eyebrow">Berekening</p>
                 <h2>Declarabiliteit</h2>
               </div>
-              <span className="panel-total">Excl. {INTERNAL_PROJECT_LABEL} / voorziene uren</span>
+              <span className="panel-total">Excl. {INTERNAL_PROJECT_LABEL} / geschreven uren</span>
             </div>
 
             <div className="project-line-list">
@@ -309,6 +308,15 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
                 </div>
                 <div className="project-line-metrics">
                   <span>{formatHours(dashboard.overtime)} uur</span>
+                </div>
+              </div>
+              <div className="project-line-row">
+                <div>
+                  <span className="row-title">Noemer</span>
+                  <span className="cell-muted">Alle geschreven uren</span>
+                </div>
+                <div className="project-line-metrics">
+                  <span>{formatHours(dashboard.written)} uur</span>
                 </div>
               </div>
             </div>
@@ -435,7 +443,7 @@ function RevenueLineChart({ rows }: { rows: RevenueBucket[] }) {
 }
 
 function InlineBar({ aggregate }: { aggregate: Aggregate }) {
-  const denominator = Math.max(aggregate.total, aggregate.written, 1);
+  const denominator = Math.max(aggregate.written, 1);
   const declarableWidth = cappedPercent(aggregate.declarable, denominator);
   const internalWidth = cappedPercent(aggregate.internal, denominator);
   const untrackedWidth = Math.max(0, 100 - declarableWidth - internalWidth);
@@ -460,7 +468,7 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-uren te tonen."
-    }, employeeSelection.options, revenueSummary, new Map());
+    }, employeeSelection.options, revenueSummary);
   }
 
   try {
@@ -489,17 +497,13 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
     const revenueSummary = activeTab === "revenue"
       ? buildRevenueSummary(await fetchInvoicesForPeriod(client, effectivePeriod), effectivePeriod)
       : emptyRevenueSummary();
-    const billabilityHours = activeTab === "declarability"
-      ? await fetchBillabilityHoursByEmployee(client, employeeIds, effectivePeriod)
-      : new Map<number, number>();
     const dashboard = buildDashboardData(
       hours,
       employeeSelection.includedEmployees,
       effectivePeriod,
       source,
       employeeSelection.options,
-      revenueSummary,
-      billabilityHours
+      revenueSummary
     );
 
     if (activeTab === "declarability" && employeeIds.length === 0) {
@@ -519,7 +523,7 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-    }, employeeSelection.options, revenueSummary, new Map());
+    }, employeeSelection.options, revenueSummary);
   }
 }
 
@@ -554,30 +558,6 @@ async function fetchEmployeePages(client: GrippClient) {
 
 async function fetchHoursForPeriod(client: GrippClient, period: Period, employeeIds: number[], maxPages?: number) {
   return fetchHourPages(client, hourFilters(period, employeeIds), [{ field: "hour.date", direction: "asc" }], maxPages);
-}
-
-async function fetchBillabilityHoursByEmployee(client: GrippClient, employeeIds: number[], period: Period) {
-  const totals = new Map<number, number>();
-
-  for (let index = 0; index < employeeIds.length; index += 100) {
-    const employeeChunk = employeeIds.slice(index, index + 100);
-    const results = await client.batch(
-      employeeChunk.map((employeeId) => ({
-        method: "employee.getWorkingHours",
-        params: [[employeeId], period.start, period.end, true]
-      }))
-    );
-
-    results.forEach((result, resultIndex) => {
-      const total = workingHoursTotal(result);
-      const employeeId = employeeChunk[resultIndex];
-      if (employeeId !== undefined && total !== null) {
-        totals.set(employeeId, total);
-      }
-    });
-  }
-
-  return totals;
 }
 
 async function fetchLatestHours(client: GrippClient, employeeIds: number[]) {
@@ -660,19 +640,16 @@ function buildDashboardData(
   period: Period,
   source: DashboardSource,
   employeeFilters: EmployeeFilterOption[],
-  revenueSummary: RevenueSummary,
-  billabilityHours: Map<number, number>
+  revenueSummary: RevenueSummary
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
   const employeeMap = new Map<string, EmployeeRow>();
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
-  const assignMinimumHours = (employeeRow: EmployeeRow, employee?: JsonRecord, employeeId?: number) => {
+  const assignMinimumHours = (employeeRow: EmployeeRow, employee?: JsonRecord) => {
     const minimumWorkingHours = createMinimumWorkingHours(period, employeeStartDate(employee));
-    const grippWorkingHours = employeeId !== undefined ? billabilityHours.get(employeeId) : undefined;
     employeeRow.total = minimumWorkingHours.total;
-    employeeRow.billabilityBase = grippWorkingHours ?? minimumWorkingHours.total;
     addWorkingHoursToWeeks(weekMap, minimumWorkingHours, period);
   };
 
@@ -689,7 +666,7 @@ function buildDashboardData(
       name: employeeName(undefined, employee)
     });
 
-    assignMinimumHours(employeeRow, employee, employeeId);
+    assignMinimumHours(employeeRow, employee);
     employeeMap.set(employeeRow.id, employeeRow);
   }
 
@@ -711,7 +688,7 @@ function buildDashboardData(
         id: employeeKey,
         name: employeeName(hour, employee)
       });
-      assignMinimumHours(employeeRow, employee ?? hourEmployee, employeeId ?? undefined);
+      assignMinimumHours(employeeRow, employee ?? hourEmployee);
       employeeMap.set(employeeKey, employeeRow);
     }
     const weekKey = weekKeyForDate(hourDate, period);
@@ -950,7 +927,6 @@ function finalizeAggregate<T extends Aggregate>(aggregate: T) {
 function sumAggregates(aggregates: Aggregate[]) {
   const total = emptyAggregate();
   for (const aggregate of aggregates) {
-    total.billabilityBase += aggregate.billabilityBase;
     total.declarable += aggregate.declarable;
     total.internal += aggregate.internal;
     total.revenue += aggregate.revenue;
@@ -965,13 +941,12 @@ function sumAggregates(aggregates: Aggregate[]) {
 function withDeclarability<T extends Aggregate>(aggregate: T) {
   return {
     ...aggregate,
-    declarability: percent(aggregate.declarable, aggregate.billabilityBase)
+    declarability: percent(aggregate.declarable, aggregate.written)
   };
 }
 
 function emptyAggregate(): Aggregate {
   return {
-    billabilityBase: 0,
     declarable: 0,
     internal: 0,
     revenue: 0,
@@ -1430,37 +1405,6 @@ function numberFrom(value: unknown): number | null {
     const normalized = normalizeNumberString(scalar);
     if (normalized && Number.isFinite(Number(normalized))) {
       return Number(normalized);
-    }
-  }
-
-  return null;
-}
-
-function workingHoursTotal(value: JsonValue): number | null {
-  if (typeof value === "number" || typeof value === "string") {
-    const direct = numberFrom(value);
-    return direct !== null ? Math.max(0, direct) : null;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const total = workingHoursTotal(item);
-      if (total !== null) {
-        return total;
-      }
-    }
-    return null;
-  }
-
-  const record = asRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  for (const field of ["total", "sum", "workinghours", "working_hours", "hours", "amount"]) {
-    const total = numberFrom(readField(record, field));
-    if (total !== null) {
-      return Math.max(0, total);
     }
   }
 
