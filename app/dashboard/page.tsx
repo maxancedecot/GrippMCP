@@ -76,18 +76,6 @@ type WorkingHoursSummary = {
   byDate: Map<string, number>;
 };
 
-type RevenuePriceSources = {
-  invoiceLines: Map<number, RevenueLine>;
-  offerProjectLines: Map<number, RevenueLine>;
-};
-
-type RevenueLine = {
-  invoiceBasis: string;
-  maxAmount: number | null;
-  netSellingPrice: number;
-  spentAmount: number | null;
-};
-
 type RevenueSummary = {
   total: number;
   byWeek: Map<string, number>;
@@ -100,7 +88,7 @@ type RevenueView = "week" | "month";
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
 const NORMAL_DAILY_HOURS = 8;
-const REVENUE_HOUR_MAX_PAGES = 40;
+const REVENUE_INVOICE_MAX_PAGES = 40;
 const DEFAULT_EXCLUDED_DASHBOARD_EMPLOYEE_NAMES = new Set(["pieter", "maxance", "tom"]);
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
@@ -336,8 +324,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <article className="panel">
             <div className="panel-heading panel-heading--revenue">
               <div>
-                <p className="eyebrow">Algemene omzet</p>
-                <h2>Opgebracht per {revenueViewLabel}</h2>
+                <p className="eyebrow">Omzet draaitabel</p>
+                <h2>Omzet per {revenueViewLabel}</h2>
               </div>
               <div className="panel-actions">
                 <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
@@ -460,12 +448,11 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
     const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
     const demoHours = createDemoHours(period);
     const hours = filterHoursByEmployeeIds(demoHours, employeeIds);
-    const revenueBasisHours = activeTab === "revenue" ? demoHours : [];
-    const revenuePrices = activeTab === "revenue" ? createDemoRevenuePrices(demoHours) : emptyRevenuePriceSources();
+    const revenueSummary = activeTab === "revenue" ? buildRevenueSummary(createDemoInvoices(period), period) : emptyRevenueSummary();
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-uren te tonen."
-    }, employeeSelection.options, revenuePrices, revenueBasisHours);
+    }, employeeSelection.options, revenueSummary);
   }
 
   try {
@@ -478,9 +465,9 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
       mode: "live",
       message: ""
     };
-    let hours = employeeIds.length > 0 ? await fetchHoursForPeriod(client, period, employeeIds) : [];
+    let hours = activeTab === "declarability" && employeeIds.length > 0 ? await fetchHoursForPeriod(client, period, employeeIds) : [];
 
-    if (employeeIds.length > 0 && hours.length === 0 && !period.isCustom) {
+    if (activeTab === "declarability" && employeeIds.length > 0 && hours.length === 0 && !period.isCustom) {
       const latestHours = await fetchLatestHours(client, employeeIds);
       if (latestHours.length > 0) {
         effectivePeriod = periodFromHours(latestHours);
@@ -491,16 +478,16 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
       }
     }
 
-    const revenueBasisHours = activeTab === "revenue" ? await fetchHoursForPeriod(client, effectivePeriod, [], REVENUE_HOUR_MAX_PAGES) : [];
-    const revenuePrices = activeTab === "revenue" ? await fetchRevenuePriceSources(client, revenueBasisHours) : emptyRevenuePriceSources();
+    const revenueSummary = activeTab === "revenue"
+      ? buildRevenueSummary(await fetchInvoicesForPeriod(client, effectivePeriod), effectivePeriod)
+      : emptyRevenueSummary();
     const dashboard = buildDashboardData(
       hours,
       employeeSelection.includedEmployees,
       effectivePeriod,
       source,
       employeeSelection.options,
-      revenuePrices,
-      revenueBasisHours
+      revenueSummary
     );
 
     if (activeTab === "declarability" && employeeIds.length === 0) {
@@ -516,12 +503,11 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
     const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
     const demoHours = createDemoHours(period);
     const hours = filterHoursByEmployeeIds(demoHours, employeeIds);
-    const revenueBasisHours = activeTab === "revenue" ? demoHours : [];
-    const revenuePrices = activeTab === "revenue" ? createDemoRevenuePrices(demoHours) : emptyRevenuePriceSources();
+    const revenueSummary = activeTab === "revenue" ? buildRevenueSummary(createDemoInvoices(period), period) : emptyRevenueSummary();
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-    }, employeeSelection.options, revenuePrices, revenueBasisHours);
+    }, employeeSelection.options, revenueSummary);
   }
 }
 
@@ -592,62 +578,31 @@ async function fetchHourPages(
   return records;
 }
 
-async function fetchRevenuePriceSources(client: GrippClient, hours: JsonRecord[]): Promise<RevenuePriceSources> {
-  const invoiceLineIds = uniqueRelationIds(hours, "invoiceline");
-  const offerProjectLineIds = uniqueRelationIds(hours, "offerprojectline");
+async function fetchInvoicesForPeriod(client: GrippClient, period: Period) {
+  const pageSize = 250;
+  const records: JsonRecord[] = [];
+  const filters: JsonValue[] = [
+    { field: "invoice.reportdate", operator: "greaterequals", value: period.start },
+    { field: "invoice.reportdate", operator: "lessequals", value: period.end }
+  ];
 
-  const [invoiceLines, offerProjectLines] = await Promise.all([
-    fetchLinePriceMap(client, "invoiceline", invoiceLineIds),
-    fetchLinePriceMap(client, "offerprojectline", offerProjectLineIds)
-  ]);
-
-  return {
-    invoiceLines,
-    offerProjectLines
-  };
-}
-
-async function fetchLinePriceMap(
-  client: GrippClient,
-  entity: "invoiceline" | "offerprojectline",
-  ids: number[]
-): Promise<Map<number, RevenueLine>> {
-  const prices = new Map<number, RevenueLine>();
-  const uniqueIds = Array.from(new Set(ids));
-
-  for (let index = 0; index < uniqueIds.length; index += 100) {
-    const idChunk = uniqueIds.slice(index, index + 100);
-    if (idChunk.length === 0) {
-      continue;
-    }
-
-    const result = await client.call(`${entity}.get`, [
-      [{ field: `${entity}.id`, operator: "in", value: idChunk }],
+  for (let page = 0; page < REVENUE_INVOICE_MAX_PAGES; page += 1) {
+    const result = await client.call("invoice.get", [
+      filters,
       {
-        paging: { firstresult: 0, maxresults: 250 },
-        orderings: [{ field: `${entity}.id`, direction: "asc" }]
+        paging: { firstresult: page * pageSize, maxresults: pageSize },
+        orderings: [{ field: "invoice.reportdate", direction: "asc" }]
       }
     ] as JsonValue[]);
+    const pageRecords = asRecords(result);
+    records.push(...pageRecords);
 
-    for (const line of asRecords(result)) {
-      const id = idFrom(readField(line, "id"));
-      if (id !== null) {
-        prices.set(id, revenueLineFromRecord(line));
-      }
+    if (pageRecords.length < pageSize) {
+      break;
     }
   }
 
-  return prices;
-}
-
-function uniqueRelationIds(records: JsonRecord[], field: string) {
-  return Array.from(
-    new Set(
-      records
-        .map((record) => relationId(record, field))
-        .filter((id): id is number => id !== null)
-    )
-  );
+  return records;
 }
 
 function hourFilters(period: Period, employeeIds: number[]) {
@@ -669,12 +624,10 @@ function buildDashboardData(
   period: Period,
   source: DashboardSource,
   employeeFilters: EmployeeFilterOption[],
-  revenuePrices: RevenuePriceSources,
-  revenueBasisHours = hours
+  revenueSummary: RevenueSummary
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
   const employeeMap = new Map<string, EmployeeRow>();
-  const revenueSummary = buildRevenueSummary(revenueBasisHours, revenuePrices, period);
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -823,36 +776,26 @@ function employeeStartDate(employee: JsonRecord | undefined) {
   return dateKeyFromValue(readField(employee, "employeesince")) ?? dateKeyFromValue(readField(employee, "startdate"));
 }
 
-function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSources, period: Period): RevenueSummary {
+function buildRevenueSummary(invoices: JsonRecord[], period: Period): RevenueSummary {
   const byWeek = new Map<string, number>();
   const byMonth = new Map<string, number>();
-  const hoursByLine = revenueHoursByLine(hours, revenuePrices);
   let total = 0;
 
-  for (const hour of hours) {
-    if (relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID) {
-      continue;
-    }
-
-    const weekKey = weekKeyForDateInPeriod(readField(hour, "date"), period);
-    const monthKey = monthKeyForDateInPeriod(readField(hour, "date"), period);
+  for (const invoice of invoices) {
+    const weekKey = weekKeyForDateInPeriod(readField(invoice, "reportdate"), period);
+    const monthKey = monthKeyForDateInPeriod(readField(invoice, "reportdate"), period);
     if (!weekKey || !monthKey) {
       continue;
     }
 
-    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
+    const amount = numberFrom(readField(invoice, "totalincldiscountexclvat")) ?? 0;
     if (amount === 0) {
       continue;
     }
 
-    const revenue = revenueForHour(hour, amount, revenuePrices, hoursByLine);
-    if (revenue === 0) {
-      continue;
-    }
-
-    total += revenue;
-    byWeek.set(weekKey, (byWeek.get(weekKey) ?? 0) + revenue);
-    byMonth.set(monthKey, (byMonth.get(monthKey) ?? 0) + revenue);
+    total += amount;
+    byWeek.set(weekKey, (byWeek.get(weekKey) ?? 0) + amount);
+    byMonth.set(monthKey, (byMonth.get(monthKey) ?? 0) + amount);
   }
 
   return {
@@ -862,83 +805,11 @@ function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSou
   };
 }
 
-function revenueForHour(
-  hour: JsonRecord,
-  amount: number,
-  revenuePrices: RevenuePriceSources,
-  hoursByLine: Map<string, number>
-) {
-  const source = revenueLineForHour(hour, revenuePrices);
-  if (!source || source.line.invoiceBasis === "NONBILLABLE") {
-    return 0;
-  }
-
-  const spentAmount = Math.max(source.line.spentAmount ?? 0, hoursByLine.get(source.key) ?? 0);
-
-  if (source.line.invoiceBasis === "FIXED") {
-    return spentAmount > 0 ? (source.line.netSellingPrice / spentAmount) * amount : 0;
-  }
-
-  if (source.line.maxAmount !== null && spentAmount > source.line.maxAmount) {
-    return ((source.line.netSellingPrice * source.line.maxAmount) / spentAmount) * amount;
-  }
-
-  return amount * source.line.netSellingPrice;
-}
-
-function revenueLineForHour(hour: JsonRecord, revenuePrices: RevenuePriceSources) {
-  const offerProjectLineId = relationId(hour, "offerprojectline");
-  const offerProjectLine = offerProjectLineId !== null ? revenuePrices.offerProjectLines.get(offerProjectLineId) : undefined;
-  if (offerProjectLine && ["FIXED", "NONBILLABLE"].includes(offerProjectLine.invoiceBasis)) {
-    return { key: `offerprojectline:${offerProjectLineId}`, line: offerProjectLine };
-  }
-
-  const invoiceLineId = relationId(hour, "invoiceline");
-  const invoiceLine = invoiceLineId !== null ? revenuePrices.invoiceLines.get(invoiceLineId) : undefined;
-  if (invoiceLine) {
-    return { key: `invoiceline:${invoiceLineId}`, line: invoiceLine };
-  }
-
-  if (offerProjectLine) {
-    return { key: `offerprojectline:${offerProjectLineId}`, line: offerProjectLine };
-  }
-
-  return null;
-}
-
-function revenueHoursByLine(hours: JsonRecord[], revenuePrices: RevenuePriceSources) {
-  const totals = new Map<string, number>();
-
-  for (const hour of hours) {
-    if (relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID) {
-      continue;
-    }
-
-    const source = revenueLineForHour(hour, revenuePrices);
-    if (!source || source.line.invoiceBasis === "NONBILLABLE") {
-      continue;
-    }
-
-    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
-    if (amount > 0) {
-      totals.set(source.key, (totals.get(source.key) ?? 0) + amount);
-    }
-  }
-
-  return totals;
-}
-
-function revenueLineFromRecord(line: JsonRecord): RevenueLine {
-  const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
-  const discount = Math.max(0, Math.min(100, numberFrom(readField(line, "discount")) ?? 0));
-  const amount = numberFrom(readField(line, "amount"));
-  const spentAmount = numberFrom(readField(line, "amountwritten"));
-
+function emptyRevenueSummary(): RevenueSummary {
   return {
-    invoiceBasis: stringFrom(readField(line, "invoicebasis"))?.toUpperCase() ?? "COSTING",
-    maxAmount: amount !== null && amount > 0 ? amount : null,
-    netSellingPrice: sellingPrice * (1 - discount / 100),
-    spentAmount: spentAmount !== null && spentAmount > 0 ? spentAmount : null
+    total: 0,
+    byWeek: new Map(),
+    byMonth: new Map()
   };
 }
 
@@ -1443,39 +1314,19 @@ function demoDatesInPeriod(period: Period, count: number) {
   );
 }
 
-function createDemoRevenuePrices(hours: JsonRecord[]): RevenuePriceSources {
-  const offerProjectLines = new Map<number, RevenueLine>();
-  const spentHoursByLine = new Map<number, number>();
-
-  for (const hour of hours) {
-    const offerProjectLineId = relationId(hour, "offerprojectline");
-    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
-    if (offerProjectLineId !== null && amount > 0) {
-      spentHoursByLine.set(offerProjectLineId, (spentHoursByLine.get(offerProjectLineId) ?? 0) + amount);
-    }
-  }
-
-  uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
-    const fixedFee = index % 4 === 0;
-    offerProjectLines.set(id, {
-      invoiceBasis: fixedFee ? "FIXED" : "COSTING",
-      maxAmount: [6, 8, 10, 12][index % 4],
-      netSellingPrice: fixedFee ? [850, 1250, 1650][index % 3] : [95, 110, 125, 140][index % 4],
-      spentAmount: fixedFee ? spentHoursByLine.get(id) ?? null : null
-    });
+function createDemoInvoices(period: Period): JsonRecord[] {
+  const workingDates = datesInPeriod(period).filter((date) => {
+    const day = parseDateKey(date)?.getDay();
+    return day !== 0 && day !== 6;
   });
 
-  return {
-    invoiceLines: new Map(),
-    offerProjectLines
-  };
-}
-
-function emptyRevenuePriceSources(): RevenuePriceSources {
-  return {
-    invoiceLines: new Map(),
-    offerProjectLines: new Map()
-  };
+  return workingDates
+    .filter((_, index) => index % 5 === 2)
+    .map((reportdate, index) => ({
+      id: 9_000 + index,
+      reportdate,
+      totalincldiscountexclvat: [1850, 2400, 3250, 1450, 2800][index % 5]
+    }));
 }
 
 function asRecords(value: JsonValue): JsonRecord[] {
