@@ -60,7 +60,7 @@ type DashboardData = Aggregate & {
 type EmployeeFilterOption = {
   id: string;
   name: string;
-  excluded: boolean;
+  included: boolean;
 };
 
 type WorkingHoursSummary = {
@@ -120,11 +120,11 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <button type="submit">Periode laden</button>
         {dashboard.employeeFilters.length > 0 ? (
           <fieldset className="employee-filter">
-            <legend>Niet meerekenen</legend>
+            <legend>Wel meerekenen</legend>
             <div className="employee-filter-list">
               {dashboard.employeeFilters.map((employee) => (
                 <label key={employee.id} className="employee-filter-option">
-                  <input type="checkbox" name="exclude" value={employee.id} defaultChecked={employee.excluded} />
+                  <input type="checkbox" name="include" value={employee.id} defaultChecked={employee.included} />
                   <span>{employee.name}</span>
                 </label>
               ))}
@@ -624,18 +624,18 @@ function getEmployeeSelection(employees: JsonRecord[], params: DashboardSearchPa
   });
 
   const submitted = firstParam(params.employeeFilter) === "1";
-  const excludedIds = submitted
-    ? new Set(paramValues(params.exclude).filter((id) => employeeById.has(id)))
-    : new Set(Array.from(employeeById.entries()).filter(([, employee]) => isDefaultExcludedDashboardEmployee(employee)).map(([id]) => id));
+  const includedIds = submitted
+    ? new Set(paramValues(params.include).filter((id) => employeeById.has(id)))
+    : new Set(Array.from(employeeById.entries()).filter(([, employee]) => !isDefaultExcludedDashboardEmployee(employee)).map(([id]) => id));
   const options = Array.from(employeeById.entries())
     .map(([id, employee]) => ({
       id,
       name: employeeName(undefined, employee),
-      excluded: excludedIds.has(id)
+      included: includedIds.has(id)
     }))
     .sort((left, right) => left.name.localeCompare(right.name, "nl"));
   const includedEmployees = Array.from(employeeById.entries())
-    .filter(([id]) => !excludedIds.has(id))
+    .filter(([id]) => includedIds.has(id))
     .map(([, employee]) => employee);
 
   return {
