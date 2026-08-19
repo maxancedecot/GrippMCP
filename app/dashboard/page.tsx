@@ -466,7 +466,6 @@ function buildDashboardData(
   source: DashboardSource
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
-  const totals = emptyAggregate();
   const minimumWorkingHours = createMinimumWorkingHours(period);
   const employeeMap = new Map<string, EmployeeRow>();
   const weekMap = new Map<string, WeekRow>(
@@ -474,7 +473,6 @@ function buildDashboardData(
   );
   const assignMinimumHours = (employeeRow: EmployeeRow) => {
     employeeRow.total = minimumWorkingHours.total;
-    totals.total += minimumWorkingHours.total;
     addWorkingHoursToWeeks(weekMap, minimumWorkingHours, period);
   };
 
@@ -522,9 +520,6 @@ function buildDashboardData(
     employeeRow.written += amount;
     employeeMap.set(employeeKey, employeeRow);
 
-    totals[targetField] += amount;
-    totals.written += amount;
-
     if (weekRow) {
       weekRow[targetField] += amount;
       weekRow.written += amount;
@@ -533,23 +528,21 @@ function buildDashboardData(
 
   const employeeRows = Array.from(employeeMap.values())
     .map(finalizeAggregate)
-    .sort((left, right) => right.total - left.total || right.written - left.written)
-    .slice(0, 12);
+    .sort((left, right) => right.total - left.total || right.written - left.written);
 
   const weekRows = Array.from(weekMap.values()).map(finalizeAggregate);
-  const internalRows = Array.from(employeeMap.values())
-    .map(finalizeAggregate)
+  const internalRows = employeeRows
     .filter((row) => row.internal > 0)
     .sort((left, right) => right.internal - left.internal)
     .slice(0, 8);
 
-  const finalizedTotals = finalizeAggregate(totals);
+  const teamTotals = sumAggregates(employeeRows);
 
   return {
-    ...finalizedTotals,
+    ...teamTotals,
     period,
     source,
-    declarability: finalizedTotals.declarability,
+    declarability: teamTotals.declarability,
     employeeRows,
     internalRows,
     weekRows,
@@ -611,6 +604,19 @@ function finalizeAggregate<T extends Aggregate>(aggregate: T) {
     untracked: Math.max(0, aggregate.total - aggregate.written),
     overtime: Math.max(0, aggregate.written - aggregate.total)
   });
+}
+
+function sumAggregates(aggregates: Aggregate[]) {
+  const total = emptyAggregate();
+  for (const aggregate of aggregates) {
+    total.declarable += aggregate.declarable;
+    total.internal += aggregate.internal;
+    total.untracked += aggregate.untracked;
+    total.overtime += aggregate.overtime;
+    total.total += aggregate.total;
+    total.written += aggregate.written;
+  }
+  return withDeclarability(total);
 }
 
 function withDeclarability<T extends Aggregate>(aggregate: T) {
