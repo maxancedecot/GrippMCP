@@ -50,10 +50,17 @@ type DashboardData = Aggregate & {
   period: Period;
   source: DashboardSource;
   declarability: number;
+  employeeFilters: EmployeeFilterOption[];
   employeeRows: EmployeeRow[];
   internalRows: EmployeeRow[];
   weekRows: WeekRow[];
   lastUpdated: string;
+};
+
+type EmployeeFilterOption = {
+  id: string;
+  name: string;
+  excluded: boolean;
 };
 
 type WorkingHoursSummary = {
@@ -64,7 +71,7 @@ type WorkingHoursSummary = {
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
 const NORMAL_DAILY_HOURS = 8;
-const EXCLUDED_DASHBOARD_EMPLOYEE_NAMES = new Set(["pieter", "maxance", "tom"]);
+const DEFAULT_EXCLUDED_DASHBOARD_EMPLOYEE_NAMES = new Set(["pieter", "maxance", "tom"]);
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -79,7 +86,7 @@ const percentFormatter = new Intl.NumberFormat("nl-NL", {
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
   const requestedPeriod = getPeriodFromParams(params);
-  const dashboard = await getDashboardData(requestedPeriod);
+  const dashboard = await getDashboardData(requestedPeriod, params);
   const gaugeProgress = Math.max(0, Math.min(dashboard.declarability, 100));
 
   return (
@@ -101,6 +108,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       {dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 
       <form className="period-form" action="/dashboard">
+        <input type="hidden" name="employeeFilter" value="1" />
         <label>
           Van
           <input type="date" name="start" defaultValue={dashboard.period.start} />
@@ -110,6 +118,19 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <input type="date" name="end" defaultValue={dashboard.period.end} />
         </label>
         <button type="submit">Periode laden</button>
+        {dashboard.employeeFilters.length > 0 ? (
+          <fieldset className="employee-filter">
+            <legend>Niet meerekenen</legend>
+            <div className="employee-filter-list">
+              {dashboard.employeeFilters.map((employee) => (
+                <label key={employee.id} className="employee-filter-option">
+                  <input type="checkbox" name="exclude" value={employee.id} defaultChecked={employee.excluded} />
+                  <span>{employee.name}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
       </form>
 
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
@@ -334,19 +355,23 @@ function InlineBar({ aggregate }: { aggregate: Aggregate }) {
   );
 }
 
-async function getDashboardData(period: Period): Promise<DashboardData> {
+async function getDashboardData(period: Period, params: DashboardSearchParams): Promise<DashboardData> {
   if (!process.env.GRIPP_API_TOKEN) {
-    const employees = createDemoEmployees();
-    return buildDashboardData(createDemoHours(period), employees, period, {
+    const allEmployees = createDemoEmployees();
+    const employeeSelection = getEmployeeSelection(allEmployees, params);
+    const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
+    const hours = filterHoursByEmployeeIds(createDemoHours(period), employeeIds);
+    return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-uren te tonen."
-    });
+    }, employeeSelection.options);
   }
 
   try {
     const client = new GrippClient();
-    const employees = await fetchEmployees(client);
-    const employeeIds = employees.map((employee) => idFrom(readField(employee, "id"))).filter((id): id is number => id !== null);
+    const allEmployees = await fetchEmployees(client);
+    const employeeSelection = getEmployeeSelection(allEmployees, params);
+    const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
     let effectivePeriod = period;
     const source: DashboardSource = {
       mode: "live",
@@ -365,7 +390,7 @@ async function getDashboardData(period: Period): Promise<DashboardData> {
       }
     }
 
-    const dashboard = buildDashboardData(hours, employees, effectivePeriod, source);
+    const dashboard = buildDashboardData(hours, employeeSelection.includedEmployees, effectivePeriod, source, employeeSelection.options);
 
     if (employeeIds.length === 0) {
       dashboard.source.message = "Geen medewerkers gevonden voor dit dashboard.";
@@ -375,18 +400,21 @@ async function getDashboardData(period: Period): Promise<DashboardData> {
 
     return dashboard;
   } catch (error) {
-    return buildDashboardData(createDemoHours(period), createDemoEmployees(), period, {
+    const allEmployees = createDemoEmployees();
+    const employeeSelection = getEmployeeSelection(allEmployees, params);
+    const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
+    const hours = filterHoursByEmployeeIds(createDemoHours(period), employeeIds);
+    return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-    });
+    }, employeeSelection.options);
   }
 }
 
 async function fetchEmployees(client: GrippClient) {
   const employees = await fetchEmployeePages(client);
   const activeEmployees = employees.filter((employee) => booleanFrom(readField(employee, "active")) !== false);
-  const visibleEmployees = activeEmployees.length > 0 ? activeEmployees : employees;
-  return visibleEmployees.filter((employee) => !isExcludedDashboardEmployee(employee));
+  return activeEmployees.length > 0 ? activeEmployees : employees;
 }
 
 async function fetchEmployeePages(client: GrippClient) {
@@ -467,7 +495,8 @@ function buildDashboardData(
   hours: JsonRecord[],
   employees: JsonRecord[],
   period: Period,
-  source: DashboardSource
+  source: DashboardSource,
+  employeeFilters: EmployeeFilterOption[]
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
   const minimumWorkingHours = createMinimumWorkingHours(period);
@@ -547,6 +576,7 @@ function buildDashboardData(
     period,
     source,
     declarability: teamTotals.declarability,
+    employeeFilters,
     employeeRows,
     internalRows,
     weekRows,
@@ -584,6 +614,53 @@ function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
   };
 }
 
+function getEmployeeSelection(employees: JsonRecord[], params: DashboardSearchParams) {
+  const employeeById = new Map<string, JsonRecord>();
+  employees.forEach((employee) => {
+    const id = employeeFilterId(employee);
+    if (id) {
+      employeeById.set(id, employee);
+    }
+  });
+
+  const submitted = firstParam(params.employeeFilter) === "1";
+  const excludedIds = submitted
+    ? new Set(paramValues(params.exclude).filter((id) => employeeById.has(id)))
+    : new Set(Array.from(employeeById.entries()).filter(([, employee]) => isDefaultExcludedDashboardEmployee(employee)).map(([id]) => id));
+  const options = Array.from(employeeById.entries())
+    .map(([id, employee]) => ({
+      id,
+      name: employeeName(undefined, employee),
+      excluded: excludedIds.has(id)
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, "nl"));
+  const includedEmployees = Array.from(employeeById.entries())
+    .filter(([id]) => !excludedIds.has(id))
+    .map(([, employee]) => employee);
+
+  return {
+    includedEmployees,
+    options
+  };
+}
+
+function employeeIdsFromEmployees(employees: JsonRecord[]) {
+  return employees.map((employee) => idFrom(readField(employee, "id"))).filter((id): id is number => id !== null);
+}
+
+function filterHoursByEmployeeIds(hours: JsonRecord[], employeeIds: number[]) {
+  const allowedEmployeeIds = new Set(employeeIds);
+  return hours.filter((hour) => {
+    const employeeId = relationId(hour, "employee");
+    return employeeId !== null && allowedEmployeeIds.has(employeeId);
+  });
+}
+
+function employeeFilterId(employee: JsonRecord) {
+  const id = idFrom(readField(employee, "id"));
+  return id === null ? null : String(id);
+}
+
 function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undefined) {
   const relation = asRecord(readField(hour, "employee"));
   const record = relation ?? employee;
@@ -602,7 +679,7 @@ function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undef
   );
 }
 
-function isExcludedDashboardEmployee(employee: JsonRecord) {
+function isDefaultExcludedDashboardEmployee(employee: JsonRecord) {
   const nameValues = [
     employeeName(undefined, employee),
     stringFrom(readField(employee, "firstname")),
@@ -612,7 +689,7 @@ function isExcludedDashboardEmployee(employee: JsonRecord) {
     stringFrom(readField(employee, "email"))
   ];
 
-  return nameValues.some((value) => nameTokens(value).some((token) => EXCLUDED_DASHBOARD_EMPLOYEE_NAMES.has(token)));
+  return nameValues.some((value) => nameTokens(value).some((token) => DEFAULT_EXCLUDED_DASHBOARD_EMPLOYEE_NAMES.has(token)));
 }
 
 function nameTokens(value: string | undefined) {
@@ -1050,6 +1127,13 @@ function formatPercent(value: number) {
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function paramValues(value: string | string[] | undefined) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  return value ? [value] : [];
 }
 
 function isDateKey(value: string | undefined): value is string {
