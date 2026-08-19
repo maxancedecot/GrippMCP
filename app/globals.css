@@ -440,12 +440,14 @@ select {
 }
 
 .weekly-list,
+.revenue-list,
 .status-list,
 .project-line-list {
   display: grid;
   gap: 14px;
 }
 
+.revenue-row,
 .stack-row {
   display: grid;
   gap: 8px;
@@ -485,6 +487,22 @@ select {
 
 .bar-segment--neutral {
   background: var(--neutral);
+}
+
+.revenue-bar {
+  width: 100%;
+  min-width: 120px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-strong);
+}
+
+.revenue-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blue);
 }
 
 .table-wrap {

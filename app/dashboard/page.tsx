@@ -28,6 +28,7 @@ type DashboardSource = {
 type Aggregate = {
   declarable: number;
   internal: number;
+  revenue: number;
   untracked: number;
   overtime: number;
   total: number;
@@ -68,6 +69,11 @@ type WorkingHoursSummary = {
   byDate: Map<string, number>;
 };
 
+type RevenuePriceSources = {
+  invoiceLines: Map<number, number>;
+  offerProjectLines: Map<number, number>;
+};
+
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
 const NORMAL_DAILY_HOURS = 8;
@@ -83,11 +89,19 @@ const percentFormatter = new Intl.NumberFormat("nl-NL", {
   maximumFractionDigits: 0
 });
 
+const currencyFormatter = new Intl.NumberFormat("nl-BE", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0
+});
+
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
   const requestedPeriod = getPeriodFromParams(params);
   const dashboard = await getDashboardData(requestedPeriod, params);
   const gaugeProgress = Math.max(0, Math.min(dashboard.declarability, 100));
+  const maxWeeklyRevenue = Math.max(1, ...dashboard.weekRows.map((week) => week.revenue));
 
   return (
     <main className="dashboard-shell">
@@ -174,14 +188,15 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <article className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Trend</p>
-              <h2>Per week</h2>
+              <p className="eyebrow">Omzet</p>
+              <h2>Opgebracht per week</h2>
             </div>
+            <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
           </div>
 
-          <div className="weekly-list">
+          <div className="revenue-list">
             {dashboard.weekRows.map((week) => (
-              <StackedBar key={week.key} label={week.label} aggregate={week} trailing={`${formatPercent(week.declarability)}%`} />
+              <RevenueBar key={week.key} label={week.label} revenue={week.revenue} maxRevenue={maxWeeklyRevenue} />
             ))}
           </div>
         </article>
@@ -340,6 +355,22 @@ function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: 
   );
 }
 
+function RevenueBar({ label, revenue, maxRevenue }: { label: string; revenue: number; maxRevenue: number }) {
+  const width = Math.max(0, Math.min(100, percent(revenue, maxRevenue)));
+
+  return (
+    <div className="revenue-row">
+      <div className="stack-label">
+        <span>{label}</span>
+        <span>{formatCurrency(revenue)}</span>
+      </div>
+      <div className="revenue-bar" aria-hidden="true">
+        <span style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function InlineBar({ aggregate }: { aggregate: Aggregate }) {
   const denominator = Math.max(aggregate.total, aggregate.written, 1);
   const declarableWidth = cappedPercent(aggregate.declarable, denominator);
@@ -361,10 +392,11 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
     const employeeSelection = getEmployeeSelection(allEmployees, params);
     const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
     const hours = filterHoursByEmployeeIds(createDemoHours(period), employeeIds);
+    const revenuePrices = createDemoRevenuePrices(hours);
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-uren te tonen."
-    }, employeeSelection.options);
+    }, employeeSelection.options, revenuePrices);
   }
 
   try {
@@ -390,7 +422,8 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
       }
     }
 
-    const dashboard = buildDashboardData(hours, employeeSelection.includedEmployees, effectivePeriod, source, employeeSelection.options);
+    const revenuePrices = await fetchRevenuePriceSources(client, hours);
+    const dashboard = buildDashboardData(hours, employeeSelection.includedEmployees, effectivePeriod, source, employeeSelection.options, revenuePrices);
 
     if (employeeIds.length === 0) {
       dashboard.source.message = "Geen medewerkers gevonden voor dit dashboard.";
@@ -404,10 +437,11 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
     const employeeSelection = getEmployeeSelection(allEmployees, params);
     const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
     const hours = filterHoursByEmployeeIds(createDemoHours(period), employeeIds);
+    const revenuePrices = createDemoRevenuePrices(hours);
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-    }, employeeSelection.options);
+    }, employeeSelection.options, revenuePrices);
   }
 }
 
@@ -478,6 +512,60 @@ async function fetchHourPages(
   return records;
 }
 
+async function fetchRevenuePriceSources(client: GrippClient, hours: JsonRecord[]): Promise<RevenuePriceSources> {
+  const invoiceLineIds = uniqueRelationIds(hours, "invoiceline");
+  const offerProjectLineIds = uniqueRelationIds(hours, "offerprojectline");
+
+  const [invoiceLines, offerProjectLines] = await Promise.all([
+    fetchLinePriceMap(client, "invoiceline", invoiceLineIds),
+    fetchLinePriceMap(client, "offerprojectline", offerProjectLineIds)
+  ]);
+
+  return {
+    invoiceLines,
+    offerProjectLines
+  };
+}
+
+async function fetchLinePriceMap(client: GrippClient, entity: "invoiceline" | "offerprojectline", ids: number[]) {
+  const prices = new Map<number, number>();
+  const uniqueIds = Array.from(new Set(ids));
+
+  for (let index = 0; index < uniqueIds.length; index += 100) {
+    const idChunk = uniqueIds.slice(index, index + 100);
+    if (idChunk.length === 0) {
+      continue;
+    }
+
+    const result = await client.call(`${entity}.get`, [
+      [{ field: `${entity}.id`, operator: "in", value: idChunk }],
+      {
+        paging: { firstresult: 0, maxresults: 250 },
+        orderings: [{ field: `${entity}.id`, direction: "asc" }]
+      }
+    ] as JsonValue[]);
+
+    for (const line of asRecords(result)) {
+      const id = idFrom(readField(line, "id"));
+      if (id !== null) {
+        prices.set(id, netUnitPrice(line));
+      }
+    }
+  }
+
+  return prices;
+}
+
+function uniqueRelationIds(records: JsonRecord[], field: string) {
+  return Array.from(
+    new Set(
+      records
+        .map((record) => relationId(record, field))
+        .filter((id): id is number => id !== null)
+    )
+  );
+}
+
 function hourFilters(period: Period, employeeIds: number[]) {
   const filters: JsonValue[] = [
     { field: "hour.date", operator: "greaterequals", value: period.start },
@@ -496,7 +584,8 @@ function buildDashboardData(
   employees: JsonRecord[],
   period: Period,
   source: DashboardSource,
-  employeeFilters: EmployeeFilterOption[]
+  employeeFilters: EmployeeFilterOption[],
+  revenuePrices: RevenuePriceSources
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
   const minimumWorkingHours = createMinimumWorkingHours(period);
@@ -548,13 +637,16 @@ function buildDashboardData(
     const weekKey = weekKeyForDate(hourDate, period);
     const weekRow = weekMap.get(weekKey);
     const targetField = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID ? "internal" : "declarable";
+    const revenue = targetField === "declarable" ? amount * revenueUnitPriceForHour(hour, revenuePrices) : 0;
 
     employeeRow[targetField] += amount;
+    employeeRow.revenue += revenue;
     employeeRow.written += amount;
     employeeMap.set(employeeKey, employeeRow);
 
     if (weekRow) {
       weekRow[targetField] += amount;
+      weekRow.revenue += revenue;
       weekRow.written += amount;
     }
   }
@@ -612,6 +704,31 @@ function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
     total: sumValues(byDate),
     byDate
   };
+}
+
+function revenueUnitPriceForHour(hour: JsonRecord, revenuePrices: RevenuePriceSources) {
+  const invoiceLineId = relationId(hour, "invoiceline");
+  if (invoiceLineId !== null) {
+    return revenuePrices.invoiceLines.get(invoiceLineId) ?? 0;
+  }
+
+  const offerProjectLineId = relationId(hour, "offerprojectline");
+  if (offerProjectLineId !== null) {
+    return revenuePrices.offerProjectLines.get(offerProjectLineId) ?? 0;
+  }
+
+  return 0;
+}
+
+function netUnitPrice(line: JsonRecord) {
+  const invoiceBasis = stringFrom(readField(line, "invoicebasis"))?.toUpperCase();
+  if (invoiceBasis === "NONBILLABLE") {
+    return 0;
+  }
+
+  const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
+  const discount = Math.max(0, Math.min(100, numberFrom(readField(line, "discount")) ?? 0));
+  return sellingPrice * (1 - discount / 100);
 }
 
 function getEmployeeSelection(employees: JsonRecord[], params: DashboardSearchParams) {
@@ -714,6 +831,7 @@ function sumAggregates(aggregates: Aggregate[]) {
   for (const aggregate of aggregates) {
     total.declarable += aggregate.declarable;
     total.internal += aggregate.internal;
+    total.revenue += aggregate.revenue;
     total.untracked += aggregate.untracked;
     total.overtime += aggregate.overtime;
     total.total += aggregate.total;
@@ -733,6 +851,7 @@ function emptyAggregate(): Aggregate {
   return {
     declarable: 0,
     internal: 0,
+    revenue: 0,
     untracked: 0,
     overtime: 0,
     total: 0,
@@ -929,13 +1048,16 @@ function createDemoHours(period: Period): JsonRecord[] {
   const days = [2, 4, 7, 9, 12, 15, 18, 21, 23, 26, 28];
   return days.flatMap((day, index) => {
     const date = `${period.start.slice(0, 8)}${String(day).padStart(2, "0")}`;
+    const firstIsInternal = index % 5 === 0;
+    const secondIsInternal = index % 3 === 0;
     return [
       {
         id: index * 3 + 1,
         date,
         amount: 5.5 + (index % 3),
         employee: (index % 4) + 1,
-        offerprojectbase: index % 5 === 0 ? INTERNAL_OFFERPROJECTBASE_ID : 120 + index,
+        offerprojectbase: firstIsInternal ? INTERNAL_OFFERPROJECTBASE_ID : 120 + index,
+        offerprojectline: firstIsInternal ? null : 1000 + index,
         status: index % 4 === 0 ? "AUTHORIZED" : "DEFINITIVE"
       },
       {
@@ -943,11 +1065,24 @@ function createDemoHours(period: Period): JsonRecord[] {
         date,
         amount: 2 + (index % 2),
         employee: ((index + 1) % 4) + 1,
-        offerprojectbase: index % 3 === 0 ? INTERNAL_OFFERPROJECTBASE_ID : 220 + index,
+        offerprojectbase: secondIsInternal ? INTERNAL_OFFERPROJECTBASE_ID : 220 + index,
+        offerprojectline: secondIsInternal ? null : 2000 + index,
         status: index % 3 === 0 ? "CONCEPT" : "DEFINITIVE"
       }
     ];
   });
+}
+
+function createDemoRevenuePrices(hours: JsonRecord[]): RevenuePriceSources {
+  const offerProjectLines = new Map<number, number>();
+  uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
+    offerProjectLines.set(id, [95, 110, 125, 140][index % 4]);
+  });
+
+  return {
+    invoiceLines: new Map(),
+    offerProjectLines
+  };
 }
 
 function asRecords(value: JsonValue): JsonRecord[] {
@@ -1119,6 +1254,10 @@ function formatHours(value: number) {
 
 function formatOvertimeLabel(value: number) {
   return `${formatHours(value)} overuren`;
+}
+
+function formatCurrency(value: number) {
+  return currencyFormatter.format(value);
 }
 
 function formatPercent(value: number) {
