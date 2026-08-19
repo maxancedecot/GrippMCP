@@ -70,8 +70,14 @@ type WorkingHoursSummary = {
 };
 
 type RevenuePriceSources = {
-  invoiceLines: Map<number, number>;
-  offerProjectLines: Map<number, number>;
+  invoiceLines: Map<number, RevenueLine>;
+  offerProjectLines: Map<number, RevenueLine>;
+};
+
+type RevenueLine = {
+  invoiceBasis: string;
+  maxAmount: number | null;
+  netSellingPrice: number;
 };
 
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
@@ -527,8 +533,12 @@ async function fetchRevenuePriceSources(client: GrippClient, hours: JsonRecord[]
   };
 }
 
-async function fetchLinePriceMap(client: GrippClient, entity: "invoiceline" | "offerprojectline", ids: number[]) {
-  const prices = new Map<number, number>();
+async function fetchLinePriceMap(
+  client: GrippClient,
+  entity: "invoiceline" | "offerprojectline",
+  ids: number[]
+): Promise<Map<number, RevenueLine>> {
+  const prices = new Map<number, RevenueLine>();
   const uniqueIds = Array.from(new Set(ids));
 
   for (let index = 0; index < uniqueIds.length; index += 100) {
@@ -548,7 +558,7 @@ async function fetchLinePriceMap(client: GrippClient, entity: "invoiceline" | "o
     for (const line of asRecords(result)) {
       const id = idFrom(readField(line, "id"));
       if (id !== null) {
-        prices.set(id, netUnitPrice(line));
+        prices.set(id, revenueLineFromRecord(line));
       }
     }
   }
@@ -590,6 +600,7 @@ function buildDashboardData(
   const employeesById = new Map<number, JsonRecord>();
   const minimumWorkingHours = createMinimumWorkingHours(period);
   const employeeMap = new Map<string, EmployeeRow>();
+  const revenueUsageByLine = new Map<string, number>();
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -637,7 +648,7 @@ function buildDashboardData(
     const weekKey = weekKeyForDate(hourDate, period);
     const weekRow = weekMap.get(weekKey);
     const targetField = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID ? "internal" : "declarable";
-    const revenue = targetField === "declarable" ? amount * revenueUnitPriceForHour(hour, revenuePrices) : 0;
+    const revenue = targetField === "declarable" ? revenueForHour(hour, amount, revenuePrices, revenueUsageByLine) : 0;
 
     employeeRow[targetField] += amount;
     employeeRow.revenue += revenue;
@@ -706,29 +717,62 @@ function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
   };
 }
 
-function revenueUnitPriceForHour(hour: JsonRecord, revenuePrices: RevenuePriceSources) {
-  const invoiceLineId = relationId(hour, "invoiceline");
-  if (invoiceLineId !== null) {
-    return revenuePrices.invoiceLines.get(invoiceLineId) ?? 0;
-  }
-
-  const offerProjectLineId = relationId(hour, "offerprojectline");
-  if (offerProjectLineId !== null) {
-    return revenuePrices.offerProjectLines.get(offerProjectLineId) ?? 0;
-  }
-
-  return 0;
-}
-
-function netUnitPrice(line: JsonRecord) {
-  const invoiceBasis = stringFrom(readField(line, "invoicebasis"))?.toUpperCase();
-  if (invoiceBasis === "NONBILLABLE") {
+function revenueForHour(hour: JsonRecord, amount: number, revenuePrices: RevenuePriceSources, usageByLine: Map<string, number>) {
+  const source = revenueLineForHour(hour, revenuePrices);
+  if (!source || source.line.invoiceBasis === "NONBILLABLE") {
     return 0;
   }
 
+  const consumed = usageByLine.get(source.key) ?? 0;
+  usageByLine.set(source.key, consumed + amount);
+
+  if (source.line.invoiceBasis === "FIXED") {
+    if (source.line.maxAmount === null) {
+      return consumed === 0 ? source.line.netSellingPrice : 0;
+    }
+
+    const billableAmount = cappedLineAmount(amount, consumed, source.line.maxAmount);
+    return (source.line.netSellingPrice / source.line.maxAmount) * billableAmount;
+  }
+
+  const billableAmount = source.line.maxAmount === null ? amount : cappedLineAmount(amount, consumed, source.line.maxAmount);
+  return billableAmount * source.line.netSellingPrice;
+}
+
+function revenueLineForHour(hour: JsonRecord, revenuePrices: RevenuePriceSources) {
+  const offerProjectLineId = relationId(hour, "offerprojectline");
+  const offerProjectLine = offerProjectLineId !== null ? revenuePrices.offerProjectLines.get(offerProjectLineId) : undefined;
+  if (offerProjectLine && ["FIXED", "NONBILLABLE"].includes(offerProjectLine.invoiceBasis)) {
+    return { key: `offerprojectline:${offerProjectLineId}`, line: offerProjectLine };
+  }
+
+  const invoiceLineId = relationId(hour, "invoiceline");
+  const invoiceLine = invoiceLineId !== null ? revenuePrices.invoiceLines.get(invoiceLineId) : undefined;
+  if (invoiceLine) {
+    return { key: `invoiceline:${invoiceLineId}`, line: invoiceLine };
+  }
+
+  if (offerProjectLine) {
+    return { key: `offerprojectline:${offerProjectLineId}`, line: offerProjectLine };
+  }
+
+  return null;
+}
+
+function cappedLineAmount(amount: number, consumed: number, maxAmount: number) {
+  return Math.max(0, Math.min(amount, maxAmount - consumed));
+}
+
+function revenueLineFromRecord(line: JsonRecord): RevenueLine {
   const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
   const discount = Math.max(0, Math.min(100, numberFrom(readField(line, "discount")) ?? 0));
-  return sellingPrice * (1 - discount / 100);
+  const amount = numberFrom(readField(line, "amount"));
+
+  return {
+    invoiceBasis: stringFrom(readField(line, "invoicebasis"))?.toUpperCase() ?? "COSTING",
+    maxAmount: amount !== null && amount > 0 ? amount : null,
+    netSellingPrice: sellingPrice * (1 - discount / 100)
+  };
 }
 
 function getEmployeeSelection(employees: JsonRecord[], params: DashboardSearchParams) {
@@ -1074,9 +1118,14 @@ function createDemoHours(period: Period): JsonRecord[] {
 }
 
 function createDemoRevenuePrices(hours: JsonRecord[]): RevenuePriceSources {
-  const offerProjectLines = new Map<number, number>();
+  const offerProjectLines = new Map<number, RevenueLine>();
   uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
-    offerProjectLines.set(id, [95, 110, 125, 140][index % 4]);
+    const fixedFee = index % 4 === 0;
+    offerProjectLines.set(id, {
+      invoiceBasis: fixedFee ? "FIXED" : "COSTING",
+      maxAmount: [6, 8, 10, 12][index % 4],
+      netSellingPrice: fixedFee ? [850, 1250, 1650][index % 3] : [95, 110, 125, 140][index % 4]
+    });
   });
 
   return {
