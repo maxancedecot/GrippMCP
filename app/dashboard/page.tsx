@@ -81,9 +81,15 @@ type RevenueLine = {
   spentAmount: number | null;
 };
 
+type RevenueSummary = {
+  total: number;
+  byWeek: Map<string, number>;
+};
+
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
 const NORMAL_DAILY_HOURS = 8;
+const REVENUE_HOUR_MAX_PAGES = 40;
 const DEFAULT_EXCLUDED_DASHBOARD_EMPLOYEE_NAMES = new Set(["pieter", "maxance", "tom"]);
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
@@ -195,7 +201,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <article className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Omzet</p>
+              <p className="eyebrow">Algemene omzet</p>
               <h2>Opgebracht per week</h2>
             </div>
             <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
@@ -430,8 +436,8 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
       }
     }
 
-    const revenuePrices = await fetchRevenuePriceSources(client, hours);
-    const revenueBasisHours = needsFixedFeeFallbackHours(hours, revenuePrices) ? await fetchHoursForPeriod(client, effectivePeriod, []) : hours;
+    const revenueBasisHours = await fetchHoursForPeriod(client, effectivePeriod, [], REVENUE_HOUR_MAX_PAGES);
+    const revenuePrices = await fetchRevenuePriceSources(client, revenueBasisHours);
     const dashboard = buildDashboardData(
       hours,
       employeeSelection.includedEmployees,
@@ -492,8 +498,8 @@ async function fetchEmployeePages(client: GrippClient) {
   return records;
 }
 
-async function fetchHoursForPeriod(client: GrippClient, period: Period, employeeIds: number[]) {
-  return fetchHourPages(client, hourFilters(period, employeeIds));
+async function fetchHoursForPeriod(client: GrippClient, period: Period, employeeIds: number[], maxPages?: number) {
+  return fetchHourPages(client, hourFilters(period, employeeIds), [{ field: "hour.date", direction: "asc" }], maxPages);
 }
 
 async function fetchLatestHours(client: GrippClient, employeeIds: number[]) {
@@ -613,8 +619,7 @@ function buildDashboardData(
   const employeesById = new Map<number, JsonRecord>();
   const minimumWorkingHours = createMinimumWorkingHours(period);
   const employeeMap = new Map<string, EmployeeRow>();
-  const cappedRevenueUsageByLine = new Map<string, number>();
-  const fixedRevenueHoursByLine = fixedFeeHoursByLine(revenueBasisHours, revenuePrices);
+  const revenueSummary = buildRevenueSummary(revenueBasisHours, revenuePrices, period);
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -662,17 +667,13 @@ function buildDashboardData(
     const weekKey = weekKeyForDate(hourDate, period);
     const weekRow = weekMap.get(weekKey);
     const targetField = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID ? "internal" : "declarable";
-    const revenue =
-      targetField === "declarable" ? revenueForHour(hour, amount, revenuePrices, cappedRevenueUsageByLine, fixedRevenueHoursByLine) : 0;
 
     employeeRow[targetField] += amount;
-    employeeRow.revenue += revenue;
     employeeRow.written += amount;
     employeeMap.set(employeeKey, employeeRow);
 
     if (weekRow) {
       weekRow[targetField] += amount;
-      weekRow.revenue += revenue;
       weekRow.written += amount;
     }
   }
@@ -681,13 +682,17 @@ function buildDashboardData(
     .map(finalizeAggregate)
     .sort((left, right) => right.total - left.total || right.written - left.written);
 
+  addRevenueToWeeks(weekMap, revenueSummary.byWeek);
   const weekRows = Array.from(weekMap.values()).map(finalizeAggregate);
   const internalRows = employeeRows
     .filter((row) => row.internal > 0)
     .sort((left, right) => right.internal - left.internal)
     .slice(0, 8);
 
-  const teamTotals = sumAggregates(employeeRows);
+  const teamTotals = {
+    ...sumAggregates(employeeRows),
+    revenue: revenueSummary.total
+  };
 
   return {
     ...teamTotals,
@@ -717,6 +722,15 @@ function addWorkingHoursToWeeks(weekMap: Map<string, WeekRow>, workingHours: Wor
   }
 }
 
+function addRevenueToWeeks(weekMap: Map<string, WeekRow>, revenueByWeek: Map<string, number>) {
+  for (const [weekKey, revenue] of revenueByWeek) {
+    const weekRow = weekMap.get(weekKey);
+    if (weekRow) {
+      weekRow.revenue += revenue;
+    }
+  }
+}
+
 function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
   const byDate = new Map<string, number>();
   datesInPeriod(period).forEach((date) => {
@@ -729,6 +743,38 @@ function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
   return {
     total: sumValues(byDate),
     byDate
+  };
+}
+
+function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSources, period: Period): RevenueSummary {
+  const byWeek = new Map<string, number>();
+  const cappedRevenueUsageByLine = new Map<string, number>();
+  const fixedRevenueHoursByLine = fixedFeeHoursByLine(hours, revenuePrices);
+  let total = 0;
+
+  for (const hour of hours) {
+    if (relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID) {
+      continue;
+    }
+
+    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
+    if (amount === 0) {
+      continue;
+    }
+
+    const revenue = revenueForHour(hour, amount, revenuePrices, cappedRevenueUsageByLine, fixedRevenueHoursByLine);
+    if (revenue === 0) {
+      continue;
+    }
+
+    const weekKey = weekKeyForDate(dateKeyFromValue(readField(hour, "date")), period);
+    total += revenue;
+    byWeek.set(weekKey, (byWeek.get(weekKey) ?? 0) + revenue);
+  }
+
+  return {
+    total,
+    byWeek
   };
 }
 
@@ -799,13 +845,6 @@ function fixedFeeHoursByLine(hours: JsonRecord[], revenuePrices: RevenuePriceSou
   }
 
   return totals;
-}
-
-function needsFixedFeeFallbackHours(hours: JsonRecord[], revenuePrices: RevenuePriceSources) {
-  return hours.some((hour) => {
-    const source = revenueLineForHour(hour, revenuePrices);
-    return source?.line.invoiceBasis === "FIXED" && (source.line.spentAmount ?? 0) <= 0;
-  });
 }
 
 function revenueLineFromRecord(line: JsonRecord): RevenueLine {
