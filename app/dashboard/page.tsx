@@ -86,6 +86,8 @@ type RevenueSummary = {
   byWeek: Map<string, number>;
 };
 
+type DashboardTab = "declarability" | "revenue";
+
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
 const NORMAL_DAILY_HOURS = 8;
@@ -111,8 +113,9 @@ const currencyFormatter = new Intl.NumberFormat("nl-BE", {
 
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
+  const activeTab = getDashboardTab(params);
   const requestedPeriod = getPeriodFromParams(params);
-  const dashboard = await getDashboardData(requestedPeriod, params);
+  const dashboard = await getDashboardData(requestedPeriod, params, activeTab);
   const gaugeProgress = Math.max(0, Math.min(dashboard.declarability, 100));
   const maxWeeklyRevenue = Math.max(1, ...dashboard.weekRows.map((week) => week.revenue));
 
@@ -121,7 +124,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <header className="dashboard-header">
         <div>
           <p className="eyebrow">Gripp uren</p>
-          <h1>Declarabiliteit</h1>
+          <h1>{activeTab === "revenue" ? "Omzet" : "Declarabiliteit"}</h1>
         </div>
         <div className="header-meta">
           <span className={`source-badge source-badge--${dashboard.source.mode}`}>
@@ -134,8 +137,27 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
 
       {dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 
+      <nav className="dashboard-tabs" aria-label="Dashboard tabs">
+        <a className={`dashboard-tab ${activeTab === "declarability" ? "dashboard-tab--active" : ""}`} href={dashboardTabHref(params, "declarability")} aria-current={activeTab === "declarability" ? "page" : undefined}>
+          Declarabiliteit
+        </a>
+        <a className={`dashboard-tab ${activeTab === "revenue" ? "dashboard-tab--active" : ""}`} href={dashboardTabHref(params, "revenue")} aria-current={activeTab === "revenue" ? "page" : undefined}>
+          Omzet
+        </a>
+      </nav>
+
       <form className="period-form" action="/dashboard">
-        <input type="hidden" name="employeeFilter" value="1" />
+        {activeTab === "revenue" ? (
+          <>
+            <input type="hidden" name="tab" value="revenue" />
+            {firstParam(params.employeeFilter) === "1" ? <input type="hidden" name="employeeFilter" value="1" /> : null}
+            {paramValues(params.include).map((employeeId) => (
+              <input key={employeeId} type="hidden" name="include" value={employeeId} />
+            ))}
+          </>
+        ) : (
+          <input type="hidden" name="employeeFilter" value="1" />
+        )}
         <label>
           Van
           <input type="date" name="start" defaultValue={dashboard.period.start} />
@@ -145,7 +167,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <input type="date" name="end" defaultValue={dashboard.period.end} />
         </label>
         <button type="submit">Periode laden</button>
-        {dashboard.employeeFilters.length > 0 ? (
+        {activeTab === "declarability" && dashboard.employeeFilters.length > 0 ? (
           <fieldset className="employee-filter">
             <legend>Wel meerekenen</legend>
             <div className="employee-filter-list">
@@ -160,155 +182,161 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         ) : null}
       </form>
 
-      <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
-        <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
-        <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Niet geboekt op ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
-        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven 8u per werkdag" tone="overtime" />
-        <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
-      </section>
+      {activeTab === "declarability" ? (
+        <>
+          <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
+            <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
+            <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Niet geboekt op ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
+            <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven 8u per werkdag" tone="overtime" />
+            <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
+          </section>
 
-      <section className="dashboard-grid">
-        <article className="panel panel--distribution">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Verdeling</p>
-              <h2>Geschreven uren</h2>
+          <section className="dashboard-grid dashboard-grid--single">
+            <article className="panel panel--distribution">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Verdeling</p>
+                  <h2>Geschreven uren</h2>
+                </div>
+                <span className="panel-total">{formatOvertimeLabel(dashboard.overtime)}</span>
+              </div>
+
+              <div className="distribution-layout">
+                <div className="gauge" aria-label={`Declarabiliteit ${formatPercent(dashboard.declarability)} procent`}>
+                  <svg className="gauge-ring" viewBox="0 0 120 120" aria-hidden="true">
+                    <circle className="gauge-ring-track" cx="60" cy="60" r="52" pathLength={100} />
+                    <circle className="gauge-ring-fill" cx="60" cy="60" r="52" pathLength={100} strokeDasharray={`${gaugeProgress} ${100 - gaugeProgress}`} />
+                  </svg>
+                  <div className="gauge-inner">
+                    <strong>{formatPercent(dashboard.declarability)}%</strong>
+                    <span>declarabel</span>
+                  </div>
+                </div>
+
+                <dl className="legend-list">
+                  <LegendItem label="Declarabel" value={dashboard.declarable} className="legend-dot--good" />
+                  <LegendItem label={INTERNAL_PROJECT_LABEL} value={dashboard.internal} className="legend-dot--warning" />
+                  <LegendItem label="Niet geschreven" value={dashboard.untracked} className="legend-dot--neutral" />
+                  <LegendItem label="Overuren" value={dashboard.overtime} className="legend-dot--overtime" formatter={formatOvertimeLabel} />
+                </dl>
+              </div>
+            </article>
+          </section>
+
+          <section className="table-grid">
+            <article className="panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Team</p>
+                  <h2>Medewerkers</h2>
+                </div>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Medewerker</th>
+                      <th>Overuren</th>
+                      <th>Declarabel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboard.employeeRows.map((employee) => (
+                      <tr key={employee.id}>
+                        <td>
+                          <span className="row-title">{employee.name}</span>
+                          <span className="cell-muted">{formatHours(employee.written)} geschreven</span>
+                        </td>
+                        <td>{formatHours(employee.overtime)}</td>
+                        <td>
+                          <InlineBar aggregate={employee} />
+                          <span className="cell-muted">{formatPercent(employee.declarability)}%</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Intern</p>
+                  <h2>{INTERNAL_PROJECT_LABEL}</h2>
+                </div>
+              </div>
+
+              {dashboard.internalRows.length > 0 ? (
+                <div className="status-list">
+                  {dashboard.internalRows.map((employee) => (
+                    <StackedBar
+                      key={employee.id}
+                      label={employee.name}
+                      aggregate={employee}
+                      trailing={`${formatHours(employee.internal)} uur`}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-state">Geen uren op {INTERNAL_PROJECT_LABEL} gevonden in deze periode.</p>
+              )}
+            </article>
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Proxy</p>
+                <h2>Declarabiliteit</h2>
+              </div>
+              <span className="panel-total">Excl. {INTERNAL_PROJECT_LABEL} / voorziene uren</span>
             </div>
-            <span className="panel-total">{formatOvertimeLabel(dashboard.overtime)}</span>
-          </div>
 
-          <div className="distribution-layout">
-            <div className="gauge" aria-label={`Declarabiliteit ${formatPercent(dashboard.declarability)} procent`}>
-              <svg className="gauge-ring" viewBox="0 0 120 120" aria-hidden="true">
-                <circle className="gauge-ring-track" cx="60" cy="60" r="52" pathLength={100} />
-                <circle className="gauge-ring-fill" cx="60" cy="60" r="52" pathLength={100} strokeDasharray={`${gaugeProgress} ${100 - gaugeProgress}`} />
-              </svg>
-              <div className="gauge-inner">
-                <strong>{formatPercent(dashboard.declarability)}%</strong>
-                <span>declarabel</span>
+            <div className="project-line-list">
+              <div className="project-line-row">
+                <div>
+                  <span className="row-title">Teller</span>
+                  <span className="cell-muted">
+                    Geschreven uren exclusief {INTERNAL_PROJECT_LABEL} (project {INTERNAL_OFFERPROJECTBASE_ID})
+                  </span>
+                </div>
+                <div className="project-line-metrics">
+                  <span>{formatHours(dashboard.declarable)} uur</span>
+                </div>
+              </div>
+              <div className="project-line-row">
+                <div>
+                  <span className="row-title">Overuren</span>
+                  <span className="cell-muted">Totaal geschreven min 8u per werkdag per medewerker</span>
+                </div>
+                <div className="project-line-metrics">
+                  <span>{formatHours(dashboard.overtime)} uur</span>
+                </div>
               </div>
             </div>
-
-            <dl className="legend-list">
-              <LegendItem label="Declarabel" value={dashboard.declarable} className="legend-dot--good" />
-              <LegendItem label={INTERNAL_PROJECT_LABEL} value={dashboard.internal} className="legend-dot--warning" />
-              <LegendItem label="Niet geschreven" value={dashboard.untracked} className="legend-dot--neutral" />
-              <LegendItem label="Overuren" value={dashboard.overtime} className="legend-dot--overtime" formatter={formatOvertimeLabel} />
-            </dl>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Algemene omzet</p>
-              <h2>Opgebracht per week</h2>
+          </section>
+        </>
+      ) : (
+        <section className="dashboard-grid dashboard-grid--single">
+          <article className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Algemene omzet</p>
+                <h2>Opgebracht per week</h2>
+              </div>
+              <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
             </div>
-            <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
-          </div>
 
-          <div className="revenue-list">
-            {dashboard.weekRows.map((week) => (
-              <RevenueBar key={week.key} label={week.label} revenue={week.revenue} maxRevenue={maxWeeklyRevenue} />
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="table-grid">
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Team</p>
-              <h2>Medewerkers</h2>
-            </div>
-          </div>
-
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Medewerker</th>
-                  <th>Overuren</th>
-                  <th>Declarabel</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dashboard.employeeRows.map((employee) => (
-                  <tr key={employee.id}>
-                    <td>
-                      <span className="row-title">{employee.name}</span>
-                      <span className="cell-muted">{formatHours(employee.written)} geschreven</span>
-                    </td>
-                    <td>{formatHours(employee.overtime)}</td>
-                    <td>
-                      <InlineBar aggregate={employee} />
-                      <span className="cell-muted">{formatPercent(employee.declarability)}%</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Intern</p>
-              <h2>{INTERNAL_PROJECT_LABEL}</h2>
-            </div>
-          </div>
-
-          {dashboard.internalRows.length > 0 ? (
-            <div className="status-list">
-              {dashboard.internalRows.map((employee) => (
-                <StackedBar
-                  key={employee.id}
-                  label={employee.name}
-                  aggregate={employee}
-                  trailing={`${formatHours(employee.internal)} uur`}
-                />
+            <div className="revenue-list">
+              {dashboard.weekRows.map((week) => (
+                <RevenueBar key={week.key} label={week.label} revenue={week.revenue} maxRevenue={maxWeeklyRevenue} />
               ))}
             </div>
-          ) : (
-            <p className="empty-state">Geen uren op {INTERNAL_PROJECT_LABEL} gevonden in deze periode.</p>
-          )}
-        </article>
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Proxy</p>
-            <h2>Declarabiliteit</h2>
-          </div>
-          <span className="panel-total">Excl. {INTERNAL_PROJECT_LABEL} / voorziene uren</span>
-        </div>
-
-        <div className="project-line-list">
-          <div className="project-line-row">
-            <div>
-              <span className="row-title">Teller</span>
-              <span className="cell-muted">
-                Geschreven uren exclusief {INTERNAL_PROJECT_LABEL} (project {INTERNAL_OFFERPROJECTBASE_ID})
-              </span>
-            </div>
-            <div className="project-line-metrics">
-              <span>{formatHours(dashboard.declarable)} uur</span>
-            </div>
-          </div>
-          <div className="project-line-row">
-            <div>
-              <span className="row-title">Overuren</span>
-              <span className="cell-muted">Totaal geschreven min 8u per werkdag per medewerker</span>
-            </div>
-            <div className="project-line-metrics">
-              <span>{formatHours(dashboard.overtime)} uur</span>
-            </div>
-          </div>
-        </div>
-      </section>
+          </article>
+        </section>
+      )}
     </main>
   );
 }
@@ -399,18 +427,19 @@ function InlineBar({ aggregate }: { aggregate: Aggregate }) {
   );
 }
 
-async function getDashboardData(period: Period, params: DashboardSearchParams): Promise<DashboardData> {
+async function getDashboardData(period: Period, params: DashboardSearchParams, activeTab: DashboardTab): Promise<DashboardData> {
   if (!process.env.GRIPP_API_TOKEN) {
     const allEmployees = createDemoEmployees();
     const employeeSelection = getEmployeeSelection(allEmployees, params);
     const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
     const demoHours = createDemoHours(period);
     const hours = filterHoursByEmployeeIds(demoHours, employeeIds);
-    const revenuePrices = createDemoRevenuePrices(demoHours);
+    const revenueBasisHours = activeTab === "revenue" ? demoHours : [];
+    const revenuePrices = activeTab === "revenue" ? createDemoRevenuePrices(demoHours) : emptyRevenuePriceSources();
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-uren te tonen."
-    }, employeeSelection.options, revenuePrices, demoHours);
+    }, employeeSelection.options, revenuePrices, revenueBasisHours);
   }
 
   try {
@@ -436,8 +465,8 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
       }
     }
 
-    const revenueBasisHours = await fetchHoursForPeriod(client, effectivePeriod, [], REVENUE_HOUR_MAX_PAGES);
-    const revenuePrices = await fetchRevenuePriceSources(client, revenueBasisHours);
+    const revenueBasisHours = activeTab === "revenue" ? await fetchHoursForPeriod(client, effectivePeriod, [], REVENUE_HOUR_MAX_PAGES) : [];
+    const revenuePrices = activeTab === "revenue" ? await fetchRevenuePriceSources(client, revenueBasisHours) : emptyRevenuePriceSources();
     const dashboard = buildDashboardData(
       hours,
       employeeSelection.includedEmployees,
@@ -448,9 +477,9 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
       revenueBasisHours
     );
 
-    if (employeeIds.length === 0) {
+    if (activeTab === "declarability" && employeeIds.length === 0) {
       dashboard.source.message = "Geen medewerkers gevonden voor dit dashboard.";
-    } else if (hours.length === 0) {
+    } else if (activeTab === "declarability" && hours.length === 0) {
       dashboard.source.message = `Geen uren gevonden tussen ${formatDate(effectivePeriod.start)} en ${formatDate(effectivePeriod.end)}.`;
     }
 
@@ -461,11 +490,12 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
     const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
     const demoHours = createDemoHours(period);
     const hours = filterHoursByEmployeeIds(demoHours, employeeIds);
-    const revenuePrices = createDemoRevenuePrices(demoHours);
+    const revenueBasisHours = activeTab === "revenue" ? demoHours : [];
+    const revenuePrices = activeTab === "revenue" ? createDemoRevenuePrices(demoHours) : emptyRevenuePriceSources();
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-    }, employeeSelection.options, revenuePrices, demoHours);
+    }, employeeSelection.options, revenuePrices, revenueBasisHours);
   }
 }
 
@@ -1006,6 +1036,31 @@ function getCurrentMonthPeriod(): Period {
   };
 }
 
+function getDashboardTab(params: DashboardSearchParams): DashboardTab {
+  return firstParam(params.tab) === "revenue" ? "revenue" : "declarability";
+}
+
+function dashboardTabHref(params: DashboardSearchParams, tab: DashboardTab) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (key === "tab") {
+      continue;
+    }
+
+    for (const item of paramValues(value)) {
+      search.append(key, item);
+    }
+  }
+
+  if (tab === "revenue") {
+    search.set("tab", "revenue");
+  }
+
+  const query = search.toString();
+  return query ? `/dashboard?${query}` : "/dashboard";
+}
+
 function getPeriodFromParams(params: DashboardSearchParams): Period {
   const start = firstParam(params.start);
   const end = firstParam(params.end);
@@ -1228,6 +1283,13 @@ function createDemoRevenuePrices(hours: JsonRecord[]): RevenuePriceSources {
   return {
     invoiceLines: new Map(),
     offerProjectLines
+  };
+}
+
+function emptyRevenuePriceSources(): RevenuePriceSources {
+  return {
+    invoiceLines: new Map(),
+    offerProjectLines: new Map()
   };
 }
 
