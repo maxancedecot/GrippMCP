@@ -64,6 +64,7 @@ type WorkingHoursSummary = {
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
 const NORMAL_DAILY_HOURS = 8;
+const EXCLUDED_DASHBOARD_EMPLOYEE_NAMES = new Set(["pieter", "maxance", "tom"]);
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -346,14 +347,14 @@ async function getDashboardData(period: Period): Promise<DashboardData> {
     const client = new GrippClient();
     const employees = await fetchEmployees(client);
     const employeeIds = employees.map((employee) => idFrom(readField(employee, "id"))).filter((id): id is number => id !== null);
-    let hours = await fetchHoursForPeriod(client, period, employeeIds);
     let effectivePeriod = period;
     const source: DashboardSource = {
       mode: "live",
       message: ""
     };
+    let hours = employeeIds.length > 0 ? await fetchHoursForPeriod(client, period, employeeIds) : [];
 
-    if (hours.length === 0 && !period.isCustom) {
+    if (employeeIds.length > 0 && hours.length === 0 && !period.isCustom) {
       const latestHours = await fetchLatestHours(client, employeeIds);
       if (latestHours.length > 0) {
         effectivePeriod = periodFromHours(latestHours);
@@ -366,7 +367,9 @@ async function getDashboardData(period: Period): Promise<DashboardData> {
 
     const dashboard = buildDashboardData(hours, employees, effectivePeriod, source);
 
-    if (hours.length === 0) {
+    if (employeeIds.length === 0) {
+      dashboard.source.message = "Geen medewerkers gevonden voor dit dashboard.";
+    } else if (hours.length === 0) {
       dashboard.source.message = `Geen uren gevonden tussen ${formatDate(effectivePeriod.start)} en ${formatDate(effectivePeriod.end)}.`;
     }
 
@@ -382,7 +385,8 @@ async function getDashboardData(period: Period): Promise<DashboardData> {
 async function fetchEmployees(client: GrippClient) {
   const employees = await fetchEmployeePages(client);
   const activeEmployees = employees.filter((employee) => booleanFrom(readField(employee, "active")) !== false);
-  return activeEmployees.length > 0 ? activeEmployees : employees;
+  const visibleEmployees = activeEmployees.length > 0 ? activeEmployees : employees;
+  return visibleEmployees.filter((employee) => !isExcludedDashboardEmployee(employee));
 }
 
 async function fetchEmployeePages(client: GrippClient) {
@@ -596,6 +600,28 @@ function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undef
     stringFrom(readField(record, "email")) ||
     "Onbekende medewerker"
   );
+}
+
+function isExcludedDashboardEmployee(employee: JsonRecord) {
+  const nameValues = [
+    employeeName(undefined, employee),
+    stringFrom(readField(employee, "firstname")),
+    stringFrom(readField(employee, "screenname")),
+    stringFrom(readField(employee, "searchname")),
+    stringFrom(readField(employee, "displayvalue")),
+    stringFrom(readField(employee, "email"))
+  ];
+
+  return nameValues.some((value) => nameTokens(value).some((token) => EXCLUDED_DASHBOARD_EMPLOYEE_NAMES.has(token)));
+}
+
+function nameTokens(value: string | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
 }
 
 function finalizeAggregate<T extends Aggregate>(aggregate: T) {
