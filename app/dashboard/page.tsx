@@ -47,6 +47,12 @@ type WeekRow = Aggregate & {
   declarability: number;
 };
 
+type RevenueBucket = {
+  key: string;
+  label: string;
+  revenue: number;
+};
+
 type DashboardData = Aggregate & {
   period: Period;
   source: DashboardSource;
@@ -54,6 +60,7 @@ type DashboardData = Aggregate & {
   employeeFilters: EmployeeFilterOption[];
   employeeRows: EmployeeRow[];
   internalRows: EmployeeRow[];
+  revenueMonthRows: RevenueBucket[];
   weekRows: WeekRow[];
   lastUpdated: string;
 };
@@ -84,9 +91,11 @@ type RevenueLine = {
 type RevenueSummary = {
   total: number;
   byWeek: Map<string, number>;
+  byMonth: Map<string, number>;
 };
 
 type DashboardTab = "declarability" | "revenue";
+type RevenueView = "week" | "month";
 
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
@@ -114,10 +123,13 @@ const currencyFormatter = new Intl.NumberFormat("nl-BE", {
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
   const activeTab = getDashboardTab(params);
+  const activeRevenueView = getRevenueView(params);
   const requestedPeriod = getPeriodFromParams(params);
   const dashboard = await getDashboardData(requestedPeriod, params, activeTab);
   const gaugeProgress = Math.max(0, Math.min(dashboard.declarability, 100));
-  const maxWeeklyRevenue = Math.max(1, ...dashboard.weekRows.map((week) => week.revenue));
+  const revenueRows: RevenueBucket[] = activeRevenueView === "month" ? dashboard.revenueMonthRows : dashboard.weekRows;
+  const maxRevenue = Math.max(1, ...revenueRows.map((row) => row.revenue));
+  const revenueViewLabel = activeRevenueView === "month" ? "maand" : "week";
 
   return (
     <main className="dashboard-shell">
@@ -150,6 +162,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         {activeTab === "revenue" ? (
           <>
             <input type="hidden" name="tab" value="revenue" />
+            <input type="hidden" name="revenueView" value={activeRevenueView} />
             {firstParam(params.employeeFilter) === "1" ? <input type="hidden" name="employeeFilter" value="1" /> : null}
             {paramValues(params.include).map((employeeId) => (
               <input key={employeeId} type="hidden" name="include" value={employeeId} />
@@ -321,19 +334,25 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       ) : (
         <section className="dashboard-grid dashboard-grid--single">
           <article className="panel">
-            <div className="panel-heading">
+            <div className="panel-heading panel-heading--revenue">
               <div>
                 <p className="eyebrow">Algemene omzet</p>
-                <h2>Opgebracht per week</h2>
+                <h2>Opgebracht per {revenueViewLabel}</h2>
               </div>
-              <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
+              <div className="panel-actions">
+                <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
+                <nav className="view-switch" aria-label="Omzetweergave">
+                  <a className={activeRevenueView === "week" ? "view-switch__item view-switch__item--active" : "view-switch__item"} href={revenueViewHref(params, "week")} aria-current={activeRevenueView === "week" ? "page" : undefined}>
+                    Week
+                  </a>
+                  <a className={activeRevenueView === "month" ? "view-switch__item view-switch__item--active" : "view-switch__item"} href={revenueViewHref(params, "month")} aria-current={activeRevenueView === "month" ? "page" : undefined}>
+                    Maand
+                  </a>
+                </nav>
+              </div>
             </div>
 
-            <div className="revenue-list">
-              {dashboard.weekRows.map((week) => (
-                <RevenueBar key={week.key} label={week.label} revenue={week.revenue} maxRevenue={maxWeeklyRevenue} />
-              ))}
-            </div>
+            <RevenueChart rows={revenueRows} maxRevenue={maxRevenue} view={activeRevenueView} />
           </article>
         </section>
       )}
@@ -396,18 +415,25 @@ function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: 
   );
 }
 
-function RevenueBar({ label, revenue, maxRevenue }: { label: string; revenue: number; maxRevenue: number }) {
-  const width = Math.max(0, Math.min(100, percent(revenue, maxRevenue)));
+function RevenueChart({ rows, maxRevenue, view }: { rows: RevenueBucket[]; maxRevenue: number; view: RevenueView }) {
+  const label = view === "month" ? "maand" : "week";
 
   return (
-    <div className="revenue-row">
-      <div className="stack-label">
-        <span>{label}</span>
-        <span>{formatCurrency(revenue)}</span>
-      </div>
-      <div className="revenue-bar" aria-hidden="true">
-        <span style={{ width: `${width}%` }} />
-      </div>
+    <div className="revenue-chart" role="list" aria-label={`Omzet per ${label}`}>
+      {rows.map((row) => {
+        const height = row.revenue > 0 ? Math.max(3, cappedPercent(row.revenue, maxRevenue)) : 0;
+        const formattedRevenue = formatCurrency(row.revenue);
+
+        return (
+          <div className="revenue-chart-column" key={row.key} role="listitem" aria-label={`${row.label}: ${formattedRevenue}`}>
+            <span className="revenue-chart-value">{formattedRevenue}</span>
+            <div className="revenue-chart-track" aria-hidden="true">
+              <span style={{ height: `${height}%` }} />
+            </div>
+            <span className="revenue-chart-label">{row.label}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -716,6 +742,7 @@ function buildDashboardData(
 
   addRevenueToWeeks(weekMap, revenueSummary.byWeek);
   const weekRows = Array.from(weekMap.values()).map(finalizeAggregate);
+  const revenueMonthRows = createRevenueMonthRows(period, revenueSummary.byMonth);
   const internalRows = employeeRows
     .filter((row) => row.internal > 0)
     .sort((left, right) => right.internal - left.internal)
@@ -734,6 +761,7 @@ function buildDashboardData(
     employeeFilters,
     employeeRows,
     internalRows,
+    revenueMonthRows,
     weekRows,
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       day: "2-digit",
@@ -763,6 +791,13 @@ function addRevenueToWeeks(weekMap: Map<string, WeekRow>, revenueByWeek: Map<str
   }
 }
 
+function createRevenueMonthRows(period: Period, revenueByMonth: Map<string, number>): RevenueBucket[] {
+  return makeMonthBuckets(period).map((bucket) => ({
+    ...bucket,
+    revenue: revenueByMonth.get(bucket.key) ?? 0
+  }));
+}
+
 function createMinimumWorkingHours(period: Period, employeeSince?: string): WorkingHoursSummary {
   const byDate = new Map<string, number>();
   const minimumStart = employeeSince && employeeSince > period.start ? employeeSince : period.start;
@@ -790,6 +825,7 @@ function employeeStartDate(employee: JsonRecord | undefined) {
 
 function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSources, period: Period): RevenueSummary {
   const byWeek = new Map<string, number>();
+  const byMonth = new Map<string, number>();
   const hoursByLine = revenueHoursByLine(hours, revenuePrices);
   let total = 0;
 
@@ -799,7 +835,8 @@ function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSou
     }
 
     const weekKey = weekKeyForDateInPeriod(readField(hour, "date"), period);
-    if (!weekKey) {
+    const monthKey = monthKeyForDateInPeriod(readField(hour, "date"), period);
+    if (!weekKey || !monthKey) {
       continue;
     }
 
@@ -815,11 +852,13 @@ function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSou
 
     total += revenue;
     byWeek.set(weekKey, (byWeek.get(weekKey) ?? 0) + revenue);
+    byMonth.set(monthKey, (byMonth.get(monthKey) ?? 0) + revenue);
   }
 
   return {
     total,
-    byWeek
+    byWeek,
+    byMonth
   };
 }
 
@@ -1052,11 +1091,15 @@ function getDashboardTab(params: DashboardSearchParams): DashboardTab {
   return firstParam(params.tab) === "revenue" ? "revenue" : "declarability";
 }
 
+function getRevenueView(params: DashboardSearchParams): RevenueView {
+  return firstParam(params.revenueView) === "month" ? "month" : "week";
+}
+
 function dashboardTabHref(params: DashboardSearchParams, tab: DashboardTab) {
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
-    if (key === "tab") {
+    if (key === "tab" || key === "revenueView") {
       continue;
     }
 
@@ -1067,10 +1110,30 @@ function dashboardTabHref(params: DashboardSearchParams, tab: DashboardTab) {
 
   if (tab === "revenue") {
     search.set("tab", "revenue");
+    search.set("revenueView", getRevenueView(params));
   }
 
   const query = search.toString();
   return query ? `/dashboard?${query}` : "/dashboard";
+}
+
+function revenueViewHref(params: DashboardSearchParams, view: RevenueView) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (key === "tab" || key === "revenueView") {
+      continue;
+    }
+
+    for (const item of paramValues(value)) {
+      search.append(key, item);
+    }
+  }
+
+  search.set("tab", "revenue");
+  search.set("revenueView", view);
+
+  return `/dashboard?${search.toString()}`;
 }
 
 function getPeriodFromParams(params: DashboardSearchParams): Period {
@@ -1150,6 +1213,28 @@ function makeWeekBuckets(startDate: Date, endDate: Date, shortMonth: string) {
   return buckets;
 }
 
+function makeMonthBuckets(period: Period) {
+  const start = parseDateKey(period.start);
+  const end = parseDateKey(period.end);
+  if (!start || !end) {
+    return [];
+  }
+
+  const buckets: WeekBucket[] = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const stop = new Date(end.getFullYear(), end.getMonth(), 1);
+
+  while (cursor <= stop) {
+    buckets.push({
+      key: monthKey(cursor),
+      label: formatMonthBucketLabel(cursor)
+    });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return buckets;
+}
+
 function formatWeekBucketLabel(startDate: Date, endDate: Date, fallbackMonth: string) {
   if (startDate.getMonth() === endDate.getMonth() && startDate.getFullYear() === endDate.getFullYear()) {
     const month = new Intl.DateTimeFormat("nl-NL", { month: "short" }).format(startDate) || fallbackMonth;
@@ -1157,6 +1242,10 @@ function formatWeekBucketLabel(startDate: Date, endDate: Date, fallbackMonth: st
   }
 
   return `${formatShortDate(dateKey(startDate))} - ${formatShortDate(dateKey(endDate))}`;
+}
+
+function formatMonthBucketLabel(date: Date) {
+  return new Intl.DateTimeFormat("nl-NL", { month: "short", year: "numeric" }).format(date);
 }
 
 function startOfIsoWeek(date: Date) {
@@ -1186,6 +1275,18 @@ function weekKeyForDateInPeriod(value: unknown, period: Period) {
   }
 
   return weekKeyForParsedDate(date, period);
+}
+
+function monthKeyForDateInPeriod(value: unknown, period: Period) {
+  const normalizedValue = dateKeyFromValue(value);
+  const date = normalizedValue ? parseDateKey(normalizedValue) : null;
+  const periodStart = parseDateKey(period.start);
+  const periodEnd = parseDateKey(period.end);
+  if (!date || !periodStart || !periodEnd || date < periodStart || date > periodEnd) {
+    return null;
+  }
+
+  return monthKey(date);
 }
 
 function weekKeyForParsedDate(date: Date, period: Period) {
@@ -1225,6 +1326,12 @@ function dateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function monthKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
 }
 
 function dateKeyFromValue(value: unknown): string | undefined {
