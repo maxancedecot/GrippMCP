@@ -78,6 +78,7 @@ type RevenueLine = {
   invoiceBasis: string;
   maxAmount: number | null;
   netSellingPrice: number;
+  spentAmount: number | null;
 };
 
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
@@ -397,12 +398,13 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
     const allEmployees = createDemoEmployees();
     const employeeSelection = getEmployeeSelection(allEmployees, params);
     const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
-    const hours = filterHoursByEmployeeIds(createDemoHours(period), employeeIds);
-    const revenuePrices = createDemoRevenuePrices(hours);
+    const demoHours = createDemoHours(period);
+    const hours = filterHoursByEmployeeIds(demoHours, employeeIds);
+    const revenuePrices = createDemoRevenuePrices(demoHours);
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-uren te tonen."
-    }, employeeSelection.options, revenuePrices);
+    }, employeeSelection.options, revenuePrices, demoHours);
   }
 
   try {
@@ -429,7 +431,16 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
     }
 
     const revenuePrices = await fetchRevenuePriceSources(client, hours);
-    const dashboard = buildDashboardData(hours, employeeSelection.includedEmployees, effectivePeriod, source, employeeSelection.options, revenuePrices);
+    const revenueBasisHours = needsFixedFeeFallbackHours(hours, revenuePrices) ? await fetchHoursForPeriod(client, effectivePeriod, []) : hours;
+    const dashboard = buildDashboardData(
+      hours,
+      employeeSelection.includedEmployees,
+      effectivePeriod,
+      source,
+      employeeSelection.options,
+      revenuePrices,
+      revenueBasisHours
+    );
 
     if (employeeIds.length === 0) {
       dashboard.source.message = "Geen medewerkers gevonden voor dit dashboard.";
@@ -442,12 +453,13 @@ async function getDashboardData(period: Period, params: DashboardSearchParams): 
     const allEmployees = createDemoEmployees();
     const employeeSelection = getEmployeeSelection(allEmployees, params);
     const employeeIds = employeeIdsFromEmployees(employeeSelection.includedEmployees);
-    const hours = filterHoursByEmployeeIds(createDemoHours(period), employeeIds);
-    const revenuePrices = createDemoRevenuePrices(hours);
+    const demoHours = createDemoHours(period);
+    const hours = filterHoursByEmployeeIds(demoHours, employeeIds);
+    const revenuePrices = createDemoRevenuePrices(demoHours);
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-    }, employeeSelection.options, revenuePrices);
+    }, employeeSelection.options, revenuePrices, demoHours);
   }
 }
 
@@ -595,12 +607,14 @@ function buildDashboardData(
   period: Period,
   source: DashboardSource,
   employeeFilters: EmployeeFilterOption[],
-  revenuePrices: RevenuePriceSources
+  revenuePrices: RevenuePriceSources,
+  revenueBasisHours = hours
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
   const minimumWorkingHours = createMinimumWorkingHours(period);
   const employeeMap = new Map<string, EmployeeRow>();
-  const revenueUsageByLine = new Map<string, number>();
+  const cappedRevenueUsageByLine = new Map<string, number>();
+  const fixedRevenueHoursByLine = fixedFeeHoursByLine(revenueBasisHours, revenuePrices);
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -648,7 +662,8 @@ function buildDashboardData(
     const weekKey = weekKeyForDate(hourDate, period);
     const weekRow = weekMap.get(weekKey);
     const targetField = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID ? "internal" : "declarable";
-    const revenue = targetField === "declarable" ? revenueForHour(hour, amount, revenuePrices, revenueUsageByLine) : 0;
+    const revenue =
+      targetField === "declarable" ? revenueForHour(hour, amount, revenuePrices, cappedRevenueUsageByLine, fixedRevenueHoursByLine) : 0;
 
     employeeRow[targetField] += amount;
     employeeRow.revenue += revenue;
@@ -717,24 +732,25 @@ function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
   };
 }
 
-function revenueForHour(hour: JsonRecord, amount: number, revenuePrices: RevenuePriceSources, usageByLine: Map<string, number>) {
+function revenueForHour(
+  hour: JsonRecord,
+  amount: number,
+  revenuePrices: RevenuePriceSources,
+  usageByLine: Map<string, number>,
+  fixedHoursByLine: Map<string, number>
+) {
   const source = revenueLineForHour(hour, revenuePrices);
   if (!source || source.line.invoiceBasis === "NONBILLABLE") {
     return 0;
   }
 
-  const consumed = usageByLine.get(source.key) ?? 0;
-  usageByLine.set(source.key, consumed + amount);
-
   if (source.line.invoiceBasis === "FIXED") {
-    if (source.line.maxAmount === null) {
-      return consumed === 0 ? source.line.netSellingPrice : 0;
-    }
-
-    const billableAmount = cappedLineAmount(amount, consumed, source.line.maxAmount);
-    return (source.line.netSellingPrice / source.line.maxAmount) * billableAmount;
+    const spentAmount = Math.max(source.line.spentAmount ?? 0, fixedHoursByLine.get(source.key) ?? 0);
+    return spentAmount > 0 ? (source.line.netSellingPrice / spentAmount) * amount : 0;
   }
 
+  const consumed = usageByLine.get(source.key) ?? 0;
+  usageByLine.set(source.key, consumed + amount);
   const billableAmount = source.line.maxAmount === null ? amount : cappedLineAmount(amount, consumed, source.line.maxAmount);
   return billableAmount * source.line.netSellingPrice;
 }
@@ -763,15 +779,46 @@ function cappedLineAmount(amount: number, consumed: number, maxAmount: number) {
   return Math.max(0, Math.min(amount, maxAmount - consumed));
 }
 
+function fixedFeeHoursByLine(hours: JsonRecord[], revenuePrices: RevenuePriceSources) {
+  const totals = new Map<string, number>();
+
+  for (const hour of hours) {
+    if (relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID) {
+      continue;
+    }
+
+    const source = revenueLineForHour(hour, revenuePrices);
+    if (source?.line.invoiceBasis !== "FIXED") {
+      continue;
+    }
+
+    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
+    if (amount > 0) {
+      totals.set(source.key, (totals.get(source.key) ?? 0) + amount);
+    }
+  }
+
+  return totals;
+}
+
+function needsFixedFeeFallbackHours(hours: JsonRecord[], revenuePrices: RevenuePriceSources) {
+  return hours.some((hour) => {
+    const source = revenueLineForHour(hour, revenuePrices);
+    return source?.line.invoiceBasis === "FIXED" && (source.line.spentAmount ?? 0) <= 0;
+  });
+}
+
 function revenueLineFromRecord(line: JsonRecord): RevenueLine {
   const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
   const discount = Math.max(0, Math.min(100, numberFrom(readField(line, "discount")) ?? 0));
   const amount = numberFrom(readField(line, "amount"));
+  const spentAmount = numberFrom(readField(line, "amountwritten"));
 
   return {
     invoiceBasis: stringFrom(readField(line, "invoicebasis"))?.toUpperCase() ?? "COSTING",
     maxAmount: amount !== null && amount > 0 ? amount : null,
-    netSellingPrice: sellingPrice * (1 - discount / 100)
+    netSellingPrice: sellingPrice * (1 - discount / 100),
+    spentAmount: spentAmount !== null && spentAmount > 0 ? spentAmount : null
   };
 }
 
@@ -1119,12 +1166,23 @@ function createDemoHours(period: Period): JsonRecord[] {
 
 function createDemoRevenuePrices(hours: JsonRecord[]): RevenuePriceSources {
   const offerProjectLines = new Map<number, RevenueLine>();
+  const spentHoursByLine = new Map<number, number>();
+
+  for (const hour of hours) {
+    const offerProjectLineId = relationId(hour, "offerprojectline");
+    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
+    if (offerProjectLineId !== null && amount > 0) {
+      spentHoursByLine.set(offerProjectLineId, (spentHoursByLine.get(offerProjectLineId) ?? 0) + amount);
+    }
+  }
+
   uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
     const fixedFee = index % 4 === 0;
     offerProjectLines.set(id, {
       invoiceBasis: fixedFee ? "FIXED" : "COSTING",
       maxAmount: [6, 8, 10, 12][index % 4],
-      netSellingPrice: fixedFee ? [850, 1250, 1650][index % 3] : [95, 110, 125, 140][index % 4]
+      netSellingPrice: fixedFee ? [850, 1250, 1650][index % 3] : [95, 110, 125, 140][index % 4],
+      spentAmount: fixedFee ? spentHoursByLine.get(id) ?? null : null
     });
   });
 
