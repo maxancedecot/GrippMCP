@@ -373,39 +373,6 @@ select {
   gap: 10px;
 }
 
-.view-switch {
-  display: inline-flex;
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-strong);
-}
-
-.view-switch__item {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  color: var(--muted);
-  padding: 6px 10px;
-  font-size: 13px;
-  font-weight: 760;
-  text-decoration: none;
-}
-
-.view-switch__item:hover {
-  color: var(--ink);
-  background: var(--surface);
-}
-
-.view-switch__item--active,
-.view-switch__item--active:hover {
-  color: #ffffff;
-  background: var(--ink);
-}
-
 .distribution-layout {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -576,76 +543,52 @@ select {
   background: var(--neutral);
 }
 
-.revenue-bar {
-  width: 100%;
-  min-width: 120px;
-  height: 10px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface-strong);
-}
-
-.revenue-bar span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--blue);
-}
-
-.revenue-chart {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-  min-height: 258px;
+.revenue-line-chart {
   overflow-x: auto;
-  padding: 4px 2px 2px;
+  padding: 10px 0 2px;
 }
 
-.revenue-chart-column {
-  display: grid;
-  grid-template-rows: minmax(18px, auto) 190px minmax(32px, auto);
-  flex: 1 0 84px;
-  min-width: 84px;
-  gap: 8px;
-}
-
-.revenue-chart-value,
-.revenue-chart-label {
-  display: block;
-  text-align: center;
-}
-
-.revenue-chart-value {
-  align-self: end;
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 760;
-  white-space: nowrap;
-}
-
-.revenue-chart-track {
-  display: flex;
-  min-height: 190px;
-  align-items: flex-end;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-strong);
-}
-
-.revenue-chart-track span {
+.revenue-line-chart svg {
   display: block;
   width: 100%;
-  border-radius: 6px 6px 0 0;
-  background: var(--blue);
+  min-width: 640px;
+  height: auto;
 }
 
-.revenue-chart-label {
-  align-self: start;
+.revenue-line-grid,
+.revenue-line-axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.revenue-line-axis {
+  stroke: var(--muted);
+}
+
+.revenue-line-path {
+  fill: none;
+  stroke: var(--blue);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.revenue-line-point {
+  fill: var(--surface);
+  stroke: var(--blue);
+  stroke-width: 3;
+}
+
+.revenue-line-value {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.revenue-line-label {
+  fill: var(--muted);
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
 }
 
 .table-wrap {
@@ -797,8 +740,7 @@ td .inline-bar {
     flex-direction: column;
   }
 
-  .panel-actions,
-  .view-switch {
+  .panel-actions {
     width: 100%;
   }
 
@@ -806,12 +748,4 @@ td .inline-bar {
     justify-content: flex-start;
   }
 
-  .view-switch__item {
-    flex: 1;
-  }
-
-  .revenue-chart-column {
-    flex-basis: 76px;
-    min-width: 76px;
-  }
 }

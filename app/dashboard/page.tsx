@@ -83,7 +83,6 @@ type RevenueSummary = {
 };
 
 type DashboardTab = "declarability" | "revenue";
-type RevenueView = "week" | "month";
 
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
@@ -111,13 +110,9 @@ const currencyFormatter = new Intl.NumberFormat("nl-BE", {
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
   const activeTab = getDashboardTab(params);
-  const activeRevenueView = getRevenueView(params);
   const requestedPeriod = getPeriodFromParams(params);
   const dashboard = await getDashboardData(requestedPeriod, params, activeTab);
   const gaugeProgress = Math.max(0, Math.min(dashboard.declarability, 100));
-  const revenueRows: RevenueBucket[] = activeRevenueView === "month" ? dashboard.revenueMonthRows : dashboard.weekRows;
-  const maxRevenue = Math.max(1, ...revenueRows.map((row) => row.revenue));
-  const revenueViewLabel = activeRevenueView === "month" ? "maand" : "week";
 
   return (
     <main className="dashboard-shell">
@@ -150,7 +145,6 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         {activeTab === "revenue" ? (
           <>
             <input type="hidden" name="tab" value="revenue" />
-            <input type="hidden" name="revenueView" value={activeRevenueView} />
             {firstParam(params.employeeFilter) === "1" ? <input type="hidden" name="employeeFilter" value="1" /> : null}
             {paramValues(params.include).map((employeeId) => (
               <input key={employeeId} type="hidden" name="include" value={employeeId} />
@@ -325,22 +319,14 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <div className="panel-heading panel-heading--revenue">
               <div>
                 <p className="eyebrow">Omzet draaitabel</p>
-                <h2>Omzet per {revenueViewLabel}</h2>
+                <h2>Omzet per maand</h2>
               </div>
               <div className="panel-actions">
                 <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
-                <nav className="view-switch" aria-label="Omzetweergave">
-                  <a className={activeRevenueView === "week" ? "view-switch__item view-switch__item--active" : "view-switch__item"} href={revenueViewHref(params, "week")} aria-current={activeRevenueView === "week" ? "page" : undefined}>
-                    Week
-                  </a>
-                  <a className={activeRevenueView === "month" ? "view-switch__item view-switch__item--active" : "view-switch__item"} href={revenueViewHref(params, "month")} aria-current={activeRevenueView === "month" ? "page" : undefined}>
-                    Maand
-                  </a>
-                </nav>
               </div>
             </div>
 
-            <RevenueChart rows={revenueRows} maxRevenue={maxRevenue} view={activeRevenueView} />
+            <RevenueLineChart rows={dashboard.revenueMonthRows} />
           </article>
         </section>
       )}
@@ -403,25 +389,46 @@ function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: 
   );
 }
 
-function RevenueChart({ rows, maxRevenue, view }: { rows: RevenueBucket[]; maxRevenue: number; view: RevenueView }) {
-  const label = view === "month" ? "maand" : "week";
+function RevenueLineChart({ rows }: { rows: RevenueBucket[] }) {
+  const width = Math.max(640, rows.length * 120);
+  const height = 320;
+  const padding = { top: 42, right: 56, bottom: 62, left: 56 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const maximum = Math.max(0, ...rows.map((row) => row.revenue));
+  const minimum = Math.min(0, ...rows.map((row) => row.revenue));
+  const range = Math.max(1, maximum - minimum);
+  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
+  const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
+  const points = rows.map((row, index) => `${xFor(index)},${yFor(row.revenue)}`).join(" ");
+  const zeroY = yFor(0);
 
   return (
-    <div className="revenue-chart" role="list" aria-label={`Omzet per ${label}`}>
-      {rows.map((row) => {
-        const height = row.revenue > 0 ? Math.max(3, cappedPercent(row.revenue, maxRevenue)) : 0;
-        const formattedRevenue = formatCurrency(row.revenue);
+    <div className="revenue-line-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} ${formatCurrency(row.revenue)}`).join(", ")}`}
+      >
+        <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
+        <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
+        {rows.length > 1 ? <polyline className="revenue-line-path" points={points} /> : null}
+        {rows.map((row, index) => {
+          const x = xFor(index);
+          const y = yFor(row.revenue);
+          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+          const valueY = y < padding.top + 24 ? y + 22 : y - 12;
 
-        return (
-          <div className="revenue-chart-column" key={row.key} role="listitem" aria-label={`${row.label}: ${formattedRevenue}`}>
-            <span className="revenue-chart-value">{formattedRevenue}</span>
-            <div className="revenue-chart-track" aria-hidden="true">
-              <span style={{ height: `${height}%` }} />
-            </div>
-            <span className="revenue-chart-label">{row.label}</span>
-          </div>
-        );
-      })}
+          return (
+            <g key={row.key}>
+              <title>{`${row.label}: ${formatCurrency(row.revenue)}`}</title>
+              <circle className="revenue-line-point" cx={x} cy={y} r="5" />
+              <text className="revenue-line-value" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
+              <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
@@ -962,10 +969,6 @@ function getDashboardTab(params: DashboardSearchParams): DashboardTab {
   return firstParam(params.tab) === "revenue" ? "revenue" : "declarability";
 }
 
-function getRevenueView(params: DashboardSearchParams): RevenueView {
-  return firstParam(params.revenueView) === "month" ? "month" : "week";
-}
-
 function dashboardTabHref(params: DashboardSearchParams, tab: DashboardTab) {
   const search = new URLSearchParams();
 
@@ -981,30 +984,10 @@ function dashboardTabHref(params: DashboardSearchParams, tab: DashboardTab) {
 
   if (tab === "revenue") {
     search.set("tab", "revenue");
-    search.set("revenueView", getRevenueView(params));
   }
 
   const query = search.toString();
   return query ? `/dashboard?${query}` : "/dashboard";
-}
-
-function revenueViewHref(params: DashboardSearchParams, view: RevenueView) {
-  const search = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (key === "tab" || key === "revenueView") {
-      continue;
-    }
-
-    for (const item of paramValues(value)) {
-      search.append(key, item);
-    }
-  }
-
-  search.set("tab", "revenue");
-  search.set("revenueView", view);
-
-  return `/dashboard?${search.toString()}`;
 }
 
 function getPeriodFromParams(params: DashboardSearchParams): Period {
