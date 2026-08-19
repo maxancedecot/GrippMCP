@@ -76,6 +76,10 @@ type WorkingHoursSummary = {
   byDate: Map<string, number>;
 };
 
+type BillabilitySources = {
+  offerProjectLineInvoiceBasis: Map<number, string>;
+};
+
 type RevenueSummary = {
   total: number;
   byWeek: Map<string, number>;
@@ -181,7 +185,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <>
           <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
             <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / geschreven uren" tone="good" />
-            <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Uren buiten ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
+            <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail="Uren op declarabele opdrachtregels" tone="blue" />
             <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven 8u per werkdag vanaf startdatum" tone="overtime" />
             <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
           </section>
@@ -190,8 +194,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <article className="panel panel--distribution">
               <div className="panel-heading">
                 <div>
-                  <p className="eyebrow">Verdeling</p>
-                  <h2>Geschreven uren</h2>
+                  <p className="eyebrow">Uren</p>
+                  <h2>Declarabiliteit</h2>
                 </div>
                 <span className="panel-total">{formatOvertimeLabel(dashboard.overtime)}</span>
               </div>
@@ -210,8 +214,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
 
                 <dl className="legend-list">
                   <LegendItem label="Declarabel" value={dashboard.declarable} className="legend-dot--good" />
+                  <LegendItem label="Niet declarabel" value={Math.max(0, dashboard.written - dashboard.declarable)} className="legend-dot--neutral" />
                   <LegendItem label={INTERNAL_PROJECT_LABEL} value={dashboard.internal} className="legend-dot--warning" />
-                  <LegendItem label="Niet geschreven" value={dashboard.untracked} className="legend-dot--neutral" />
                   <LegendItem label="Overuren" value={dashboard.overtime} className="legend-dot--overtime" formatter={formatOvertimeLabel} />
                 </dl>
               </div>
@@ -286,7 +290,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
                 <p className="eyebrow">Berekening</p>
                 <h2>Declarabiliteit</h2>
               </div>
-              <span className="panel-total">Excl. {INTERNAL_PROJECT_LABEL} / geschreven uren</span>
+              <span className="panel-total">Declarabele opdrachtregels / geschreven uren</span>
             </div>
 
             <div className="project-line-list">
@@ -294,7 +298,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
                 <div>
                   <span className="row-title">Teller</span>
                   <span className="cell-muted">
-                    Geschreven uren exclusief {INTERNAL_PROJECT_LABEL} (project {INTERNAL_OFFERPROJECTBASE_ID})
+                    Uren op opdrachtregels met een declarabele facturatiebasis
                   </span>
                 </div>
                 <div className="project-line-metrics">
@@ -392,7 +396,7 @@ function StackedBar({ label, aggregate, trailing }: { label: string; aggregate: 
         <span>{label}</span>
         <span>{trailing}</span>
       </div>
-      <InlineBar aggregate={aggregate} />
+      <InternalBar aggregate={aggregate} />
       <span className="cell-muted">{formatOvertimeLabel(aggregate.overtime)}</span>
     </div>
   );
@@ -445,14 +449,25 @@ function RevenueLineChart({ rows }: { rows: RevenueBucket[] }) {
 function InlineBar({ aggregate }: { aggregate: Aggregate }) {
   const denominator = Math.max(aggregate.written, 1);
   const declarableWidth = cappedPercent(aggregate.declarable, denominator);
-  const internalWidth = cappedPercent(aggregate.internal, denominator);
-  const untrackedWidth = Math.max(0, 100 - declarableWidth - internalWidth);
+  const nonDeclarableWidth = Math.max(0, 100 - declarableWidth);
 
   return (
     <div className="inline-bar" aria-hidden="true">
       <span className="bar-segment bar-segment--good" style={{ width: `${declarableWidth}%` }} />
+      <span className="bar-segment bar-segment--neutral" style={{ width: `${nonDeclarableWidth}%` }} />
+    </div>
+  );
+}
+
+function InternalBar({ aggregate }: { aggregate: Aggregate }) {
+  const denominator = Math.max(aggregate.written, 1);
+  const internalWidth = cappedPercent(aggregate.internal, denominator);
+  const externalWidth = Math.max(0, 100 - internalWidth);
+
+  return (
+    <div className="inline-bar" aria-hidden="true">
       <span className="bar-segment bar-segment--warning" style={{ width: `${internalWidth}%` }} />
-      <span className="bar-segment bar-segment--neutral" style={{ width: `${untrackedWidth}%` }} />
+      <span className="bar-segment bar-segment--neutral" style={{ width: `${externalWidth}%` }} />
     </div>
   );
 }
@@ -468,7 +483,7 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-uren te tonen."
-    }, employeeSelection.options, revenueSummary);
+    }, employeeSelection.options, revenueSummary, createDemoBillabilitySources(demoHours));
   }
 
   try {
@@ -497,13 +512,17 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
     const revenueSummary = activeTab === "revenue"
       ? buildRevenueSummary(await fetchInvoicesForPeriod(client, effectivePeriod), effectivePeriod)
       : emptyRevenueSummary();
+    const billabilitySources = activeTab === "declarability"
+      ? await fetchBillabilitySources(client, hours)
+      : emptyBillabilitySources();
     const dashboard = buildDashboardData(
       hours,
       employeeSelection.includedEmployees,
       effectivePeriod,
       source,
       employeeSelection.options,
-      revenueSummary
+      revenueSummary,
+      billabilitySources
     );
 
     if (activeTab === "declarability" && employeeIds.length === 0) {
@@ -523,7 +542,7 @@ async function getDashboardData(period: Period, params: DashboardSearchParams, a
     return buildDashboardData(hours, employeeSelection.includedEmployees, period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-    }, employeeSelection.options, revenueSummary);
+    }, employeeSelection.options, revenueSummary, createDemoBillabilitySources(demoHours));
   }
 }
 
@@ -558,6 +577,55 @@ async function fetchEmployeePages(client: GrippClient) {
 
 async function fetchHoursForPeriod(client: GrippClient, period: Period, employeeIds: number[], maxPages?: number) {
   return fetchHourPages(client, hourFilters(period, employeeIds), [{ field: "hour.date", direction: "asc" }], maxPages);
+}
+
+async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[]): Promise<BillabilitySources> {
+  const invoiceBases = new Map<number, string>();
+  const offerProjectLineIds = uniqueRelationIds(hours, "offerprojectline");
+
+  for (let index = 0; index < offerProjectLineIds.length; index += 100) {
+    const idChunk = offerProjectLineIds.slice(index, index + 100);
+    const result = await client.call("offerprojectline.get", [
+      [{ field: "offerprojectline.id", operator: "in", value: idChunk }],
+      {
+        paging: { firstresult: 0, maxresults: 250 },
+        orderings: [{ field: "offerprojectline.id", direction: "asc" }]
+      }
+    ] as JsonValue[]);
+
+    for (const offerProjectLine of asRecords(result)) {
+      const id = idFrom(readField(offerProjectLine, "id"));
+      const invoiceBasis = stringFrom(readField(offerProjectLine, "invoicebasis"))?.toUpperCase();
+      if (id !== null && invoiceBasis) {
+        invoiceBases.set(id, invoiceBasis);
+      }
+    }
+  }
+
+  return { offerProjectLineInvoiceBasis: invoiceBases };
+}
+
+function uniqueRelationIds(records: JsonRecord[], field: string) {
+  return Array.from(
+    new Set(
+      records
+        .map((record) => relationId(record, field))
+        .filter((id): id is number => id !== null)
+    )
+  );
+}
+
+function isDeclarableHour(hour: JsonRecord, billabilitySources: BillabilitySources) {
+  const offerProjectLineId = relationId(hour, "offerprojectline");
+  const invoiceBasis = offerProjectLineId === null
+    ? undefined
+    : billabilitySources.offerProjectLineInvoiceBasis.get(offerProjectLineId);
+
+  if (invoiceBasis) {
+    return invoiceBasis !== "NONBILLABLE";
+  }
+
+  return relationId(hour, "offerprojectbase") !== INTERNAL_OFFERPROJECTBASE_ID;
 }
 
 async function fetchLatestHours(client: GrippClient, employeeIds: number[]) {
@@ -640,7 +708,8 @@ function buildDashboardData(
   period: Period,
   source: DashboardSource,
   employeeFilters: EmployeeFilterOption[],
-  revenueSummary: RevenueSummary
+  revenueSummary: RevenueSummary,
+  billabilitySources: BillabilitySources
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
   const employeeMap = new Map<string, EmployeeRow>();
@@ -693,14 +762,25 @@ function buildDashboardData(
     }
     const weekKey = weekKeyForDate(hourDate, period);
     const weekRow = weekMap.get(weekKey);
-    const targetField = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID ? "internal" : "declarable";
+    const isInternal = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID;
+    const isDeclarable = isDeclarableHour(hour, billabilitySources);
 
-    employeeRow[targetField] += amount;
+    if (isDeclarable) {
+      employeeRow.declarable += amount;
+    }
+    if (isInternal) {
+      employeeRow.internal += amount;
+    }
     employeeRow.written += amount;
     employeeMap.set(employeeKey, employeeRow);
 
     if (weekRow) {
-      weekRow[targetField] += amount;
+      if (isDeclarable) {
+        weekRow.declarable += amount;
+      }
+      if (isInternal) {
+        weekRow.internal += amount;
+      }
       weekRow.written += amount;
     }
   }
@@ -827,6 +907,10 @@ function emptyRevenueSummary(): RevenueSummary {
     byWeek: new Map(),
     byMonth: new Map()
   };
+}
+
+function emptyBillabilitySources(): BillabilitySources {
+  return { offerProjectLineInvoiceBasis: new Map() };
 }
 
 function getEmployeeSelection(employees: JsonRecord[], params: DashboardSearchParams) {
@@ -1282,6 +1366,16 @@ function createDemoHours(period: Period): JsonRecord[] {
       }
     ];
   });
+}
+
+function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
+  const offerProjectLineInvoiceBasis = new Map<number, string>();
+
+  uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
+    offerProjectLineInvoiceBasis.set(id, index % 6 === 0 ? "NONBILLABLE" : "COSTING");
+  });
+
+  return { offerProjectLineInvoiceBasis };
 }
 
 function demoDatesInPeriod(period: Period, count: number) {
