@@ -63,6 +63,7 @@ type WorkingHoursSummary = {
 
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
+const NORMAL_DAILY_HOURS = 8;
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -113,7 +114,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
         <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Niet geboekt op ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
-        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven minimum" tone="overtime" />
+        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven 8u per werkdag" tone="overtime" />
         <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -250,7 +251,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="project-line-row">
             <div>
               <span className="row-title">Overuren</span>
-              <span className="cell-muted">Totaal geschreven min minimum te presteren uren</span>
+              <span className="cell-muted">Totaal geschreven min 8u per werkdag per medewerker</span>
             </div>
             <div className="project-line-metrics">
               <span>{formatHours(dashboard.overtime)} uur</span>
@@ -335,7 +336,7 @@ function InlineBar({ aggregate }: { aggregate: Aggregate }) {
 async function getDashboardData(period: Period): Promise<DashboardData> {
   if (!process.env.GRIPP_API_TOKEN) {
     const employees = createDemoEmployees();
-    return buildDashboardData(createDemoHours(period), employees, createDemoWorkingHours(employees, period), period, {
+    return buildDashboardData(createDemoHours(period), employees, period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-uren te tonen."
     });
@@ -363,20 +364,15 @@ async function getDashboardData(period: Period): Promise<DashboardData> {
       }
     }
 
-    const workingHoursByEmployee = await fetchWorkingHoursByEmployee(client, employeeIds, effectivePeriod);
-    const dashboard = buildDashboardData(hours, employees, workingHoursByEmployee, effectivePeriod, source);
+    const dashboard = buildDashboardData(hours, employees, effectivePeriod, source);
 
-    if (dashboard.total === 0 && dashboard.written > 0) {
-      dashboard.source.message = [dashboard.source.message, "De voorziene uren konden niet worden bepaald en zijn 0."]
-        .filter(Boolean)
-        .join(" ");
-    } else if (hours.length === 0) {
+    if (hours.length === 0) {
       dashboard.source.message = `Geen uren gevonden tussen ${formatDate(effectivePeriod.start)} en ${formatDate(effectivePeriod.end)}.`;
     }
 
     return dashboard;
   } catch (error) {
-    return buildDashboardData(createDemoHours(period), createDemoEmployees(), createDemoWorkingHours(createDemoEmployees(), period), period, {
+    return buildDashboardData(createDemoHours(period), createDemoEmployees(), period, {
       mode: "demo",
       message: `Live data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
     });
@@ -463,38 +459,24 @@ function hourFilters(period: Period, employeeIds: number[]) {
   return filters;
 }
 
-async function fetchWorkingHoursByEmployee(client: GrippClient, employeeIds: number[], period: Period) {
-  const summaries = new Map<number, WorkingHoursSummary>();
-
-  for (const employeeChunk of chunk(employeeIds, 25)) {
-    const results = await client.batch(
-      employeeChunk.map((employeeId) => ({
-        method: "employee.getWorkingHours",
-        params: [[employeeId], period.start, period.end, true] as JsonValue[]
-      }))
-    );
-
-    employeeChunk.forEach((employeeId, index) => {
-      summaries.set(employeeId, normalizeWorkingHours(parseWorkingHours(results[index]), period));
-    });
-  }
-
-  return summaries;
-}
-
 function buildDashboardData(
   hours: JsonRecord[],
   employees: JsonRecord[],
-  workingHoursByEmployee: Map<number, WorkingHoursSummary>,
   period: Period,
   source: DashboardSource
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
   const totals = emptyAggregate();
+  const minimumWorkingHours = createMinimumWorkingHours(period);
   const employeeMap = new Map<string, EmployeeRow>();
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
+  const assignMinimumHours = (employeeRow: EmployeeRow) => {
+    employeeRow.total = minimumWorkingHours.total;
+    totals.total += minimumWorkingHours.total;
+    addWorkingHoursToWeeks(weekMap, minimumWorkingHours, period);
+  };
 
   for (const employee of employees) {
     const employeeId = idFrom(readField(employee, "id"));
@@ -503,16 +485,13 @@ function buildDashboardData(
     }
 
     employeesById.set(employeeId, employee);
-    const workingHours = workingHoursByEmployee.get(employeeId) ?? emptyWorkingHours();
     const employeeRow = withDeclarability({
       ...emptyAggregate(),
       id: String(employeeId),
       name: employeeName(undefined, employee)
     });
 
-    employeeRow.total = workingHours.total;
-    totals.total += workingHours.total;
-    addWorkingHoursToWeeks(weekMap, workingHours, period);
+    assignMinimumHours(employeeRow);
     employeeMap.set(employeeRow.id, employeeRow);
   }
 
@@ -525,13 +504,16 @@ function buildDashboardData(
     const employeeId = relationId(hour, "employee");
     const employeeKey = employeeId !== null ? String(employeeId) : "unknown";
     const hourDate = dateKeyFromValue(readField(hour, "date"));
-    const employeeRow =
-      employeeMap.get(employeeKey) ??
-      withDeclarability({
+    let employeeRow = employeeMap.get(employeeKey);
+    if (!employeeRow) {
+      employeeRow = withDeclarability({
         ...emptyAggregate(),
         id: employeeKey,
         name: employeeName(hour, employeeId !== null ? employeesById.get(employeeId) : undefined)
       });
+      assignMinimumHours(employeeRow);
+      employeeMap.set(employeeKey, employeeRow);
+    }
     const weekKey = weekKeyForDate(hourDate, period);
     const weekRow = weekMap.get(weekKey);
     const targetField = relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID ? "internal" : "declarable";
@@ -590,91 +572,19 @@ function addWorkingHoursToWeeks(weekMap: Map<string, WeekRow>, workingHours: Wor
   }
 }
 
-function parseWorkingHours(value: JsonValue): WorkingHoursSummary {
+function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
   const byDate = new Map<string, number>();
-  collectWorkingHoursByDate(value, byDate);
+  datesInPeriod(period).forEach((date) => {
+    const day = parseDateKey(date)?.getDay();
+    if (day !== 0 && day !== 6) {
+      byDate.set(date, NORMAL_DAILY_HOURS);
+    }
+  });
 
   return {
-    total: extractWorkingHoursTotal(value) ?? sumValues(byDate),
+    total: sumValues(byDate),
     byDate
   };
-}
-
-function normalizeWorkingHours(summary: WorkingHoursSummary, period: Period) {
-  if (summary.byDate.size > 0 || summary.total <= 0) {
-    return summary;
-  }
-
-  return {
-    total: summary.total,
-    byDate: distributeHoursAcrossWeekdays(summary.total, period)
-  };
-}
-
-function collectWorkingHoursByDate(value: unknown, byDate: Map<string, number>) {
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectWorkingHoursByDate(item, byDate));
-    return;
-  }
-
-  const record = asRecord(value);
-  if (!record) {
-    return;
-  }
-
-  const date = stringFrom(record.date ?? record.day ?? record.datum);
-  const amount = firstNumber(record.hours, record.hour, record.amount, record.workinghours, record.workingHours, record.total, record.value);
-  if (isDateKey(date) && amount !== null) {
-    byDate.set(date, (byDate.get(date) ?? 0) + amount);
-  }
-
-  Object.values(record).forEach((nested) => collectWorkingHoursByDate(nested, byDate));
-}
-
-function extractWorkingHoursTotal(value: unknown): number | null {
-  if (typeof value === "number" || typeof value === "string") {
-    return numberFrom(value);
-  }
-
-  if (Array.isArray(value)) {
-    const first = value[0];
-    const firstTotal = extractWorkingHoursTotal(first);
-    if (firstTotal !== null) {
-      return firstTotal;
-    }
-
-    return null;
-  }
-
-  const record = asRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  return firstNumber(
-    record.total,
-    record.totalhours,
-    record.totalHours,
-    record.workinghours,
-    record.workingHours,
-    record.available,
-    record.sum
-  );
-}
-
-function distributeHoursAcrossWeekdays(total: number, period: Period) {
-  const dates = datesInPeriod(period).filter((date) => {
-    const day = parseDateKey(date)?.getDay();
-    return day !== 0 && day !== 6;
-  });
-  const byDate = new Map<string, number>();
-  if (dates.length === 0) {
-    return byDate;
-  }
-
-  const perDay = total / dates.length;
-  dates.forEach((date) => byDate.set(date, perDay));
-  return byDate;
 }
 
 function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undefined) {
@@ -718,13 +628,6 @@ function emptyAggregate(): Aggregate {
     overtime: 0,
     total: 0,
     written: 0
-  };
-}
-
-function emptyWorkingHours(): WorkingHoursSummary {
-  return {
-    total: 0,
-    byDate: new Map()
   };
 }
 
@@ -913,21 +816,6 @@ function createDemoEmployees(): JsonRecord[] {
   ];
 }
 
-function createDemoWorkingHours(employees: JsonRecord[], period: Period) {
-  const workingHours = new Map<number, WorkingHoursSummary>();
-  employees.forEach((employee, index) => {
-    const id = idFrom(readField(employee, "id"));
-    if (id !== null) {
-      const total = [88, 92, 84, 80][index] ?? 80;
-      workingHours.set(id, {
-        total,
-        byDate: distributeHoursAcrossWeekdays(total, period)
-      });
-    }
-  });
-  return workingHours;
-}
-
 function createDemoHours(period: Period): JsonRecord[] {
   const days = [2, 4, 7, 9, 12, 15, 18, 21, 23, 26, 28];
   return days.flatMap((day, index) => {
@@ -1043,16 +931,6 @@ function numberFrom(value: unknown): number | null {
   return null;
 }
 
-function firstNumber(...values: unknown[]) {
-  for (const value of values) {
-    const number = numberFrom(value);
-    if (number !== null) {
-      return number;
-    }
-  }
-  return null;
-}
-
 function booleanFrom(value: unknown): boolean | undefined {
   const scalar = scalarFrom(value);
   if (typeof scalar === "boolean") {
@@ -1116,14 +994,6 @@ function normalizeNumberString(value: string) {
 
 function sumValues(values: Map<string, number>) {
   return Array.from(values.values()).reduce((total, value) => total + value, 0);
-}
-
-function chunk<T>(items: T[], size: number) {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
 }
 
 function percent(value: number, total: number) {
