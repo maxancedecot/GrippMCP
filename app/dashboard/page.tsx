@@ -63,7 +63,6 @@ type WorkingHoursSummary = {
 
 const INTERNAL_OFFERPROJECTBASE_ID = 318;
 const INTERNAL_PROJECT_LABEL = "Ledoux intern";
-const NORMAL_DAILY_HOURS = 8;
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -114,7 +113,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
         <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
         <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Niet geboekt op ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
-        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Boven 40u per kalenderweek" tone="overtime" />
+        <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven minimum" tone="overtime" />
         <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
       </section>
 
@@ -251,7 +250,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="project-line-row">
             <div>
               <span className="row-title">Overuren</span>
-              <span className="cell-muted">Som van kalenderweken boven 40u</span>
+              <span className="cell-muted">Totaal geschreven min minimum te presteren uren</span>
             </div>
             <div className="project-line-metrics">
               <span>{formatHours(dashboard.overtime)} uur</span>
@@ -493,7 +492,6 @@ function buildDashboardData(
   const employeesById = new Map<number, JsonRecord>();
   const totals = emptyAggregate();
   const employeeMap = new Map<string, EmployeeRow>();
-  const writtenByEmployeeWeek = new Map<string, Map<string, number>>();
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
@@ -549,11 +547,7 @@ function buildDashboardData(
       weekRow[targetField] += amount;
       weekRow.written += amount;
     }
-
-    addToNestedNumber(writtenByEmployeeWeek, employeeKey, weekKey, amount);
   }
-
-  applyWeeklyOvertime(totals, employeeMap, weekMap, writtenByEmployeeWeek, period);
 
   const employeeRows = Array.from(employeeMap.values())
     .map(finalizeAggregate)
@@ -594,65 +588,6 @@ function addWorkingHoursToWeeks(weekMap: Map<string, WeekRow>, workingHours: Wor
       weekRow.total += amount;
     }
   }
-}
-
-function applyWeeklyOvertime(
-  totals: Aggregate,
-  employeeMap: Map<string, EmployeeRow>,
-  weekMap: Map<string, WeekRow>,
-  writtenByEmployeeWeek: Map<string, Map<string, number>>,
-  period: Period
-) {
-  for (const [employeeId, writtenByWeek] of writtenByEmployeeWeek) {
-    const employeeRow = employeeMap.get(employeeId);
-    if (!employeeRow) {
-      continue;
-    }
-
-    for (const [weekKey, written] of writtenByWeek) {
-      const overtime = Math.max(0, written - normalHoursForWeekBucket(weekKey, period));
-      if (overtime === 0) {
-        continue;
-      }
-
-      employeeRow.overtime += overtime;
-      totals.overtime += overtime;
-
-      const weekRow = weekMap.get(weekKey);
-      if (weekRow) {
-        weekRow.overtime += overtime;
-      }
-    }
-  }
-}
-
-function normalHoursForWeekBucket(weekKey: string, period: Period) {
-  const bucketStart = parseDateKey(weekKey);
-  const periodStart = parseDateKey(period.start);
-  const periodEnd = parseDateKey(period.end);
-  if (!bucketStart || !periodStart || !periodEnd) {
-    return NORMAL_DAILY_HOURS * 5;
-  }
-
-  const bucketEnd = new Date(bucketStart);
-  bucketEnd.setDate(bucketEnd.getDate() + 6);
-  const start = bucketStart < periodStart ? new Date(periodStart) : new Date(bucketStart);
-  const end = bucketEnd > periodEnd ? new Date(periodEnd) : bucketEnd;
-  if (start > end) {
-    return 0;
-  }
-
-  let workingDays = 0;
-  const cursor = new Date(start);
-  while (cursor <= end) {
-    const day = cursor.getDay();
-    if (day !== 0 && day !== 6) {
-      workingDays += 1;
-    }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return workingDays * NORMAL_DAILY_HOURS;
 }
 
 function parseWorkingHours(value: JsonValue): WorkingHoursSummary {
@@ -763,7 +698,8 @@ function employeeName(hour: JsonRecord | undefined, employee: JsonRecord | undef
 function finalizeAggregate<T extends Aggregate>(aggregate: T) {
   return withDeclarability({
     ...aggregate,
-    untracked: Math.max(0, aggregate.total - aggregate.written)
+    untracked: Math.max(0, aggregate.total - aggregate.written),
+    overtime: Math.max(0, aggregate.written - aggregate.total)
   });
 }
 
@@ -1180,12 +1116,6 @@ function normalizeNumberString(value: string) {
 
 function sumValues(values: Map<string, number>) {
   return Array.from(values.values()).reduce((total, value) => total + value, 0);
-}
-
-function addToNestedNumber(map: Map<string, Map<string, number>>, outerKey: string, innerKey: string, value: number) {
-  const inner = map.get(outerKey) ?? new Map<string, number>();
-  inner.set(innerKey, (inner.get(innerKey) ?? 0) + value);
-  map.set(outerKey, inner);
 }
 
 function chunk<T>(items: T[], size: number) {
