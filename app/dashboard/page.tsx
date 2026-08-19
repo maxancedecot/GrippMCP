@@ -187,7 +187,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <section className="metric-grid" aria-label="Kerncijfers declarabiliteit">
             <MetricCard label="Declarabiliteit" value={`${formatPercent(dashboard.declarability)}%`} detail="Declarabele uren / voorziene uren" tone="good" />
             <MetricCard label="Declarabele uren" value={formatHours(dashboard.declarable)} detail={`Niet geboekt op ${INTERNAL_PROJECT_LABEL}`} tone="blue" />
-            <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven 8u per werkdag" tone="overtime" />
+            <MetricCard label="Overuren" value={formatHours(dashboard.overtime)} detail="Geschreven boven 8u per werkdag vanaf startdatum" tone="overtime" />
             <MetricCard label={INTERNAL_PROJECT_LABEL} value={formatHours(dashboard.internal)} detail={`Project ${INTERNAL_OFFERPROJECTBASE_ID}`} tone="warning" />
           </section>
 
@@ -309,7 +309,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               <div className="project-line-row">
                 <div>
                   <span className="row-title">Overuren</span>
-                  <span className="cell-muted">Totaal geschreven min 8u per werkdag per medewerker</span>
+                  <span className="cell-muted">Totaal geschreven min 8u per werkdag vanaf startdatum medewerker</span>
                 </div>
                 <div className="project-line-metrics">
                   <span>{formatHours(dashboard.overtime)} uur</span>
@@ -647,13 +647,13 @@ function buildDashboardData(
   revenueBasisHours = hours
 ): DashboardData {
   const employeesById = new Map<number, JsonRecord>();
-  const minimumWorkingHours = createMinimumWorkingHours(period);
   const employeeMap = new Map<string, EmployeeRow>();
   const revenueSummary = buildRevenueSummary(revenueBasisHours, revenuePrices, period);
   const weekMap = new Map<string, WeekRow>(
     period.weekBuckets.map((bucket) => [bucket.key, withDeclarability({ ...emptyAggregate(), key: bucket.key, label: bucket.label })])
   );
-  const assignMinimumHours = (employeeRow: EmployeeRow) => {
+  const assignMinimumHours = (employeeRow: EmployeeRow, employee?: JsonRecord) => {
+    const minimumWorkingHours = createMinimumWorkingHours(period, employeeStartDate(employee));
     employeeRow.total = minimumWorkingHours.total;
     addWorkingHoursToWeeks(weekMap, minimumWorkingHours, period);
   };
@@ -671,7 +671,7 @@ function buildDashboardData(
       name: employeeName(undefined, employee)
     });
 
-    assignMinimumHours(employeeRow);
+    assignMinimumHours(employeeRow, employee);
     employeeMap.set(employeeRow.id, employeeRow);
   }
 
@@ -686,12 +686,14 @@ function buildDashboardData(
     const hourDate = dateKeyFromValue(readField(hour, "date"));
     let employeeRow = employeeMap.get(employeeKey);
     if (!employeeRow) {
+      const hourEmployee = asRecord(readField(hour, "employee"));
+      const employee = employeeId !== null ? employeesById.get(employeeId) : undefined;
       employeeRow = withDeclarability({
         ...emptyAggregate(),
         id: employeeKey,
-        name: employeeName(hour, employeeId !== null ? employeesById.get(employeeId) : undefined)
+        name: employeeName(hour, employee)
       });
-      assignMinimumHours(employeeRow);
+      assignMinimumHours(employeeRow, employee ?? hourEmployee);
       employeeMap.set(employeeKey, employeeRow);
     }
     const weekKey = weekKeyForDate(hourDate, period);
@@ -761,9 +763,15 @@ function addRevenueToWeeks(weekMap: Map<string, WeekRow>, revenueByWeek: Map<str
   }
 }
 
-function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
+function createMinimumWorkingHours(period: Period, employeeSince?: string): WorkingHoursSummary {
   const byDate = new Map<string, number>();
+  const minimumStart = employeeSince && employeeSince > period.start ? employeeSince : period.start;
+
   datesInPeriod(period).forEach((date) => {
+    if (date < minimumStart) {
+      return;
+    }
+
     const day = parseDateKey(date)?.getDay();
     if (day !== 0 && day !== 6) {
       byDate.set(date, NORMAL_DAILY_HOURS);
@@ -774,6 +782,10 @@ function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
     total: sumValues(byDate),
     byDate
   };
+}
+
+function employeeStartDate(employee: JsonRecord | undefined) {
+  return dateKeyFromValue(readField(employee, "employeesince")) ?? dateKeyFromValue(readField(employee, "startdate"));
 }
 
 function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSources, period: Period): RevenueSummary {
