@@ -778,12 +778,16 @@ function createMinimumWorkingHours(period: Period): WorkingHoursSummary {
 
 function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSources, period: Period): RevenueSummary {
   const byWeek = new Map<string, number>();
-  const cappedRevenueUsageByLine = new Map<string, number>();
-  const fixedRevenueHoursByLine = fixedFeeHoursByLine(hours, revenuePrices);
+  const hoursByLine = revenueHoursByLine(hours, revenuePrices);
   let total = 0;
 
   for (const hour of hours) {
     if (relationId(hour, "offerprojectbase") === INTERNAL_OFFERPROJECTBASE_ID) {
+      continue;
+    }
+
+    const weekKey = weekKeyForDateInPeriod(readField(hour, "date"), period);
+    if (!weekKey) {
       continue;
     }
 
@@ -792,12 +796,11 @@ function buildRevenueSummary(hours: JsonRecord[], revenuePrices: RevenuePriceSou
       continue;
     }
 
-    const revenue = revenueForHour(hour, amount, revenuePrices, cappedRevenueUsageByLine, fixedRevenueHoursByLine);
+    const revenue = revenueForHour(hour, amount, revenuePrices, hoursByLine);
     if (revenue === 0) {
       continue;
     }
 
-    const weekKey = weekKeyForDate(dateKeyFromValue(readField(hour, "date")), period);
     total += revenue;
     byWeek.set(weekKey, (byWeek.get(weekKey) ?? 0) + revenue);
   }
@@ -812,23 +815,24 @@ function revenueForHour(
   hour: JsonRecord,
   amount: number,
   revenuePrices: RevenuePriceSources,
-  usageByLine: Map<string, number>,
-  fixedHoursByLine: Map<string, number>
+  hoursByLine: Map<string, number>
 ) {
   const source = revenueLineForHour(hour, revenuePrices);
   if (!source || source.line.invoiceBasis === "NONBILLABLE") {
     return 0;
   }
 
+  const spentAmount = Math.max(source.line.spentAmount ?? 0, hoursByLine.get(source.key) ?? 0);
+
   if (source.line.invoiceBasis === "FIXED") {
-    const spentAmount = Math.max(source.line.spentAmount ?? 0, fixedHoursByLine.get(source.key) ?? 0);
     return spentAmount > 0 ? (source.line.netSellingPrice / spentAmount) * amount : 0;
   }
 
-  const consumed = usageByLine.get(source.key) ?? 0;
-  usageByLine.set(source.key, consumed + amount);
-  const billableAmount = source.line.maxAmount === null ? amount : cappedLineAmount(amount, consumed, source.line.maxAmount);
-  return billableAmount * source.line.netSellingPrice;
+  if (source.line.maxAmount !== null && spentAmount > source.line.maxAmount) {
+    return ((source.line.netSellingPrice * source.line.maxAmount) / spentAmount) * amount;
+  }
+
+  return amount * source.line.netSellingPrice;
 }
 
 function revenueLineForHour(hour: JsonRecord, revenuePrices: RevenuePriceSources) {
@@ -851,11 +855,7 @@ function revenueLineForHour(hour: JsonRecord, revenuePrices: RevenuePriceSources
   return null;
 }
 
-function cappedLineAmount(amount: number, consumed: number, maxAmount: number) {
-  return Math.max(0, Math.min(amount, maxAmount - consumed));
-}
-
-function fixedFeeHoursByLine(hours: JsonRecord[], revenuePrices: RevenuePriceSources) {
+function revenueHoursByLine(hours: JsonRecord[], revenuePrices: RevenuePriceSources) {
   const totals = new Map<string, number>();
 
   for (const hour of hours) {
@@ -864,7 +864,7 @@ function fixedFeeHoursByLine(hours: JsonRecord[], revenuePrices: RevenuePriceSou
     }
 
     const source = revenueLineForHour(hour, revenuePrices);
-    if (source?.line.invoiceBasis !== "FIXED") {
+    if (!source || source.line.invoiceBasis === "NONBILLABLE") {
       continue;
     }
 
@@ -1161,12 +1161,22 @@ function startOfDay(date: Date) {
 }
 
 function weekKeyForDate(value: string | undefined, period: Period) {
+  return weekKeyForDateInPeriod(value, period) ?? period.weekBuckets[0]?.key ?? period.start;
+}
+
+function weekKeyForDateInPeriod(value: unknown, period: Period) {
   const normalizedValue = dateKeyFromValue(value);
   const date = normalizedValue ? parseDateKey(normalizedValue) : null;
-  if (!date) {
-    return period.weekBuckets[0]?.key ?? period.start;
+  const periodStart = parseDateKey(period.start);
+  const periodEnd = parseDateKey(period.end);
+  if (!date || !periodStart || !periodEnd || date < periodStart || date > periodEnd) {
+    return null;
   }
 
+  return weekKeyForParsedDate(date, period);
+}
+
+function weekKeyForParsedDate(date: Date, period: Period) {
   for (const bucket of period.weekBuckets) {
     const bucketStart = parseDateKey(bucket.key);
     if (!bucketStart) {
@@ -1179,7 +1189,7 @@ function weekKeyForDate(value: string | undefined, period: Period) {
     }
   }
 
-  return period.weekBuckets[0]?.key ?? period.start;
+  return null;
 }
 
 function datesInPeriod(period: Period) {
@@ -1205,18 +1215,54 @@ function dateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function dateKeyFromValue(value: unknown) {
-  const rawValue = stringFrom(value);
-  if (!rawValue) {
+function dateKeyFromValue(value: unknown): string | undefined {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return dateKey(value);
+  }
+
+  if (typeof value === "string") {
+    return dateKeyFromString(value);
+  }
+
+  const record = asRecord(value);
+  if (!record) {
     return undefined;
   }
 
-  const dateKeyMatch = rawValue.match(/\d{4}-\d{2}-\d{2}/)?.[0];
+  for (const key of ["rawValue", "rawvalue", "date", "value", "displayvalue", "displayValue", "label", "name", "searchname"]) {
+    const nestedValue = record[key];
+    if (nestedValue !== undefined && nestedValue !== null && nestedValue !== value) {
+      const nestedDate = dateKeyFromValue(nestedValue);
+      if (nestedDate) {
+        return nestedDate;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function dateKeyFromString(rawValue: string) {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const dateKeyMatch = trimmed.match(/\d{4}-\d{2}-\d{2}/)?.[0];
   if (isDateKey(dateKeyMatch)) {
     return dateKeyMatch;
   }
 
-  const parsed = new Date(rawValue);
+  const dayFirstMatch = trimmed.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/);
+  if (dayFirstMatch) {
+    const [, day, month, year] = dayFirstMatch;
+    const date = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    if (isDateKey(date)) {
+      return date;
+    }
+  }
+
+  const parsed = new Date(trimmed);
   return Number.isNaN(parsed.getTime()) ? undefined : dateKey(parsed);
 }
 
@@ -1230,9 +1276,7 @@ function createDemoEmployees(): JsonRecord[] {
 }
 
 function createDemoHours(period: Period): JsonRecord[] {
-  const days = [2, 4, 7, 9, 12, 15, 18, 21, 23, 26, 28];
-  return days.flatMap((day, index) => {
-    const date = `${period.start.slice(0, 8)}${String(day).padStart(2, "0")}`;
+  return demoDatesInPeriod(period, 11).flatMap((date, index) => {
     const firstIsInternal = index % 5 === 0;
     const secondIsInternal = index % 3 === 0;
     return [
@@ -1256,6 +1300,28 @@ function createDemoHours(period: Period): JsonRecord[] {
       }
     ];
   });
+}
+
+function demoDatesInPeriod(period: Period, count: number) {
+  const periodDates = datesInPeriod(period);
+  const workingDates = periodDates.filter((date) => {
+    const day = parseDateKey(date)?.getDay();
+    return day !== 0 && day !== 6;
+  });
+  const sourceDates = workingDates.length > 0 ? workingDates : periodDates;
+
+  if (sourceDates.length <= count) {
+    return sourceDates;
+  }
+
+  return Array.from(
+    new Set(
+      Array.from({ length: count }, (_, index) => {
+        const sourceIndex = Math.round((index * (sourceDates.length - 1)) / Math.max(1, count - 1));
+        return sourceDates[sourceIndex];
+      })
+    )
+  );
 }
 
 function createDemoRevenuePrices(hours: JsonRecord[]): RevenuePriceSources {
