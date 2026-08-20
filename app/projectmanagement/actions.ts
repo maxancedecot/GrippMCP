@@ -51,8 +51,8 @@ async function completedProjectPhaseId(client: GrippClient) {
   ] as JsonValue[]);
 
   for (const phase of asRecords(result)) {
-    if (normalize(stringFrom(phase.name)) === "afgerond") {
-      return idFrom(phase.id);
+    if (isCompletedPhaseName(stringFrom(readField(phase, "name")))) {
+      return idFrom(readField(phase, "id"));
     }
   }
 
@@ -85,7 +85,7 @@ function asRecords(value: JsonValue): Record<string, unknown>[] {
     }
   }
 
-  return record.id !== undefined ? [record] : [];
+  return readField(record, "id") !== undefined ? [record] : [];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -106,6 +106,21 @@ function idFrom(value: unknown) {
 
 function stringFrom(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readField(record: Record<string, unknown>, field: string) {
+  const direct = record[field] ?? record[`projectphase.${field}`];
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  const suffix = `.${field.toLowerCase()}`;
+  const matchingKey = Object.keys(record).find((key) => key.toLowerCase().endsWith(suffix));
+  return matchingKey ? record[matchingKey] : undefined;
+}
+
+function isCompletedPhaseName(name: string) {
+  return normalize(name).includes("afgerond");
 }
 
 function normalize(value: string) {
