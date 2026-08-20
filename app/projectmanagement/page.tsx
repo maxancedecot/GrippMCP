@@ -205,6 +205,7 @@ function ProjectTimeline({
           const deadlineDate = project.deadline ?? deliveryDate;
           const deadlineTone = deadlineToneFor(deadlineDate);
           const deadlinePosition = timelineDeadlinePosition(deadlineDate, startDate, deliveryDate, timeline);
+          const deadlineProgress = timelineDeadlineProgress(deadlineDate, startDate, deliveryDate);
 
           return (
             <article className="project-timeline-row" key={project.id} role="listitem">
@@ -222,6 +223,8 @@ function ProjectTimeline({
                   <span className="project-timeline-gridline" key={tick.date} style={{ left: `${timelinePosition(tick.date, timeline)}%` }} aria-hidden="true" />
                 ))}
                 <span className="project-timeline-block" style={timelineBarStyle(startDate, deliveryDate, timeline)}>
+                  <span className="project-timeline-block__before" style={{ width: `${deadlineProgress}%` }} aria-hidden="true" />
+                  <span className="project-timeline-block__after" style={{ left: `${deadlineProgress}%` }} aria-hidden="true" />
                   <span className="sr-only">Projectperiode</span>
                 </span>
                 <span
@@ -688,6 +691,15 @@ function timelineDeadlinePosition(deadline: string, start: string, end: string, 
   const deadlinePosition = timelinePosition(deadline, timeline);
 
   return Math.max(startPosition, Math.min(endPosition, deadlinePosition));
+}
+
+function timelineDeadlineProgress(deadline: string, start: string, end: string) {
+  const duration = daysBetween(start, end);
+  if (duration <= 0) {
+    return 100;
+  }
+
+  return Math.max(0, Math.min(100, (daysBetween(start, deadline) / duration) * 100));
 }
 
 function timelineMinimumWidth(timeline: ProjectTimelineData) {
