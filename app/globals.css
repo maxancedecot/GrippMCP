@@ -804,6 +804,21 @@ td .inline-bar {
   height: 30px;
 }
 
+.project-timeline-body {
+  position: relative;
+}
+
+.project-timeline-shared-grid {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 150px;
+  bottom: 0;
+  left: 238px;
+  overflow: hidden;
+  background: var(--surface-strong);
+}
+
 .project-timeline-axis__tick {
   position: absolute;
   bottom: 0;
@@ -836,6 +851,8 @@ td .inline-bar {
 }
 
 .project-timeline-row {
+  position: relative;
+  z-index: 1;
   min-height: 106px;
   align-items: stretch;
   padding: 14px 0;
@@ -864,8 +881,7 @@ td .inline-bar {
 .project-timeline-track {
   position: relative;
   min-height: 88px;
-  overflow: hidden;
-  background: var(--surface-strong);
+  overflow: visible;
 }
 
 .project-timeline-gridline {
@@ -924,19 +940,6 @@ td .inline-bar {
 
 .project-timeline-deadline--danger {
   background: var(--danger);
-}
-
-.project-timeline-dates {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  left: 8px;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
 }
 
 .project-timeline-summary {

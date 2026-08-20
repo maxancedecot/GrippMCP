@@ -199,56 +199,57 @@ function ProjectTimeline({
           <span className="project-timeline-fixed project-timeline-fixed--right project-timeline-summary-heading">Waarde</span>
         </div>
 
-        {projects.map((project) => {
-          const startDate = project.startDate ?? timeline.start;
-          const deliveryDate = project.deliveryDate ?? timeline.end;
-          const deadlineDate = project.deadline ?? deliveryDate;
-          const deadlineTone = deadlineToneFor(deadlineDate);
-          const deadlinePosition = timelineDeadlinePosition(deadlineDate, startDate, deliveryDate, timeline);
-          const deadlineProgress = timelineDeadlineProgress(deadlineDate, startDate, deliveryDate);
+        <div className="project-timeline-body">
+          <div className="project-timeline-shared-grid" aria-hidden="true">
+            {timeline.ticks.map((tick) => (
+              <span className="project-timeline-gridline" key={tick.date} style={{ left: `${timelinePosition(tick.date, timeline)}%` }} />
+            ))}
+          </div>
 
-          return (
-            <article className="project-timeline-row" key={project.id} role="listitem">
-              <div className="project-timeline-details project-timeline-fixed project-timeline-fixed--left">
-                <div className="project-timeline-title-row">
-                  <span className="row-title">{project.name}</span>
-                  <span className="project-tag project-tag--good">{project.phase}</span>
+          {projects.map((project) => {
+            const startDate = project.startDate ?? timeline.start;
+            const deliveryDate = project.deliveryDate ?? timeline.end;
+            const deadlineDate = project.deadline ?? deliveryDate;
+            const deadlineTone = deadlineToneFor(deadlineDate);
+            const deadlinePosition = timelineDeadlinePosition(deadlineDate, startDate, deliveryDate, timeline);
+            const deadlineProgress = timelineDeadlineProgress(deadlineDate, startDate, deliveryDate);
+
+            return (
+              <article className="project-timeline-row" key={project.id} role="listitem">
+                <div className="project-timeline-details project-timeline-fixed project-timeline-fixed--left">
+                  <div className="project-timeline-title-row">
+                    <span className="row-title">{project.name}</span>
+                    <span className="project-tag project-tag--good">{project.phase}</span>
+                  </div>
+                  <span className="cell-muted">{project.code} · {project.company}</span>
+                  <span className="cell-muted">{project.manager}</span>
                 </div>
-                <span className="cell-muted">{project.code} · {project.company}</span>
-                <span className="cell-muted">{project.manager}</span>
-              </div>
 
-              <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; interne oplevering ${formatDate(deadlineDate)}`}>
-                {timeline.ticks.map((tick) => (
-                  <span className="project-timeline-gridline" key={tick.date} style={{ left: `${timelinePosition(tick.date, timeline)}%` }} aria-hidden="true" />
-                ))}
-                <span className="project-timeline-block" style={timelineBarStyle(startDate, deliveryDate, timeline)}>
-                  <span className="project-timeline-block__before" style={{ width: `${deadlineProgress}%` }} aria-hidden="true" />
-                  <span className="project-timeline-block__after" style={{ left: `${deadlineProgress}%` }} aria-hidden="true" />
-                  <span className="sr-only">Projectperiode</span>
-                </span>
-                <span
-                  className={`project-timeline-deadline project-timeline-deadline--${deadlineTone}`}
-                  style={{ left: `${deadlinePosition}%` }}
-                  title={`Interne oplevering ${formatDate(deadlineDate)}`}
-                >
-                  <span className="sr-only">Interne oplevering {formatDate(deadlineDate)}</span>
-                </span>
-                <div className="project-timeline-dates">
-                  <span>Aanvang {formatDate(startDate)}</span>
-                  <span>Levering {formatDate(deliveryDate)}</span>
+                <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; interne oplevering ${formatDate(deadlineDate)}`}>
+                  <span className="project-timeline-block" style={timelineBarStyle(startDate, deliveryDate, timeline)}>
+                    <span className="project-timeline-block__before" style={{ width: `${deadlineProgress}%` }} aria-hidden="true" />
+                    <span className="project-timeline-block__after" style={{ left: `${deadlineProgress}%` }} aria-hidden="true" />
+                    <span className="sr-only">Projectperiode</span>
+                  </span>
+                  <span
+                    className={`project-timeline-deadline project-timeline-deadline--${deadlineTone}`}
+                    style={{ left: `${deadlinePosition}%` }}
+                    title={`Interne oplevering ${formatDate(deadlineDate)}`}
+                  >
+                    <span className="sr-only">Interne oplevering {formatDate(deadlineDate)}</span>
+                  </span>
                 </div>
-              </div>
 
-              <div className="project-timeline-summary project-timeline-fixed project-timeline-fixed--right">
-                <strong>{project.value > 0 ? formatCurrency(project.value) : "-"}</strong>
-                {sourceMode === "live" ? (
-                  <CompleteProjectForm projectId={project.id} projectName={project.name} query={query} />
-                ) : null}
-              </div>
-            </article>
-          );
-        })}
+                <div className="project-timeline-summary project-timeline-fixed project-timeline-fixed--right">
+                  <strong>{project.value > 0 ? formatCurrency(project.value) : "-"}</strong>
+                  {sourceMode === "live" ? (
+                    <CompleteProjectForm projectId={project.id} projectName={project.name} query={query} />
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -663,17 +664,17 @@ function createTimelineTicks(start: string, end: string): ProjectTimelineTick[] 
 }
 
 function timelinePosition(date: string, timeline: ProjectTimelineData) {
-  const duration = daysBetween(timeline.start, timeline.end);
-  if (duration <= 0) {
+  const dayCount = timelineDayCount(timeline);
+  if (dayCount <= 0) {
     return 0;
   }
 
-  return Math.max(0, Math.min(100, (daysBetween(timeline.start, date) / duration) * 100));
+  return Math.max(0, Math.min(100, (daysBetween(timeline.start, date) / dayCount) * 100));
 }
 
 function timelineBarStyle(start: string, end: string, timeline: ProjectTimelineData) {
   const startPosition = timelinePosition(start, timeline);
-  const endPosition = Math.max(startPosition, timelinePosition(end, timeline));
+  const endPosition = Math.max(startPosition, timelinePosition(addDays(end, 1), timeline));
   const width = Math.max(0.8, endPosition - startPosition);
 
   return {
@@ -691,16 +692,16 @@ function timelineDeadlinePosition(deadline: string, start: string, end: string, 
 }
 
 function timelineDeadlineProgress(deadline: string, start: string, end: string) {
-  const duration = daysBetween(start, end);
-  if (duration <= 0) {
+  const dayCount = daysBetween(start, end) + 1;
+  if (dayCount <= 0) {
     return 100;
   }
 
-  return Math.max(0, Math.min(100, (daysBetween(start, deadline) / duration) * 100));
+  return Math.max(0, Math.min(100, (daysBetween(start, deadline) / dayCount) * 100));
 }
 
 function timelineMinimumWidth(timeline: ProjectTimelineData) {
-  return TIMELINE_FIXED_WIDTH + Math.max(3 * 30 * TIMELINE_DAY_WIDTH, (daysBetween(timeline.start, timeline.end) + 1) * TIMELINE_DAY_WIDTH);
+  return TIMELINE_FIXED_WIDTH + Math.max(3 * 30 * TIMELINE_DAY_WIDTH, timelineDayCount(timeline) * TIMELINE_DAY_WIDTH);
 }
 
 function deadlineToneFor(deadline: string) {
@@ -710,6 +711,16 @@ function deadlineToneFor(deadline: string) {
 
 function daysBetween(start: string, end: string) {
   return Math.round((dateFromKey(end).getTime() - dateFromKey(start).getTime()) / 86_400_000);
+}
+
+function timelineDayCount(timeline: ProjectTimelineData) {
+  return daysBetween(timeline.start, timeline.end) + 1;
+}
+
+function addDays(value: string, days: number) {
+  const date = dateFromKey(value);
+  date.setDate(date.getDate() + days);
+  return dateKey(date);
 }
 
 function dateFromKey(value: string) {
