@@ -143,6 +143,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <a className={`dashboard-tab ${activeTab === "revenue" ? "dashboard-tab--active" : ""}`} href={dashboardTabHref(params, "revenue")} aria-current={activeTab === "revenue" ? "page" : undefined}>
           Omzet
         </a>
+        <a className="dashboard-tab" href="/projectmanagement">
+          Projectmanagement
+        </a>
       </nav>
 
       <form className="period-form" action="/dashboard">
