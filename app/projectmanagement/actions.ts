@@ -13,7 +13,6 @@ export type ProjectTask = {
   startDate?: string;
   deadlineDate?: string;
   completed: boolean;
-  estimatedHours?: number;
 };
 
 export type ProjectTasksResult = {
@@ -111,8 +110,7 @@ function projectTaskFromRecord(task: JsonRecord): ProjectTask {
     title: description || `Taak ${id || "zonder nummer"}`,
     startDate: taskDate(taskField(task, "startdate")),
     deadlineDate: taskDate(taskField(task, "deadlinedate")),
-    completed: taskBoolean(taskField(task, "isafgerond")) === true || Boolean(taskDate(taskField(task, "completedon"))),
-    estimatedHours: taskNumber(taskField(task, "estimatedhours")) ?? undefined
+    completed: taskBoolean(taskField(task, "isafgerond")) === true || Boolean(taskDate(taskField(task, "completedon")))
   };
 }
 
@@ -243,8 +241,8 @@ function createDemoProjectTasks(projectId: number): ProjectTask[] {
   };
 
   return [
-    { id: projectId * 10 + 1, title: "Planning en voorbereiding", startDate: date(-14), deadlineDate: date(-7), completed: true, estimatedHours: 4 },
-    { id: projectId * 10 + 2, title: "Uitwerking", startDate: date(-6), deadlineDate: date(2), completed: false, estimatedHours: 12 },
-    { id: projectId * 10 + 3, title: "Interne oplevering", startDate: date(3), deadlineDate: date(7), completed: false, estimatedHours: 2 }
+    { id: projectId * 10 + 1, title: "Planning en voorbereiding", startDate: date(-14), deadlineDate: date(-7), completed: true },
+    { id: projectId * 10 + 2, title: "Uitwerking", startDate: date(-6), deadlineDate: date(2), completed: false },
+    { id: projectId * 10 + 3, title: "Interne oplevering", startDate: date(3), deadlineDate: date(7), completed: false }
   ];
 }

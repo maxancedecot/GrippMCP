@@ -11,11 +11,6 @@ const dateFormatter = new Intl.DateTimeFormat("nl-NL", {
   year: "numeric"
 });
 
-const hoursFormatter = new Intl.NumberFormat("nl-NL", {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 1
-});
-
 export function ProjectTasksModal({ projectId, projectName }: { projectId: number; projectName: string }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [tasks, setTasks] = useState<ProjectTask[]>([]);
@@ -93,8 +88,7 @@ export function ProjectTasksModal({ projectId, projectName }: { projectId: numbe
 function taskDetails(task: ProjectTask) {
   const details = [
     task.startDate ? `Start ${formatDate(task.startDate)}` : "",
-    task.deadlineDate ? `Deadline ${formatDate(task.deadlineDate)}` : "",
-    task.estimatedHours !== undefined ? `${hoursFormatter.format(task.estimatedHours)} u geschat` : ""
+    task.deadlineDate ? `Deadline ${formatDate(task.deadlineDate)}` : ""
   ].filter(Boolean);
 
   return details.join(" · ") || "Geen planning ingevuld";
