@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
+import { ProjectManagementAutoRefresh } from "./auto-refresh.js";
 import { CompleteProjectForm } from "./complete-project-form.js";
 
 export const dynamic = "force-dynamic";
@@ -87,6 +88,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
 
   return (
     <main className="dashboard-shell project-shell">
+      <ProjectManagementAutoRefresh />
       <header className="dashboard-header">
         <div>
           <p className="eyebrow">Gripp opdrachten</p>
