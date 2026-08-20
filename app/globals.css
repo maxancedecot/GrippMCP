@@ -44,7 +44,7 @@ select {
 }
 
 .dashboard-shell {
-  width: min(1220px, calc(100% - 32px));
+  width: 90%;
   margin: 0 auto;
   padding: 32px 0 48px;
 }
@@ -1045,7 +1045,6 @@ td .inline-bar {
 
 @media (max-width: 660px) {
   .dashboard-shell {
-    width: min(100% - 20px, 1220px);
     padding-top: 16px;
   }
 
