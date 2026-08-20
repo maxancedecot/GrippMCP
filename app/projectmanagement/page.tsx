@@ -197,6 +197,7 @@ function ProjectTimeline({
           const deliveryDate = project.deliveryDate ?? timeline.end;
           const deadlineDate = project.deadline ?? deliveryDate;
           const deadlineTone = deadlineToneFor(deadlineDate);
+          const deadlinePosition = timelineDeadlinePosition(deadlineDate, startDate, deliveryDate, timeline);
 
           return (
             <article className="project-timeline-row" key={project.id} role="listitem">
@@ -209,22 +210,22 @@ function ProjectTimeline({
                 <span className="cell-muted">{project.manager}</span>
               </div>
 
-              <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; deadline ${formatDate(deadlineDate)}`}>
+              <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; interne oplevering ${formatDate(deadlineDate)}`}>
                 {timeline.ticks.map((tick) => (
                   <span className="project-timeline-gridline" key={tick.date} style={{ left: `${timelinePosition(tick.date, timeline)}%` }} aria-hidden="true" />
                 ))}
-                <span className="project-timeline-bar" style={timelineBarStyle(startDate, deliveryDate, timeline)}>
+                <span className="project-timeline-block" style={timelineBarStyle(startDate, deliveryDate, timeline)}>
                   <span className="sr-only">Projectperiode</span>
                 </span>
                 <span
                   className={`project-timeline-deadline project-timeline-deadline--${deadlineTone}`}
-                  style={{ left: `${timelinePosition(deadlineDate, timeline)}%` }}
-                  title={`Deadline ${formatDate(deadlineDate)}`}
+                  style={{ left: `${deadlinePosition}%` }}
+                  title={`Interne oplevering ${formatDate(deadlineDate)}`}
                 >
-                  <span className="sr-only">Deadline {formatDate(deadlineDate)}</span>
+                  <span className="sr-only">Interne oplevering {formatDate(deadlineDate)}</span>
                 </span>
                 <div className="project-timeline-dates">
-                  <span>Start {formatDate(startDate)}</span>
+                  <span>Aanvang {formatDate(startDate)}</span>
                   <span>Levering {formatDate(deliveryDate)}</span>
                 </div>
               </div>
@@ -232,7 +233,7 @@ function ProjectTimeline({
               <div className="project-timeline-summary">
                 <strong>{project.value > 0 ? formatCurrency(project.value) : "-"}</strong>
                 <span className={`project-timeline-deadline-label project-timeline-deadline-label--${deadlineTone}`}>
-                  Deadline {formatDate(deadlineDate)}
+                  Interne oplevering {formatDate(deadlineDate)}
                 </span>
                 {sourceMode === "live" ? (
                   <CompleteProjectForm projectId={project.id} projectName={project.name} query={query} />
@@ -666,6 +667,14 @@ function timelineBarStyle(start: string, end: string, timeline: ProjectTimelineD
     left: `${Math.min(startPosition, 100 - width)}%`,
     width: `${width}%`
   };
+}
+
+function timelineDeadlinePosition(deadline: string, start: string, end: string, timeline: ProjectTimelineData) {
+  const startPosition = timelinePosition(start, timeline);
+  const endPosition = Math.max(startPosition, timelinePosition(end, timeline));
+  const deadlinePosition = timelinePosition(deadline, timeline);
+
+  return Math.max(startPosition, Math.min(endPosition, deadlinePosition));
 }
 
 function deadlineToneFor(deadline: string) {

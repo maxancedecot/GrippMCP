@@ -839,7 +839,7 @@ td .inline-bar {
 
 .project-timeline-track {
   position: relative;
-  min-height: 76px;
+  min-height: 88px;
   overflow: hidden;
   background: var(--surface-strong);
 }
@@ -852,27 +852,28 @@ td .inline-bar {
   background: rgba(95, 107, 118, 0.22);
 }
 
-.project-timeline-bar {
+.project-timeline-block {
   position: absolute;
-  top: 20px;
+  z-index: 1;
+  top: 16px;
   display: block;
-  height: 14px;
+  height: 36px;
   border-radius: 4px;
-  background: var(--good);
-  box-shadow: inset 0 0 0 1px rgba(7, 95, 83, 0.2);
+  border: 1px solid var(--good);
+  background: var(--good-soft);
 }
 
 .project-timeline-deadline {
   position: absolute;
-  z-index: 1;
-  top: 10px;
-  bottom: 26px;
-  width: 2px;
+  z-index: 2;
+  top: 16px;
+  height: 36px;
+  width: 3px;
   transform: translateX(-1px);
 }
 
 .project-timeline-deadline--good {
-  background: var(--good);
+  background: var(--ink);
 }
 
 .project-timeline-deadline--warning {
@@ -886,7 +887,7 @@ td .inline-bar {
 .project-timeline-dates {
   position: absolute;
   right: 8px;
-  bottom: 7px;
+  bottom: 8px;
   left: 8px;
   display: flex;
   justify-content: space-between;
