@@ -1,13 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation.js";
 
 const REFRESH_INTERVAL_MS = 120_000;
 
 export function ProjectManagementAutoRefresh() {
-  const router = useRouter();
-
   useEffect(() => {
     let secondFrame = 0;
     const firstFrame = window.requestAnimationFrame(() => {
@@ -21,20 +18,25 @@ export function ProjectManagementAutoRefresh() {
   }, []);
 
   useEffect(() => {
+    let lastRefresh = Date.now();
     const refresh = () => {
-      if (document.visibilityState === "visible") {
-        router.refresh();
+      lastRefresh = Date.now();
+      window.location.reload();
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastRefresh >= REFRESH_INTERVAL_MS) {
+        refresh();
       }
     };
 
     const interval = window.setInterval(refresh, REFRESH_INTERVAL_MS);
-    document.addEventListener("visibilitychange", refresh);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {
       window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [router]);
+  }, []);
 
   return null;
 }
