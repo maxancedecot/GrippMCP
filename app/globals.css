@@ -949,24 +949,6 @@ td .inline-bar {
   font-size: 14px;
 }
 
-.project-timeline-deadline-label {
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.project-timeline-deadline-label--good {
-  color: #075f53;
-}
-
-.project-timeline-deadline-label--warning {
-  color: #8a5200;
-}
-
-.project-timeline-deadline-label--danger {
-  color: var(--danger);
-}
-
 .project-completion-form {
   margin: 0;
 }

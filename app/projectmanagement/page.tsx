@@ -242,9 +242,6 @@ function ProjectTimeline({
 
               <div className="project-timeline-summary project-timeline-fixed project-timeline-fixed--right">
                 <strong>{project.value > 0 ? formatCurrency(project.value) : "-"}</strong>
-                <span className={`project-timeline-deadline-label project-timeline-deadline-label--${deadlineTone}`}>
-                  Interne oplevering {formatDate(deadlineDate)}
-                </span>
                 {sourceMode === "live" ? (
                   <CompleteProjectForm projectId={project.id} projectName={project.name} query={query} />
                 ) : null}
