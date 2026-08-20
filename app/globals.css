@@ -874,7 +874,7 @@ td .inline-bar {
 
 .project-timeline-block__before {
   left: 0;
-  background: var(--overtime);
+  background: var(--overtime-soft);
 }
 
 .project-timeline-block__after {
