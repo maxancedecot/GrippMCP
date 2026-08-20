@@ -240,8 +240,18 @@ function ProjectTimeline({
 
                 <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; interne oplevering ${formatDate(deadlineDate)}`}>
                   <span className="project-timeline-block" style={timelineBarStyle(startDate, deliveryDate, timeline)}>
-                    <span className="project-timeline-block__before" style={{ width: `${deadlineProgress}%` }} aria-hidden="true" />
-                    <span className="project-timeline-block__after" style={{ left: `${deadlineProgress}%` }} aria-hidden="true" />
+                    <span
+                      className="project-timeline-block__before"
+                      style={{ width: `${deadlineProgress}%` }}
+                      title={`Interne oplevering ${formatDate(deadlineDate)}`}
+                      aria-hidden="true"
+                    />
+                    <span
+                      className="project-timeline-block__after"
+                      style={{ left: `${deadlineProgress}%` }}
+                      title={`Oplevering ${formatDate(deliveryDate)}`}
+                      aria-hidden="true"
+                    />
                     <span className="sr-only">Projectperiode</span>
                   </span>
                   <span
@@ -360,9 +370,11 @@ function buildProjectManagementData(projects: ProjectRow[], query: string, sourc
       return normalize([project.code, project.name, project.company, project.manager, project.phase].join(" ")).includes(normalizedQuery);
     })
     .sort((left, right) => {
+      const leftDeadline = left.deadline ?? "9999-12-31";
+      const rightDeadline = right.deadline ?? "9999-12-31";
       const leftStart = left.startDate ?? "9999-12-31";
       const rightStart = right.startDate ?? "9999-12-31";
-      return leftStart.localeCompare(rightStart) || left.name.localeCompare(right.name, "nl");
+      return leftDeadline.localeCompare(rightDeadline) || leftStart.localeCompare(rightStart) || left.name.localeCompare(right.name, "nl");
     });
 
   return {

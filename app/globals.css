@@ -799,6 +799,7 @@ td .inline-bar {
   display: flex;
   align-items: flex-end;
   padding-bottom: 10px;
+  padding-inline: 16px;
 }
 
 .project-timeline-summary-heading {
@@ -864,6 +865,7 @@ td .inline-bar {
   flex-direction: column;
   justify-content: center;
   padding-block: 14px;
+  padding-inline: 16px;
 }
 
 .project-timeline-title-row {
@@ -936,6 +938,7 @@ td .inline-bar {
   position: absolute;
   top: 0;
   bottom: 0;
+  cursor: help;
 }
 
 .project-timeline-block__before {
