@@ -7,11 +7,10 @@ import type { JsonValue } from "../../src/types.js";
 
 export async function completeProjectAction(formData: FormData) {
   const projectId = Number(formData.get("projectId"));
-  const filter = formValue(formData, "filter");
   const query = formValue(formData, "query");
 
   if (!Number.isInteger(projectId) || projectId <= 0) {
-    redirect(projectManagementHref(filter, query, "invalid"));
+    redirect(projectManagementHref(query, "invalid"));
   }
 
   let client: GrippClient;
@@ -20,21 +19,21 @@ export async function completeProjectAction(formData: FormData) {
     client = new GrippClient();
     completedPhaseId = await completedProjectPhaseId(client);
   } catch {
-    redirect(projectManagementHref(filter, query, "failed"));
+    redirect(projectManagementHref(query, "failed"));
   }
 
   if (completedPhaseId === null) {
-    redirect(projectManagementHref(filter, query, "missing_phase"));
+    redirect(projectManagementHref(query, "missing_phase"));
   }
 
   try {
     await client.call("project.update", [projectId, { phase: completedPhaseId, archived: false }] as JsonValue[], true);
   } catch {
-    redirect(projectManagementHref(filter, query, "failed"));
+    redirect(projectManagementHref(query, "failed"));
   }
 
   revalidatePath("/projectmanagement");
-  redirect(projectManagementHref(filter, query, "completed"));
+  redirect(projectManagementHref(query, "completed"));
 }
 
 function formValue(formData: FormData, name: string) {
@@ -60,11 +59,8 @@ async function completedProjectPhaseId(client: GrippClient) {
   return null;
 }
 
-function projectManagementHref(filter: string, query: string, notice: "completed" | "failed" | "invalid" | "missing_phase") {
+function projectManagementHref(query: string, notice: "completed" | "failed" | "invalid" | "missing_phase") {
   const params = new URLSearchParams({ notice });
-  if (filter === "active" || filter === "archived") {
-    params.set("filter", filter);
-  }
   if (query) {
     params.set("query", query);
   }

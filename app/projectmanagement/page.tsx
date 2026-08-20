@@ -12,8 +12,7 @@ export const metadata: Metadata = {
 
 type JsonRecord = Record<string, unknown>;
 type ProjectSearchParams = Record<string, string | string[] | undefined>;
-type ProjectFilter = "all" | "active" | "archived";
-type RelationEntity = "company" | "employee" | "projectphase";
+type RelationEntity = "company" | "employee" | "projectphase" | "tag";
 
 type ProjectSource = {
   mode: "live" | "demo";
@@ -30,6 +29,7 @@ type ProjectRow = {
   deadline?: string;
   startDate?: string;
   deliveryDate?: string;
+  tags: string[];
   value: number;
   archived: boolean;
 };
@@ -38,10 +38,9 @@ type ProjectManagementData = {
   source: ProjectSource;
   projects: ProjectRow[];
   totalProjects: number;
-  activeProjects: number;
-  archivedProjects: number;
   overdueProjects: number;
   upcomingProjects: number;
+  totalValue: number;
   lastUpdated: string;
 };
 
@@ -62,10 +61,9 @@ const dateFormatter = new Intl.DateTimeFormat("nl-NL", {
 
 export default async function ProjectManagementPage({ searchParams }: { searchParams?: Promise<ProjectSearchParams> }) {
   const params = (await searchParams) ?? {};
-  const filter = projectFilterFromParams(params);
   const query = firstParam(params.query)?.trim() ?? "";
   const completionNotice = completionNoticeFromParams(params);
-  const data = await getProjectManagementData(filter, query);
+  const data = await getProjectManagementData(query);
 
   return (
     <main className="dashboard-shell project-shell">
@@ -78,7 +76,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
           <span className={`source-badge source-badge--${data.source.mode}`}>
             {data.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
           </span>
-          <span>{data.totalProjects} opdrachten</span>
+          <span>{data.totalProjects} lopende projecten</span>
           <span>Bijgewerkt {data.lastUpdated}</span>
         </div>
       </header>
@@ -97,22 +95,14 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
           Zoeken
           <input type="search" name="query" defaultValue={query} placeholder="Opdracht, klant of verantwoordelijke" />
         </label>
-        <label>
-          Status
-          <select name="filter" defaultValue={filter}>
-            <option value="all">Alle opdrachten</option>
-            <option value="active">Actief</option>
-            <option value="archived">Gearchiveerd</option>
-          </select>
-        </label>
         <button type="submit">Zoeken</button>
       </form>
 
       <section className="metric-grid project-metric-grid" aria-label="Kerncijfers projecten">
-        <ProjectMetric label="Actief" value={String(data.activeProjects)} detail="Niet gearchiveerde opdrachten" tone="good" />
-        <ProjectMetric label="Achter deadline" value={String(data.overdueProjects)} detail="Actieve opdrachten met verstreken deadline" tone="warning" />
-        <ProjectMetric label="Binnen 14 dagen" value={String(data.upcomingProjects)} detail="Actieve opdrachten met aankomende deadline" tone="blue" />
-        <ProjectMetric label="Gearchiveerd" value={String(data.archivedProjects)} detail="Opdrachten in deze selectie" tone="neutral" />
+        <ProjectMetric label="Lopend" value={String(data.totalProjects)} detail="Tag Project met alle projectdatums" tone="good" />
+        <ProjectMetric label="Achter deadline" value={String(data.overdueProjects)} detail="Lopende projecten met verstreken deadline" tone="warning" />
+        <ProjectMetric label="Binnen 14 dagen" value={String(data.upcomingProjects)} detail="Lopende projecten met aankomende deadline" tone="blue" />
+        <ProjectMetric label="Totale waarde" value={formatCurrency(data.totalValue)} detail="Exclusief btw, van zichtbare projecten" tone="neutral" />
       </section>
 
       <section className="panel project-list-panel">
@@ -149,16 +139,14 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
                     <td>{project.company}</td>
                     <td>{project.manager}</td>
                     <td>
-                      <span className={`project-tag ${project.archived ? "project-tag--neutral" : "project-tag--good"}`}>
-                        {project.archived ? "Gearchiveerd" : project.phase}
-                      </span>
+                      <span className="project-tag project-tag--good">{project.phase}</span>
                     </td>
-                    <td><Deadline date={project.deadline} archived={project.archived} /></td>
+                    <td><Deadline date={project.deadline} /></td>
                     <td><DateRange start={project.startDate} end={project.deliveryDate} /></td>
                     <td className="table-number">{project.value > 0 ? formatCurrency(project.value) : "-"}</td>
                     <td className="project-action-cell">
-                      {!project.archived && data.source.mode === "live" ? (
-                        <CompleteProjectForm projectId={project.id} projectName={project.name} filter={filter} query={query} />
+                      {data.source.mode === "live" ? (
+                        <CompleteProjectForm projectId={project.id} projectName={project.name} query={query} />
                       ) : null}
                     </td>
                   </tr>
@@ -167,7 +155,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
             </table>
           </div>
         ) : (
-          <p className="empty-state">Geen opdrachten gevonden voor deze selectie.</p>
+          <p className="empty-state">Geen lopende projecten met tag Project en alle datums gevonden.</p>
         )}
       </section>
     </main>
@@ -194,22 +182,20 @@ function ProjectMetric({
   );
 }
 
-function Deadline({ date, archived }: { date?: string; archived: boolean }) {
+function Deadline({ date }: { date?: string }) {
   if (!date) {
     return <span className="cell-muted">Geen deadline</span>;
   }
 
   const days = daysUntil(date);
-  const tone = archived ? "neutral" : days < 0 ? "danger" : days <= 14 ? "warning" : "good";
-  const label = archived
-    ? formatDate(date)
-    : days < 0
-      ? `${Math.abs(days)} d. te laat`
-      : days === 0
-        ? "Vandaag"
-        : days === 1
-          ? "Morgen"
-          : formatDate(date);
+  const tone = days < 0 ? "danger" : days <= 14 ? "warning" : "good";
+  const label = days < 0
+    ? `${Math.abs(days)} d. te laat`
+    : days === 0
+      ? "Vandaag"
+      : days === 1
+        ? "Morgen"
+        : formatDate(date);
 
   return <span className={`deadline deadline--${tone}`}>{label}</span>;
 }
@@ -228,9 +214,9 @@ function DateRange({ start, end }: { start?: string; end?: string }) {
   );
 }
 
-async function getProjectManagementData(filter: ProjectFilter, query: string): Promise<ProjectManagementData> {
+async function getProjectManagementData(query: string): Promise<ProjectManagementData> {
   if (!process.env.GRIPP_API_TOKEN) {
-    return buildProjectManagementData(createDemoProjects(), filter, query, {
+    return buildProjectManagementData(createDemoProjects(), query, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-opdrachten te tonen."
     });
@@ -242,18 +228,20 @@ async function getProjectManagementData(filter: ProjectFilter, query: string): P
     const relationIds = {
       companies: uniqueRelationIds(projectRecords, "company"),
       employees: uniqueRelationIds(projectRecords, "accountmanager"),
-      phases: uniqueRelationIds(projectRecords, "phase")
+      phases: uniqueRelationIds(projectRecords, "phase"),
+      tags: uniqueRelationIds(projectRecords, "tags")
     };
-    const [companies, employees, phases] = await Promise.all([
+    const [companies, employees, phases, tags] = await Promise.all([
       fetchRelationNames(client, "company", relationIds.companies),
       fetchRelationNames(client, "employee", relationIds.employees),
-      fetchRelationNames(client, "projectphase", relationIds.phases)
+      fetchRelationNames(client, "projectphase", relationIds.phases),
+      fetchRelationNames(client, "tag", relationIds.tags)
     ]);
 
-    const projects = projectRecords.map((project) => projectRowFromRecord(project, { companies, employees, phases }));
-    return buildProjectManagementData(projects, filter, query, { mode: "live", message: "" });
+    const projects = projectRecords.map((project) => projectRowFromRecord(project, { companies, employees, phases, tags }));
+    return buildProjectManagementData(projects, query, { mode: "live", message: "" });
   } catch (error) {
-    return buildProjectManagementData(createDemoProjects(), filter, query, {
+    return buildProjectManagementData(createDemoProjects(), query, {
       mode: "demo",
       message: `Live opdrachten konden niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
     });
@@ -306,10 +294,10 @@ async function fetchRelationNames(client: GrippClient, entity: RelationEntity, i
   return names;
 }
 
-function buildProjectManagementData(projects: ProjectRow[], filter: ProjectFilter, query: string, source: ProjectSource): ProjectManagementData {
+function buildProjectManagementData(projects: ProjectRow[], query: string, source: ProjectSource): ProjectManagementData {
   const normalizedQuery = normalize(query);
   const filteredProjects = projects
-    .filter((project) => filter === "all" || (filter === "archived" ? project.archived : !project.archived))
+    .filter(isOngoingProject)
     .filter((project) => {
       if (!normalizedQuery) {
         return true;
@@ -318,24 +306,17 @@ function buildProjectManagementData(projects: ProjectRow[], filter: ProjectFilte
       return normalize([project.code, project.name, project.company, project.manager, project.phase].join(" ")).includes(normalizedQuery);
     })
     .sort((left, right) => {
-      if (left.archived !== right.archived) {
-        return Number(left.archived) - Number(right.archived);
-      }
-
       const leftDeadline = left.deadline ?? "9999-12-31";
       const rightDeadline = right.deadline ?? "9999-12-31";
       return leftDeadline.localeCompare(rightDeadline) || left.name.localeCompare(right.name, "nl");
     });
-  const activeProjects = filteredProjects.filter((project) => !project.archived);
 
   return {
     source,
     projects: filteredProjects,
     totalProjects: filteredProjects.length,
-    activeProjects: activeProjects.length,
-    archivedProjects: filteredProjects.filter((project) => project.archived).length,
-    overdueProjects: activeProjects.filter((project) => project.deadline && daysUntil(project.deadline) < 0).length,
-    upcomingProjects: activeProjects.filter((project) => {
+    overdueProjects: filteredProjects.filter((project) => project.deadline && daysUntil(project.deadline) < 0).length,
+    upcomingProjects: filteredProjects.filter((project) => {
       if (!project.deadline) {
         return false;
       }
@@ -343,6 +324,7 @@ function buildProjectManagementData(projects: ProjectRow[], filter: ProjectFilte
       const days = daysUntil(project.deadline);
       return days >= 0 && days <= 14;
     }).length,
+    totalValue: filteredProjects.reduce((total, project) => total + project.value, 0),
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       day: "2-digit",
       month: "2-digit",
@@ -355,7 +337,7 @@ function buildProjectManagementData(projects: ProjectRow[], filter: ProjectFilte
 
 function projectRowFromRecord(
   project: JsonRecord,
-  relations: { companies: Map<number, string>; employees: Map<number, string>; phases: Map<number, string> }
+  relations: { companies: Map<number, string>; employees: Map<number, string>; phases: Map<number, string>; tags: Map<number, string> }
 ): ProjectRow {
   const id = idFrom(readField(project, "id")) ?? 0;
   const number = stringFrom(readField(project, "number"));
@@ -369,7 +351,8 @@ function projectRowFromRecord(
     phase: relationDisplayName(project, "phase", relations.phases, "Geen fase"),
     deadline: dateKeyFromValue(readField(project, "deadline")),
     startDate: dateKeyFromValue(readField(project, "startdate")),
-    deliveryDate: dateKeyFromValue(readField(project, "deliverydate")) ?? dateKeyFromValue(readField(project, "enddate")),
+    deliveryDate: dateKeyFromValue(readField(project, "deliverydate")),
+    tags: relationIds(project, "tags").map((id) => relations.tags.get(id)).filter((tag): tag is string => Boolean(tag)),
     value: Math.max(0, numberFrom(readField(project, "totalexclvat")) ?? 0),
     archived: booleanFrom(readField(project, "archived")) === true
   };
@@ -384,11 +367,6 @@ function relationDisplayName(project: JsonRecord, field: string, names: Map<numb
 
   const id = relationId(project, field);
   return id !== null ? names.get(id) ?? fallback : fallback;
-}
-
-function projectFilterFromParams(params: ProjectSearchParams): ProjectFilter {
-  const value = firstParam(params.filter);
-  return value === "active" || value === "archived" ? value : "all";
 }
 
 function completionNoticeFromParams(params: ProjectSearchParams) {
@@ -411,7 +389,17 @@ function firstParam(value: string | string[] | undefined) {
 }
 
 function uniqueRelationIds(records: JsonRecord[], field: string) {
-  return Array.from(new Set(records.map((record) => relationId(record, field)).filter((id): id is number => id !== null)));
+  return Array.from(new Set(records.flatMap((record) => relationIds(record, field))));
+}
+
+function relationIds(record: JsonRecord, field: string) {
+  const relation = readField(record, field);
+  if (Array.isArray(relation)) {
+    return relation.map(idFrom).filter((id): id is number => id !== null);
+  }
+
+  const id = relationId(record, field);
+  return id === null ? [] : [id];
 }
 
 function relationId(record: JsonRecord, field: string) {
@@ -608,6 +596,15 @@ function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
+function isOngoingProject(project: ProjectRow) {
+  return (
+    !project.archived &&
+    normalize(project.phase) !== "afgerond" &&
+    project.tags.some((tag) => normalize(tag) === "project") &&
+    Boolean(project.startDate && project.deadline && project.deliveryDate)
+  );
+}
+
 function looksLikeEntity(record: JsonRecord) {
   return ["id", "name", "number", "deadline", "company"].some((field) => readField(record, field) !== undefined);
 }
@@ -620,13 +617,13 @@ function createDemoProjects(): ProjectRow[] {
   };
 
   return [
-    { id: 601, code: "#2026-041", name: "Rebranding voorjaar", company: "Atelier Nova", manager: "Janneke Jacobs", phase: "Concept", deadline: relativeDate(-3), startDate: relativeDate(-42), deliveryDate: relativeDate(8), value: 12400, archived: false },
-    { id: 602, code: "#2026-042", name: "E-commerce campagne", company: "Korf & Co", manager: "Jasmijn Bakker", phase: "Productie", deadline: relativeDate(2), startDate: relativeDate(-21), deliveryDate: relativeDate(2), value: 18600, archived: false },
-    { id: 603, code: "#2026-043", name: "Website onderhoud Q3", company: "Veldhuis Groep", manager: "Noor de Vries", phase: "Uitvoering", deadline: relativeDate(6), startDate: relativeDate(-12), deliveryDate: relativeDate(6), value: 7200, archived: false },
-    { id: 604, code: "#2026-044", name: "Employer branding", company: "Meridian", manager: "Milan Jansen", phase: "Review", deadline: relativeDate(11), startDate: relativeDate(-28), deliveryDate: relativeDate(11), value: 9500, archived: false },
-    { id: 605, code: "#2026-045", name: "Jaarverslag 2026", company: "Hartman Industries", manager: "Janneke Jacobs", phase: "Planning", deadline: relativeDate(28), startDate: relativeDate(8), deliveryDate: relativeDate(28), value: 15750, archived: false },
-    { id: 606, code: "#2026-031", name: "Contentretainer juni", company: "Studio Linden", manager: "Jasmijn Bakker", phase: "Uitvoering", deadline: relativeDate(35), startDate: relativeDate(-18), deliveryDate: relativeDate(35), value: 5400, archived: false },
-    { id: 607, code: "#2026-029", name: "Productlancering", company: "Penta Labs", manager: "Noor de Vries", phase: "Oplevering", deadline: relativeDate(-16), startDate: relativeDate(-62), deliveryDate: relativeDate(-16), value: 22400, archived: true },
-    { id: 608, code: "#2026-024", name: "Merkstrategie", company: "Lumen Partners", manager: "Milan Jansen", phase: "Afgerond", deadline: relativeDate(-49), startDate: relativeDate(-90), deliveryDate: relativeDate(-49), value: 13800, archived: true }
+    { id: 601, code: "#2026-041", name: "Rebranding voorjaar", company: "Atelier Nova", manager: "Janneke Jacobs", phase: "Concept", deadline: relativeDate(-3), startDate: relativeDate(-42), deliveryDate: relativeDate(8), tags: ["Project"], value: 12400, archived: false },
+    { id: 602, code: "#2026-042", name: "E-commerce campagne", company: "Korf & Co", manager: "Jasmijn Bakker", phase: "Productie", deadline: relativeDate(2), startDate: relativeDate(-21), deliveryDate: relativeDate(2), tags: ["Project"], value: 18600, archived: false },
+    { id: 603, code: "#2026-043", name: "Website onderhoud Q3", company: "Veldhuis Groep", manager: "Noor de Vries", phase: "Uitvoering", deadline: relativeDate(6), startDate: relativeDate(-12), deliveryDate: relativeDate(6), tags: ["Project"], value: 7200, archived: false },
+    { id: 604, code: "#2026-044", name: "Employer branding", company: "Meridian", manager: "Milan Jansen", phase: "Review", deadline: relativeDate(11), startDate: relativeDate(-28), deliveryDate: relativeDate(11), tags: ["Campagne"], value: 9500, archived: false },
+    { id: 605, code: "#2026-045", name: "Jaarverslag 2026", company: "Hartman Industries", manager: "Janneke Jacobs", phase: "Afgerond", deadline: relativeDate(28), startDate: relativeDate(8), deliveryDate: relativeDate(28), tags: ["Project"], value: 15750, archived: false },
+    { id: 606, code: "#2026-031", name: "Contentretainer juni", company: "Studio Linden", manager: "Jasmijn Bakker", phase: "Uitvoering", deadline: relativeDate(35), startDate: relativeDate(-18), deliveryDate: relativeDate(35), tags: ["Project"], value: 5400, archived: false },
+    { id: 607, code: "#2026-029", name: "Productlancering", company: "Penta Labs", manager: "Noor de Vries", phase: "Oplevering", deadline: relativeDate(-16), startDate: relativeDate(-62), deliveryDate: relativeDate(-16), tags: ["Project"], value: 22400, archived: true },
+    { id: 608, code: "#2026-024", name: "Merkstrategie", company: "Lumen Partners", manager: "Milan Jansen", phase: "Afgerond", deadline: relativeDate(-49), startDate: relativeDate(-90), deliveryDate: relativeDate(-49), tags: ["Project"], value: 13800, archived: true }
   ];
 }
