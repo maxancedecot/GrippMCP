@@ -19,7 +19,7 @@ export function CompleteProjectForm({
       className="project-completion-form"
       action={completeProjectAction}
       onSubmit={(event) => {
-        if (!window.confirm(`Opdracht '${projectName}' afronden?`)) {
+        if (!window.confirm(`Opdracht '${projectName}' als afgerond markeren?`)) {
           event.preventDefault();
         }
       }}

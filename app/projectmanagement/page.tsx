@@ -399,6 +399,8 @@ function completionNoticeFromParams(params: ProjectSearchParams) {
       return { tone: "error", message: "De opdracht kon niet worden afgerond." };
     case "invalid":
       return { tone: "error", message: "Ongeldige opdracht." };
+    case "missing_phase":
+      return { tone: "error", message: "Geen projectfase 'Afgerond' gevonden. De opdracht is niet aangepast." };
     default:
       return null;
   }
