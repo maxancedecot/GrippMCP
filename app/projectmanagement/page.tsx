@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
+import { CompleteProjectForm } from "./complete-project-form.js";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
   const params = (await searchParams) ?? {};
   const filter = projectFilterFromParams(params);
   const query = firstParam(params.query)?.trim() ?? "";
+  const completionNotice = completionNoticeFromParams(params);
   const data = await getProjectManagementData(filter, query);
 
   return (
@@ -82,6 +84,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
       </header>
 
       {data.source.message ? <p className="data-notice">{data.source.message}</p> : null}
+      {completionNotice ? <p className={`data-notice data-notice--${completionNotice.tone}`}>{completionNotice.message}</p> : null}
 
       <nav className="dashboard-tabs" aria-label="Hoofdnavigatie">
         <a className="dashboard-tab" href="/dashboard">Declarabiliteit</a>
@@ -133,6 +136,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
                   <th>Deadline</th>
                   <th>Periode</th>
                   <th className="table-number">Waarde</th>
+                  <th><span className="sr-only">Actie</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -152,6 +156,11 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
                     <td><Deadline date={project.deadline} archived={project.archived} /></td>
                     <td><DateRange start={project.startDate} end={project.deliveryDate} /></td>
                     <td className="table-number">{project.value > 0 ? formatCurrency(project.value) : "-"}</td>
+                    <td className="project-action-cell">
+                      {!project.archived && data.source.mode === "live" ? (
+                        <CompleteProjectForm projectId={project.id} projectName={project.name} filter={filter} query={query} />
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -380,6 +389,19 @@ function relationDisplayName(project: JsonRecord, field: string, names: Map<numb
 function projectFilterFromParams(params: ProjectSearchParams): ProjectFilter {
   const value = firstParam(params.filter);
   return value === "active" || value === "archived" ? value : "all";
+}
+
+function completionNoticeFromParams(params: ProjectSearchParams) {
+  switch (firstParam(params.notice)) {
+    case "completed":
+      return { tone: "success", message: "Opdracht afgerond." };
+    case "failed":
+      return { tone: "error", message: "De opdracht kon niet worden afgerond." };
+    case "invalid":
+      return { tone: "error", message: "Ongeldige opdracht." };
+    default:
+      return null;
+  }
 }
 
 function firstParam(value: string | string[] | undefined) {

@@ -117,6 +117,18 @@ select {
   font-size: 14px;
 }
 
+.data-notice--success {
+  border-color: rgba(8, 121, 104, 0.28);
+  background: var(--good-soft);
+  color: #075f53;
+}
+
+.data-notice--error {
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fde8e5;
+  color: var(--danger);
+}
+
 .dashboard-tabs {
   display: inline-flex;
   gap: 4px;
@@ -747,6 +759,36 @@ td .inline-bar {
   padding-right: 0;
 }
 
+.project-action-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.project-completion-form {
+  margin: 0;
+}
+
+.project-complete-button {
+  min-height: 30px;
+  border: 1px solid #0b6b5e;
+  border-radius: 6px;
+  background: var(--surface);
+  color: #075f53;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.project-complete-button:hover {
+  background: var(--good-soft);
+}
+
+.project-complete-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .table-number {
   text-align: right;
   white-space: nowrap;
@@ -790,6 +832,18 @@ td .inline-bar {
   color: var(--muted);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 @media (max-width: 980px) {
