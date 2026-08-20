@@ -222,7 +222,7 @@ function ProjectTimeline({
                     <ProjectTasksModal projectId={project.id} projectName={project.name} />
                   </div>
                   <span className="cell-muted">{project.company}</span>
-                  {project.accountManager ? <span className="cell-muted">Accountmanager: {project.accountManager}</span> : null}
+                  {project.accountManager ? <span className="cell-muted">{project.accountManager}</span> : null}
                 </div>
 
                 <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; interne oplevering ${formatDate(deadlineDate)}`}>
