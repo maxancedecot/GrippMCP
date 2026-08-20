@@ -3,6 +3,7 @@ import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
 import { ProjectManagementAutoRefresh } from "./auto-refresh.js";
 import { CompleteProjectForm } from "./complete-project-form.js";
+import { ProjectTasksModal } from "./project-tasks-modal.js";
 
 export const dynamic = "force-dynamic";
 
@@ -212,7 +213,7 @@ function ProjectTimeline({
               <article className="project-timeline-row" key={project.id} role="listitem">
                 <div className="project-timeline-details project-timeline-fixed project-timeline-fixed--left">
                   <div className="project-timeline-title-row">
-                    <span className="row-title">{project.name}</span>
+                    <ProjectTasksModal projectId={project.id} projectName={project.name} />
                   </div>
                   <span className="cell-muted">{project.company}</span>
                 </div>
