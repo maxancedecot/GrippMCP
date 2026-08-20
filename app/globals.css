@@ -765,7 +765,7 @@ td .inline-bar {
 
 .project-timeline-header {
   align-items: end;
-  padding: 0 0 10px;
+  padding: 0;
   border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: 12px;
@@ -774,7 +774,6 @@ td .inline-bar {
 }
 
 .project-timeline-fixed {
-  border: 1px solid rgba(255, 255, 255, 0.72);
   background: rgba(255, 255, 255, 0.66);
   backdrop-filter: blur(16px) saturate(1.18);
   -webkit-backdrop-filter: blur(16px) saturate(1.18);
@@ -784,7 +783,6 @@ td .inline-bar {
   position: sticky;
   z-index: 3;
   left: 0;
-  border-left: 0;
   box-shadow: 9px 0 18px -14px rgba(25, 35, 45, 0.55);
 }
 
@@ -792,12 +790,15 @@ td .inline-bar {
   position: sticky;
   z-index: 3;
   right: 0;
-  border-right: 0;
   box-shadow: -9px 0 18px -14px rgba(25, 35, 45, 0.55);
 }
 
 .project-timeline-header .project-timeline-fixed {
   z-index: 4;
+  align-self: stretch;
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 10px;
 }
 
 .project-timeline-summary-heading {
@@ -806,7 +807,7 @@ td .inline-bar {
 
 .project-timeline-axis {
   position: relative;
-  height: 30px;
+  height: 40px;
 }
 
 .project-timeline-body {
@@ -826,7 +827,7 @@ td .inline-bar {
 
 .project-timeline-axis__tick {
   position: absolute;
-  bottom: 0;
+  bottom: 10px;
   height: 8px;
   border-left: 1px solid var(--border);
 }
@@ -850,9 +851,9 @@ td .inline-bar {
 .project-timeline-row {
   position: relative;
   z-index: 1;
-  min-height: 106px;
+  min-height: 116px;
   align-items: stretch;
-  padding: 14px 0;
+  padding: 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -862,6 +863,7 @@ td .inline-bar {
   min-width: 0;
   flex-direction: column;
   justify-content: center;
+  padding-block: 14px;
 }
 
 .project-timeline-title-row {
@@ -878,6 +880,7 @@ td .inline-bar {
 .project-timeline-track {
   position: relative;
   min-height: 88px;
+  margin-block: 14px;
   overflow: visible;
 }
 
