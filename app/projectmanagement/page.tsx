@@ -390,10 +390,16 @@ function projectRowFromRecord(
 }
 
 function relationDisplayName(project: JsonRecord, field: string, names: Map<number, string>, fallback: string) {
-  const relation = asRecord(readField(project, field));
+  const relationValue = readField(project, field);
+  const relation = asRecord(relationValue);
   const embeddedName = relation ? recordDisplayName(relation, "") : "";
   if (embeddedName) {
     return embeddedName;
+  }
+
+  const directName = stringFrom(relationValue);
+  if (directName && idFrom(relationValue) === null) {
+    return directName;
   }
 
   const id = relationId(project, field);
@@ -698,10 +704,14 @@ function normalize(value: string) {
 function isOngoingProject(project: ProjectRow) {
   return (
     !project.archived &&
-    normalize(project.phase) !== "afgerond" &&
+    !isCompletedProjectPhase(project.phase) &&
     project.tags.some((tag) => normalize(tag) === "project") &&
     Boolean(project.startDate && project.deadline && project.deliveryDate)
   );
+}
+
+function isCompletedProjectPhase(phase: string) {
+  return normalize(phase).includes("afgerond");
 }
 
 function looksLikeEntity(record: JsonRecord) {
