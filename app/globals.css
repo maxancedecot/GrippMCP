@@ -774,21 +774,26 @@ td .inline-bar {
 }
 
 .project-timeline-fixed {
-  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.66);
+  backdrop-filter: blur(16px) saturate(1.18);
+  -webkit-backdrop-filter: blur(16px) saturate(1.18);
 }
 
 .project-timeline-fixed--left {
   position: sticky;
   z-index: 3;
   left: 0;
-  box-shadow: 9px 0 12px -12px rgba(25, 35, 45, 0.7);
+  border-left: 0;
+  box-shadow: 9px 0 18px -14px rgba(25, 35, 45, 0.55);
 }
 
 .project-timeline-fixed--right {
   position: sticky;
   z-index: 3;
   right: 0;
-  box-shadow: -9px 0 12px -12px rgba(25, 35, 45, 0.7);
+  border-right: 0;
+  box-shadow: -9px 0 18px -14px rgba(25, 35, 45, 0.55);
 }
 
 .project-timeline-header .project-timeline-fixed {
@@ -839,14 +844,6 @@ td .inline-bar {
 }
 
 .project-timeline-axis__tick--start > span {
-  transform: none;
-}
-
-.project-timeline-axis__tick--end > span {
-  transform: translateX(-100%);
-}
-
-.project-timeline-axis__tick--start.project-timeline-axis__tick--end > span {
   transform: none;
 }
 

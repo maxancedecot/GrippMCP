@@ -188,7 +188,7 @@ function ProjectTimeline({
           <div className="project-timeline-axis">
             {timeline.ticks.map((tick, index) => (
               <span
-                className={`project-timeline-axis__tick ${index === 0 ? "project-timeline-axis__tick--start" : ""} ${index === timeline.ticks.length - 1 ? "project-timeline-axis__tick--end" : ""}`}
+                className={`project-timeline-axis__tick ${index === 0 ? "project-timeline-axis__tick--start" : ""}`}
                 key={tick.date}
                 style={{ left: `${timelinePosition(tick.date, timeline)}%` }}
               >
@@ -646,21 +646,16 @@ function createProjectTimeline(projects: ProjectRow[]): ProjectTimelineData | nu
 }
 
 function createTimelineTicks(start: string, end: string): ProjectTimelineTick[] {
-  const tickDates = new Set([start, end]);
   const currentMonth = dateFromKey(start);
   currentMonth.setDate(1);
-  if (dateKey(currentMonth) <= start) {
+  const tickDates: string[] = [];
+
+  while (dateKey(currentMonth) <= end) {
+    tickDates.push(dateKey(currentMonth));
     currentMonth.setMonth(currentMonth.getMonth() + 1);
   }
 
-  while (dateKey(currentMonth) < end) {
-    tickDates.add(dateKey(currentMonth));
-    currentMonth.setMonth(currentMonth.getMonth() + 1);
-  }
-
-  return [...tickDates]
-    .sort()
-    .map((date) => ({ date, label: date === start || date === end ? formatDate(date) : monthFormatter.format(dateFromKey(date)) }));
+  return tickDates.map((date) => ({ date, label: monthFormatter.format(dateFromKey(date)) }));
 }
 
 function timelinePosition(date: string, timeline: ProjectTimelineData) {
