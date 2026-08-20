@@ -175,6 +175,9 @@ function ProjectTimeline({
   query: string;
   sourceMode: ProjectSource["mode"];
 }) {
+  const today = currentDateKey();
+  const todayPosition = isDateOnTimeline(today, timeline) ? timelinePosition(today, timeline) : null;
+
   return (
     <div className="project-timeline-wrap">
       <div
@@ -195,6 +198,9 @@ function ProjectTimeline({
                 <span>{tick.label}</span>
               </span>
             ))}
+            {todayPosition !== null ? (
+              <span className="project-timeline-today project-timeline-today--axis" style={{ left: `${todayPosition}%` }} title={`Vandaag, ${formatDate(today)}`} />
+            ) : null}
           </div>
           <span className="project-timeline-fixed project-timeline-fixed--right project-timeline-summary-heading">Waarde</span>
         </div>
@@ -205,6 +211,11 @@ function ProjectTimeline({
               <span className="project-timeline-gridline" key={tick.date} style={{ left: `${timelinePosition(tick.date, timeline)}%` }} />
             ))}
           </div>
+          {todayPosition !== null ? (
+            <div className="project-timeline-today-layer" aria-hidden="true">
+              <span className="project-timeline-today" style={{ left: `${todayPosition}%` }} />
+            </div>
+          ) : null}
 
           {projects.map((project) => {
             const startDate = project.startDate ?? timeline.start;
@@ -712,6 +723,10 @@ function timelineDayCount(timeline: ProjectTimelineData) {
   return daysBetween(timeline.start, timeline.end) + 1;
 }
 
+function isDateOnTimeline(date: string, timeline: ProjectTimelineData) {
+  return date >= timeline.start && date <= timeline.end;
+}
+
 function addDays(value: string, days: number) {
   const date = dateFromKey(value);
   date.setDate(date.getDate() + days);
@@ -736,6 +751,17 @@ function dateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function currentDateKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Brussels",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function normalize(value: string) {
