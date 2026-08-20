@@ -58,6 +58,8 @@ type ProjectTimelineData = {
 
 const PROJECT_PAGE_SIZE = 250;
 const PROJECT_MAX_PAGES = 40;
+const TIMELINE_DAY_WIDTH = 10;
+const TIMELINE_FIXED_WIDTH = 388;
 const currencyFormatter = new Intl.NumberFormat("nl-BE", {
   style: "currency",
   currency: "EUR",
@@ -175,7 +177,12 @@ function ProjectTimeline({
 }) {
   return (
     <div className="project-timeline-wrap">
-      <div className="project-timeline" role="list" aria-label={`Projectplanning van ${formatDate(timeline.start)} tot ${formatDate(timeline.end)}`}>
+      <div
+        className="project-timeline"
+        role="list"
+        aria-label={`Projectplanning van ${formatDate(timeline.start)} tot ${formatDate(timeline.end)}`}
+        style={{ minWidth: `${timelineMinimumWidth(timeline)}px` }}
+      >
         <div className="project-timeline-header" aria-hidden="true">
           <span>Project</span>
           <div className="project-timeline-axis">
@@ -622,11 +629,17 @@ function createProjectTimeline(projects: ProjectRow[]): ProjectTimelineData | nu
     return null;
   }
 
-  const start = [...startDates].sort()[0];
-  const end = [...deliveryDates].sort().at(-1);
-  if (!start || !end) {
+  const earliestStart = [...startDates].sort()[0];
+  const latestDelivery = [...deliveryDates].sort().at(-1);
+  if (!earliestStart || !latestDelivery) {
     return null;
   }
+
+  const calendarStart = dateFromKey(earliestStart);
+  calendarStart.setDate(1);
+  const start = dateKey(calendarStart);
+  const minimumEnd = new Date(calendarStart.getFullYear(), calendarStart.getMonth() + 3, 0);
+  const end = latestDelivery > dateKey(minimumEnd) ? latestDelivery : dateKey(minimumEnd);
 
   return { start, end, ticks: createTimelineTicks(start, end) };
 }
@@ -675,6 +688,10 @@ function timelineDeadlinePosition(deadline: string, start: string, end: string, 
   const deadlinePosition = timelinePosition(deadline, timeline);
 
   return Math.max(startPosition, Math.min(endPosition, deadlinePosition));
+}
+
+function timelineMinimumWidth(timeline: ProjectTimelineData) {
+  return TIMELINE_FIXED_WIDTH + Math.max(3 * 30 * TIMELINE_DAY_WIDTH, (daysBetween(timeline.start, timeline.end) + 1) * TIMELINE_DAY_WIDTH);
 }
 
 function deadlineToneFor(deadline: string) {
