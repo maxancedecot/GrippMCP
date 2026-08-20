@@ -81,9 +81,8 @@ const monthFormatter = new Intl.DateTimeFormat("nl-NL", {
 
 export default async function ProjectManagementPage({ searchParams }: { searchParams?: Promise<ProjectSearchParams> }) {
   const params = (await searchParams) ?? {};
-  const query = firstParam(params.query)?.trim() ?? "";
   const completionNotice = completionNoticeFromParams(params);
-  const data = await getProjectManagementData(query);
+  const data = await getProjectManagementData();
   const timeline = createProjectTimeline(data.projects);
 
   return (
@@ -106,20 +105,6 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
       {data.source.message ? <p className="data-notice">{data.source.message}</p> : null}
       {completionNotice ? <p className={`data-notice data-notice--${completionNotice.tone}`}>{completionNotice.message}</p> : null}
 
-      <nav className="dashboard-tabs" aria-label="Hoofdnavigatie">
-        <a className="dashboard-tab" href="/dashboard">Declarabiliteit</a>
-        <a className="dashboard-tab" href="/dashboard?tab=revenue">Omzet</a>
-        <a className="dashboard-tab dashboard-tab--active" href="/projectmanagement" aria-current="page">Projectmanagement</a>
-      </nav>
-
-      <form className="project-filter-form" action="/projectmanagement">
-        <label className="project-search-field">
-          Zoeken
-          <input type="search" name="query" defaultValue={query} placeholder="Opdracht, klant of verantwoordelijke" />
-        </label>
-        <button type="submit">Zoeken</button>
-      </form>
-
       <section className="metric-grid project-metric-grid" aria-label="Kerncijfers projecten">
         <ProjectMetric label="Lopend" value={String(data.totalProjects)} detail="Tag Project met alle projectdatums" tone="good" />
         <ProjectMetric label="Achter deadline" value={String(data.overdueProjects)} detail="Lopende projecten met verstreken deadline" tone="warning" />
@@ -137,7 +122,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
         </div>
 
         {timeline ? (
-          <ProjectTimeline projects={data.projects} timeline={timeline} query={query} sourceMode={data.source.mode} />
+          <ProjectTimeline projects={data.projects} timeline={timeline} sourceMode={data.source.mode} />
         ) : (
           <p className="empty-state">Geen lopende projecten met tag Project en alle datums gevonden.</p>
         )}
@@ -169,12 +154,10 @@ function ProjectMetric({
 function ProjectTimeline({
   projects,
   timeline,
-  query,
   sourceMode
 }: {
   projects: ProjectRow[];
   timeline: ProjectTimelineData;
-  query: string;
   sourceMode: ProjectSource["mode"];
 }) {
   const today = currentDateKey();
@@ -266,7 +249,7 @@ function ProjectTimeline({
                 <div className="project-timeline-summary project-timeline-fixed project-timeline-fixed--right">
                   <strong>{project.value > 0 ? formatCurrency(project.value) : "-"}</strong>
                   {sourceMode === "live" ? (
-                    <CompleteProjectForm projectId={project.id} projectName={project.name} query={query} />
+                    <CompleteProjectForm projectId={project.id} projectName={project.name} />
                   ) : null}
                 </div>
               </article>
@@ -278,9 +261,9 @@ function ProjectTimeline({
   );
 }
 
-async function getProjectManagementData(query: string): Promise<ProjectManagementData> {
+async function getProjectManagementData(): Promise<ProjectManagementData> {
   if (!process.env.GRIPP_API_TOKEN) {
-    return buildProjectManagementData(createDemoProjects(), query, {
+    return buildProjectManagementData(createDemoProjects(), {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-opdrachten te tonen."
     });
@@ -303,9 +286,9 @@ async function getProjectManagementData(query: string): Promise<ProjectManagemen
     ]);
 
     const projects = projectRecords.map((project) => projectRowFromRecord(project, { companies, employees, phases, tags }));
-    return buildProjectManagementData(projects, query, { mode: "live", message: "" });
+    return buildProjectManagementData(projects, { mode: "live", message: "" });
   } catch (error) {
-    return buildProjectManagementData(createDemoProjects(), query, {
+    return buildProjectManagementData(createDemoProjects(), {
       mode: "demo",
       message: `Live opdrachten konden niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
     });
@@ -358,17 +341,9 @@ async function fetchRelationNames(client: GrippClient, entity: RelationEntity, i
   return names;
 }
 
-function buildProjectManagementData(projects: ProjectRow[], query: string, source: ProjectSource): ProjectManagementData {
-  const normalizedQuery = normalize(query);
+function buildProjectManagementData(projects: ProjectRow[], source: ProjectSource): ProjectManagementData {
   const filteredProjects = projects
     .filter(isOngoingProject)
-    .filter((project) => {
-      if (!normalizedQuery) {
-        return true;
-      }
-
-      return normalize([project.code, project.name, project.company, project.manager, project.phase].join(" ")).includes(normalizedQuery);
-    })
     .sort((left, right) => {
       const leftDeadline = left.deadline ?? "9999-12-31";
       const rightDeadline = right.deadline ?? "9999-12-31";

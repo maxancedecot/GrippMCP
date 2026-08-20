@@ -7,34 +7,24 @@ import type { JsonValue } from "../../src/types.js";
 
 export async function completeProjectAction(formData: FormData) {
   const projectId = Number(formData.get("projectId"));
-  const query = formValue(formData, "query");
 
   if (!Number.isInteger(projectId) || projectId <= 0) {
-    redirect(projectManagementHref(query, "invalid"));
+    redirect(projectManagementHref("invalid"));
   }
 
   try {
     const client = new GrippClient();
     await client.call("project.update", [projectId, { enddate: completionDateKey(), archived: false }] as JsonValue[], true);
   } catch {
-    redirect(projectManagementHref(query, "failed"));
+    redirect(projectManagementHref("failed"));
   }
 
   revalidatePath("/projectmanagement");
-  redirect(projectManagementHref(query, "completed"));
+  redirect(projectManagementHref("completed"));
 }
 
-function formValue(formData: FormData, name: string) {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
-}
-
-function projectManagementHref(query: string, notice: "completed" | "failed" | "invalid") {
+function projectManagementHref(notice: "completed" | "failed" | "invalid") {
   const params = new URLSearchParams({ notice });
-  if (query) {
-    params.set("query", query);
-  }
-
   return `/projectmanagement?${params.toString()}`;
 }
 

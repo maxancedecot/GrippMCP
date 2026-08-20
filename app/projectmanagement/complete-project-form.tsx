@@ -5,12 +5,10 @@ import { completeProjectAction } from "./actions.js";
 
 export function CompleteProjectForm({
   projectId,
-  projectName,
-  query
+  projectName
 }: {
   projectId: number;
   projectName: string;
-  query: string;
 }) {
   return (
     <form
@@ -23,7 +21,6 @@ export function CompleteProjectForm({
       }}
     >
       <input type="hidden" name="projectId" value={projectId} />
-      <input type="hidden" name="query" value={query} />
       <CompleteProjectButton projectName={projectName} />
     </form>
   );
