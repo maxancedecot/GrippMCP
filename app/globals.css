@@ -1007,27 +1007,6 @@ td .inline-bar {
   opacity: 0.62;
 }
 
-.project-tag {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-  font-weight: 740;
-  white-space: nowrap;
-}
-
-.project-tag--good {
-  background: var(--good-soft);
-  color: #075f53;
-}
-
-.project-tag--neutral {
-  background: var(--neutral-soft);
-  color: #536272;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;

@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 
 type JsonRecord = Record<string, unknown>;
 type ProjectSearchParams = Record<string, string | string[] | undefined>;
-type RelationEntity = "company" | "employee" | "projectphase" | "tag";
+type RelationEntity = "company" | "projectphase" | "tag";
 
 type ProjectSource = {
   mode: "live" | "demo";
@@ -22,10 +22,8 @@ type ProjectSource = {
 
 type ProjectRow = {
   id: number;
-  code: string;
   name: string;
   company: string;
-  manager: string;
   phase: string;
   deadline?: string;
   startDate?: string;
@@ -215,10 +213,8 @@ function ProjectTimeline({
                 <div className="project-timeline-details project-timeline-fixed project-timeline-fixed--left">
                   <div className="project-timeline-title-row">
                     <span className="row-title">{project.name}</span>
-                    <span className="project-tag project-tag--good">{project.phase}</span>
                   </div>
-                  <span className="cell-muted">{project.code} · {project.company}</span>
-                  <span className="cell-muted">{project.manager}</span>
+                  <span className="cell-muted">{project.company}</span>
                 </div>
 
                 <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; interne oplevering ${formatDate(deadlineDate)}`}>
@@ -274,18 +270,16 @@ async function getProjectManagementData(): Promise<ProjectManagementData> {
     const projectRecords = await fetchProjectPages(client);
     const relationIds = {
       companies: uniqueRelationIds(projectRecords, "company"),
-      employees: uniqueRelationIds(projectRecords, "accountmanager"),
       phases: uniqueRelationIds(projectRecords, "phase"),
       tags: uniqueRelationIds(projectRecords, "tags")
     };
-    const [companies, employees, phases, tags] = await Promise.all([
+    const [companies, phases, tags] = await Promise.all([
       fetchRelationNames(client, "company", relationIds.companies),
-      fetchRelationNames(client, "employee", relationIds.employees),
       fetchRelationNames(client, "projectphase", relationIds.phases),
       fetchRelationNames(client, "tag", relationIds.tags)
     ]);
 
-    const projects = projectRecords.map((project) => projectRowFromRecord(project, { companies, employees, phases, tags }));
+    const projects = projectRecords.map((project) => projectRowFromRecord(project, { companies, phases, tags }));
     return buildProjectManagementData(projects, { mode: "live", message: "" });
   } catch (error) {
     return buildProjectManagementData(createDemoProjects(), {
@@ -378,17 +372,14 @@ function buildProjectManagementData(projects: ProjectRow[], source: ProjectSourc
 
 function projectRowFromRecord(
   project: JsonRecord,
-  relations: { companies: Map<number, string>; employees: Map<number, string>; phases: Map<number, string>; tags: Map<number, string> }
+  relations: { companies: Map<number, string>; phases: Map<number, string>; tags: Map<number, string> }
 ): ProjectRow {
   const id = idFrom(readField(project, "id")) ?? 0;
-  const number = stringFrom(readField(project, "number"));
 
   return {
     id,
-    code: number ? `#${number}` : `#${id}`,
     name: stringFrom(readField(project, "name")) ?? recordDisplayName(project, "Naamloze opdracht"),
     company: relationDisplayName(project, "company", relations.companies, "Geen klant"),
-    manager: relationDisplayName(project, "accountmanager", relations.employees, "Niet toegewezen"),
     phase: relationDisplayName(project, "phase", relations.phases, "Geen fase"),
     deadline: dateKeyFromValue(readField(project, "deadline")),
     startDate: dateKeyFromValue(readField(project, "startdate")),
@@ -783,13 +774,13 @@ function createDemoProjects(): ProjectRow[] {
   };
 
   return [
-    { id: 601, code: "#2026-041", name: "Rebranding voorjaar", company: "Atelier Nova", manager: "Janneke Jacobs", phase: "Concept", deadline: relativeDate(-3), startDate: relativeDate(-42), deliveryDate: relativeDate(8), tags: ["Project"], value: 12400, archived: false },
-    { id: 602, code: "#2026-042", name: "E-commerce campagne", company: "Korf & Co", manager: "Jasmijn Bakker", phase: "Productie", deadline: relativeDate(2), startDate: relativeDate(-21), deliveryDate: relativeDate(2), tags: ["Project"], value: 18600, archived: false },
-    { id: 603, code: "#2026-043", name: "Website onderhoud Q3", company: "Veldhuis Groep", manager: "Noor de Vries", phase: "Uitvoering", deadline: relativeDate(6), startDate: relativeDate(-12), deliveryDate: relativeDate(6), tags: ["Project"], value: 7200, archived: false },
-    { id: 604, code: "#2026-044", name: "Employer branding", company: "Meridian", manager: "Milan Jansen", phase: "Review", deadline: relativeDate(11), startDate: relativeDate(-28), deliveryDate: relativeDate(11), tags: ["Campagne"], value: 9500, archived: false },
-    { id: 605, code: "#2026-045", name: "Jaarverslag 2026", company: "Hartman Industries", manager: "Janneke Jacobs", phase: "Uitvoering", deadline: relativeDate(28), startDate: relativeDate(8), deliveryDate: relativeDate(28), completedDate: relativeDate(-1), tags: ["Project"], value: 15750, archived: false },
-    { id: 606, code: "#2026-031", name: "Contentretainer juni", company: "Studio Linden", manager: "Jasmijn Bakker", phase: "Uitvoering", deadline: relativeDate(35), startDate: relativeDate(-18), deliveryDate: relativeDate(35), tags: ["Project"], value: 5400, archived: false },
-    { id: 607, code: "#2026-029", name: "Productlancering", company: "Penta Labs", manager: "Noor de Vries", phase: "Oplevering", deadline: relativeDate(-16), startDate: relativeDate(-62), deliveryDate: relativeDate(-16), tags: ["Project"], value: 22400, archived: true },
-    { id: 608, code: "#2026-024", name: "Merkstrategie", company: "Lumen Partners", manager: "Milan Jansen", phase: "Afgerond", deadline: relativeDate(-49), startDate: relativeDate(-90), deliveryDate: relativeDate(-49), tags: ["Project"], value: 13800, archived: true }
+    { id: 601, name: "Rebranding voorjaar", company: "Atelier Nova", phase: "Concept", deadline: relativeDate(-3), startDate: relativeDate(-42), deliveryDate: relativeDate(8), tags: ["Project"], value: 12400, archived: false },
+    { id: 602, name: "E-commerce campagne", company: "Korf & Co", phase: "Productie", deadline: relativeDate(2), startDate: relativeDate(-21), deliveryDate: relativeDate(2), tags: ["Project"], value: 18600, archived: false },
+    { id: 603, name: "Website onderhoud Q3", company: "Veldhuis Groep", phase: "Uitvoering", deadline: relativeDate(6), startDate: relativeDate(-12), deliveryDate: relativeDate(6), tags: ["Project"], value: 7200, archived: false },
+    { id: 604, name: "Employer branding", company: "Meridian", phase: "Review", deadline: relativeDate(11), startDate: relativeDate(-28), deliveryDate: relativeDate(11), tags: ["Campagne"], value: 9500, archived: false },
+    { id: 605, name: "Jaarverslag 2026", company: "Hartman Industries", phase: "Uitvoering", deadline: relativeDate(28), startDate: relativeDate(8), deliveryDate: relativeDate(28), completedDate: relativeDate(-1), tags: ["Project"], value: 15750, archived: false },
+    { id: 606, name: "Contentretainer juni", company: "Studio Linden", phase: "Uitvoering", deadline: relativeDate(35), startDate: relativeDate(-18), deliveryDate: relativeDate(35), tags: ["Project"], value: 5400, archived: false },
+    { id: 607, name: "Productlancering", company: "Penta Labs", phase: "Oplevering", deadline: relativeDate(-16), startDate: relativeDate(-62), deliveryDate: relativeDate(-16), tags: ["Project"], value: 22400, archived: true },
+    { id: 608, name: "Merkstrategie", company: "Lumen Partners", phase: "Afgerond", deadline: relativeDate(-49), startDate: relativeDate(-90), deliveryDate: relativeDate(-49), tags: ["Project"], value: 13800, archived: true }
   ];
 }
