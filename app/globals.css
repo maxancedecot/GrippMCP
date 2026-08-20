@@ -746,6 +746,7 @@ td .inline-bar {
 }
 
 .project-timeline-wrap {
+  position: relative;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   padding-bottom: 4px;
@@ -770,6 +771,28 @@ td .inline-bar {
   font-size: 12px;
   font-weight: 760;
   text-transform: uppercase;
+}
+
+.project-timeline-fixed {
+  background: var(--surface);
+}
+
+.project-timeline-fixed--left {
+  position: sticky;
+  z-index: 3;
+  left: 0;
+  box-shadow: 9px 0 12px -12px rgba(25, 35, 45, 0.7);
+}
+
+.project-timeline-fixed--right {
+  position: sticky;
+  z-index: 3;
+  right: 0;
+  box-shadow: -9px 0 12px -12px rgba(25, 35, 45, 0.7);
+}
+
+.project-timeline-header .project-timeline-fixed {
+  z-index: 4;
 }
 
 .project-timeline-summary-heading {

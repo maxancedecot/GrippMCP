@@ -184,7 +184,7 @@ function ProjectTimeline({
         style={{ minWidth: `${timelineMinimumWidth(timeline)}px` }}
       >
         <div className="project-timeline-header" aria-hidden="true">
-          <span>Project</span>
+          <span className="project-timeline-fixed project-timeline-fixed--left">Project</span>
           <div className="project-timeline-axis">
             {timeline.ticks.map((tick, index) => (
               <span
@@ -196,7 +196,7 @@ function ProjectTimeline({
               </span>
             ))}
           </div>
-          <span className="project-timeline-summary-heading">Waarde</span>
+          <span className="project-timeline-fixed project-timeline-fixed--right project-timeline-summary-heading">Waarde</span>
         </div>
 
         {projects.map((project) => {
@@ -209,7 +209,7 @@ function ProjectTimeline({
 
           return (
             <article className="project-timeline-row" key={project.id} role="listitem">
-              <div className="project-timeline-details">
+              <div className="project-timeline-details project-timeline-fixed project-timeline-fixed--left">
                 <div className="project-timeline-title-row">
                   <span className="row-title">{project.name}</span>
                   <span className="project-tag project-tag--good">{project.phase}</span>
@@ -240,7 +240,7 @@ function ProjectTimeline({
                 </div>
               </div>
 
-              <div className="project-timeline-summary">
+              <div className="project-timeline-summary project-timeline-fixed project-timeline-fixed--right">
                 <strong>{project.value > 0 ? formatCurrency(project.value) : "-"}</strong>
                 <span className={`project-timeline-deadline-label project-timeline-deadline-label--${deadlineTone}`}>
                   Interne oplevering {formatDate(deadlineDate)}
