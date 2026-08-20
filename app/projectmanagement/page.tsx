@@ -29,6 +29,7 @@ type ProjectRow = {
   deadline?: string;
   startDate?: string;
   deliveryDate?: string;
+  completedDate?: string;
   tags: string[];
   value: number;
   archived: boolean;
@@ -383,6 +384,7 @@ function projectRowFromRecord(
     deadline: dateKeyFromValue(readField(project, "deadline")),
     startDate: dateKeyFromValue(readField(project, "startdate")),
     deliveryDate: dateKeyFromValue(readField(project, "deliverydate")),
+    completedDate: dateKeyFromValue(readField(project, "enddate")),
     tags: relationIds(project, "tags").map((id) => relations.tags.get(id)).filter((tag): tag is string => Boolean(tag)),
     value: Math.max(0, numberFrom(readField(project, "totalexclvat")) ?? 0),
     archived: booleanFrom(readField(project, "archived")) === true
@@ -414,8 +416,6 @@ function completionNoticeFromParams(params: ProjectSearchParams) {
       return { tone: "error", message: "De opdracht kon niet worden afgerond." };
     case "invalid":
       return { tone: "error", message: "Ongeldige opdracht." };
-    case "missing_phase":
-      return { tone: "error", message: "Geen projectfase 'Afgerond' gevonden. De opdracht is niet aangepast." };
     default:
       return null;
   }
@@ -704,6 +704,7 @@ function normalize(value: string) {
 function isOngoingProject(project: ProjectRow) {
   return (
     !project.archived &&
+    !project.completedDate &&
     !isCompletedProjectPhase(project.phase) &&
     project.tags.some((tag) => normalize(tag) === "project") &&
     Boolean(project.startDate && project.deadline && project.deliveryDate)
@@ -730,7 +731,7 @@ function createDemoProjects(): ProjectRow[] {
     { id: 602, code: "#2026-042", name: "E-commerce campagne", company: "Korf & Co", manager: "Jasmijn Bakker", phase: "Productie", deadline: relativeDate(2), startDate: relativeDate(-21), deliveryDate: relativeDate(2), tags: ["Project"], value: 18600, archived: false },
     { id: 603, code: "#2026-043", name: "Website onderhoud Q3", company: "Veldhuis Groep", manager: "Noor de Vries", phase: "Uitvoering", deadline: relativeDate(6), startDate: relativeDate(-12), deliveryDate: relativeDate(6), tags: ["Project"], value: 7200, archived: false },
     { id: 604, code: "#2026-044", name: "Employer branding", company: "Meridian", manager: "Milan Jansen", phase: "Review", deadline: relativeDate(11), startDate: relativeDate(-28), deliveryDate: relativeDate(11), tags: ["Campagne"], value: 9500, archived: false },
-    { id: 605, code: "#2026-045", name: "Jaarverslag 2026", company: "Hartman Industries", manager: "Janneke Jacobs", phase: "Afgerond", deadline: relativeDate(28), startDate: relativeDate(8), deliveryDate: relativeDate(28), tags: ["Project"], value: 15750, archived: false },
+    { id: 605, code: "#2026-045", name: "Jaarverslag 2026", company: "Hartman Industries", manager: "Janneke Jacobs", phase: "Uitvoering", deadline: relativeDate(28), startDate: relativeDate(8), deliveryDate: relativeDate(28), completedDate: relativeDate(-1), tags: ["Project"], value: 15750, archived: false },
     { id: 606, code: "#2026-031", name: "Contentretainer juni", company: "Studio Linden", manager: "Jasmijn Bakker", phase: "Uitvoering", deadline: relativeDate(35), startDate: relativeDate(-18), deliveryDate: relativeDate(35), tags: ["Project"], value: 5400, archived: false },
     { id: 607, code: "#2026-029", name: "Productlancering", company: "Penta Labs", manager: "Noor de Vries", phase: "Oplevering", deadline: relativeDate(-16), startDate: relativeDate(-62), deliveryDate: relativeDate(-16), tags: ["Project"], value: 22400, archived: true },
     { id: 608, code: "#2026-024", name: "Merkstrategie", company: "Lumen Partners", manager: "Milan Jansen", phase: "Afgerond", deadline: relativeDate(-49), startDate: relativeDate(-90), deliveryDate: relativeDate(-49), tags: ["Project"], value: 13800, archived: true }
