@@ -44,6 +44,17 @@ type ProjectManagementData = {
   lastUpdated: string;
 };
 
+type ProjectTimelineTick = {
+  date: string;
+  label: string;
+};
+
+type ProjectTimelineData = {
+  start: string;
+  end: string;
+  ticks: ProjectTimelineTick[];
+};
+
 const PROJECT_PAGE_SIZE = 250;
 const PROJECT_MAX_PAGES = 40;
 const currencyFormatter = new Intl.NumberFormat("nl-BE", {
@@ -59,11 +70,17 @@ const dateFormatter = new Intl.DateTimeFormat("nl-NL", {
   year: "numeric"
 });
 
+const monthFormatter = new Intl.DateTimeFormat("nl-NL", {
+  month: "short",
+  year: "numeric"
+});
+
 export default async function ProjectManagementPage({ searchParams }: { searchParams?: Promise<ProjectSearchParams> }) {
   const params = (await searchParams) ?? {};
   const query = firstParam(params.query)?.trim() ?? "";
   const completionNotice = completionNoticeFromParams(params);
   const data = await getProjectManagementData(query);
+  const timeline = createProjectTimeline(data.projects);
 
   return (
     <main className="dashboard-shell project-shell">
@@ -108,52 +125,14 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
       <section className="panel project-list-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Opdrachten</p>
-            <h2>Projectoverzicht</h2>
+            <p className="eyebrow">Planning</p>
+            <h2>Projecttijdlijn</h2>
           </div>
           <span className="panel-total">{data.projects.length} zichtbaar</span>
         </div>
 
-        {data.projects.length > 0 ? (
-          <div className="table-wrap">
-            <table className="project-table">
-              <thead>
-                <tr>
-                  <th>Opdracht</th>
-                  <th>Klant</th>
-                  <th>Verantwoordelijke</th>
-                  <th>Fase</th>
-                  <th>Deadline</th>
-                  <th>Periode</th>
-                  <th className="table-number">Waarde</th>
-                  <th><span className="sr-only">Actie</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.projects.map((project) => (
-                  <tr key={project.id}>
-                    <td>
-                      <span className="row-title">{project.name}</span>
-                      <span className="cell-muted">{project.code}</span>
-                    </td>
-                    <td>{project.company}</td>
-                    <td>{project.manager}</td>
-                    <td>
-                      <span className="project-tag project-tag--good">{project.phase}</span>
-                    </td>
-                    <td><Deadline date={project.deadline} /></td>
-                    <td><DateRange start={project.startDate} end={project.deliveryDate} /></td>
-                    <td className="table-number">{project.value > 0 ? formatCurrency(project.value) : "-"}</td>
-                    <td className="project-action-cell">
-                      {data.source.mode === "live" ? (
-                        <CompleteProjectForm projectId={project.id} projectName={project.name} query={query} />
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {timeline ? (
+          <ProjectTimeline projects={data.projects} timeline={timeline} query={query} sourceMode={data.source.mode} />
         ) : (
           <p className="empty-state">Geen lopende projecten met tag Project en alle datums gevonden.</p>
         )}
@@ -182,35 +161,87 @@ function ProjectMetric({
   );
 }
 
-function Deadline({ date }: { date?: string }) {
-  if (!date) {
-    return <span className="cell-muted">Geen deadline</span>;
-  }
-
-  const days = daysUntil(date);
-  const tone = days < 0 ? "danger" : days <= 14 ? "warning" : "good";
-  const label = days < 0
-    ? `${Math.abs(days)} d. te laat`
-    : days === 0
-      ? "Vandaag"
-      : days === 1
-        ? "Morgen"
-        : formatDate(date);
-
-  return <span className={`deadline deadline--${tone}`}>{label}</span>;
-}
-
-function DateRange({ start, end }: { start?: string; end?: string }) {
-  if (!start && !end) {
-    return <span className="cell-muted">Geen periode</span>;
-  }
-
+function ProjectTimeline({
+  projects,
+  timeline,
+  query,
+  sourceMode
+}: {
+  projects: ProjectRow[];
+  timeline: ProjectTimelineData;
+  query: string;
+  sourceMode: ProjectSource["mode"];
+}) {
   return (
-    <span className="date-range">
-      <span>{start ? formatDate(start) : "-"}</span>
-      <span aria-hidden="true"> tot </span>
-      <span>{end ? formatDate(end) : "-"}</span>
-    </span>
+    <div className="project-timeline-wrap">
+      <div className="project-timeline" role="list" aria-label={`Projectplanning van ${formatDate(timeline.start)} tot ${formatDate(timeline.end)}`}>
+        <div className="project-timeline-header" aria-hidden="true">
+          <span>Project</span>
+          <div className="project-timeline-axis">
+            {timeline.ticks.map((tick, index) => (
+              <span
+                className={`project-timeline-axis__tick ${index === 0 ? "project-timeline-axis__tick--start" : ""} ${index === timeline.ticks.length - 1 ? "project-timeline-axis__tick--end" : ""}`}
+                key={tick.date}
+                style={{ left: `${timelinePosition(tick.date, timeline)}%` }}
+              >
+                <span>{tick.label}</span>
+              </span>
+            ))}
+          </div>
+          <span className="project-timeline-summary-heading">Waarde</span>
+        </div>
+
+        {projects.map((project) => {
+          const startDate = project.startDate ?? timeline.start;
+          const deliveryDate = project.deliveryDate ?? timeline.end;
+          const deadlineDate = project.deadline ?? deliveryDate;
+          const deadlineTone = deadlineToneFor(deadlineDate);
+
+          return (
+            <article className="project-timeline-row" key={project.id} role="listitem">
+              <div className="project-timeline-details">
+                <div className="project-timeline-title-row">
+                  <span className="row-title">{project.name}</span>
+                  <span className="project-tag project-tag--good">{project.phase}</span>
+                </div>
+                <span className="cell-muted">{project.code} · {project.company}</span>
+                <span className="cell-muted">{project.manager}</span>
+              </div>
+
+              <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; deadline ${formatDate(deadlineDate)}`}>
+                {timeline.ticks.map((tick) => (
+                  <span className="project-timeline-gridline" key={tick.date} style={{ left: `${timelinePosition(tick.date, timeline)}%` }} aria-hidden="true" />
+                ))}
+                <span className="project-timeline-bar" style={timelineBarStyle(startDate, deliveryDate, timeline)}>
+                  <span className="sr-only">Projectperiode</span>
+                </span>
+                <span
+                  className={`project-timeline-deadline project-timeline-deadline--${deadlineTone}`}
+                  style={{ left: `${timelinePosition(deadlineDate, timeline)}%` }}
+                  title={`Deadline ${formatDate(deadlineDate)}`}
+                >
+                  <span className="sr-only">Deadline {formatDate(deadlineDate)}</span>
+                </span>
+                <div className="project-timeline-dates">
+                  <span>Start {formatDate(startDate)}</span>
+                  <span>Levering {formatDate(deliveryDate)}</span>
+                </div>
+              </div>
+
+              <div className="project-timeline-summary">
+                <strong>{project.value > 0 ? formatCurrency(project.value) : "-"}</strong>
+                <span className={`project-timeline-deadline-label project-timeline-deadline-label--${deadlineTone}`}>
+                  Deadline {formatDate(deadlineDate)}
+                </span>
+                {sourceMode === "live" ? (
+                  <CompleteProjectForm projectId={project.id} projectName={project.name} query={query} />
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -306,9 +337,9 @@ function buildProjectManagementData(projects: ProjectRow[], query: string, sourc
       return normalize([project.code, project.name, project.company, project.manager, project.phase].join(" ")).includes(normalizedQuery);
     })
     .sort((left, right) => {
-      const leftDeadline = left.deadline ?? "9999-12-31";
-      const rightDeadline = right.deadline ?? "9999-12-31";
-      return leftDeadline.localeCompare(rightDeadline) || left.name.localeCompare(right.name, "nl");
+      const leftStart = left.startDate ?? "9999-12-31";
+      const rightStart = right.startDate ?? "9999-12-31";
+      return leftStart.localeCompare(rightStart) || left.name.localeCompare(right.name, "nl");
     });
 
   return {
@@ -575,6 +606,74 @@ function daysUntil(value: string) {
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const date = new Date(`${value}T00:00:00`);
   return Math.round((date.getTime() - startOfToday.getTime()) / 86_400_000);
+}
+
+function createProjectTimeline(projects: ProjectRow[]): ProjectTimelineData | null {
+  const startDates = projects.map((project) => project.startDate).filter((date): date is string => Boolean(date));
+  const deliveryDates = projects.map((project) => project.deliveryDate).filter((date): date is string => Boolean(date));
+  if (startDates.length === 0 || deliveryDates.length === 0) {
+    return null;
+  }
+
+  const start = [...startDates].sort()[0];
+  const end = [...deliveryDates].sort().at(-1);
+  if (!start || !end) {
+    return null;
+  }
+
+  return { start, end, ticks: createTimelineTicks(start, end) };
+}
+
+function createTimelineTicks(start: string, end: string): ProjectTimelineTick[] {
+  const tickDates = new Set([start, end]);
+  const currentMonth = dateFromKey(start);
+  currentMonth.setDate(1);
+  if (dateKey(currentMonth) <= start) {
+    currentMonth.setMonth(currentMonth.getMonth() + 1);
+  }
+
+  while (dateKey(currentMonth) < end) {
+    tickDates.add(dateKey(currentMonth));
+    currentMonth.setMonth(currentMonth.getMonth() + 1);
+  }
+
+  return [...tickDates]
+    .sort()
+    .map((date) => ({ date, label: date === start || date === end ? formatDate(date) : monthFormatter.format(dateFromKey(date)) }));
+}
+
+function timelinePosition(date: string, timeline: ProjectTimelineData) {
+  const duration = daysBetween(timeline.start, timeline.end);
+  if (duration <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, (daysBetween(timeline.start, date) / duration) * 100));
+}
+
+function timelineBarStyle(start: string, end: string, timeline: ProjectTimelineData) {
+  const startPosition = timelinePosition(start, timeline);
+  const endPosition = Math.max(startPosition, timelinePosition(end, timeline));
+  const width = Math.max(0.8, endPosition - startPosition);
+
+  return {
+    left: `${Math.min(startPosition, 100 - width)}%`,
+    width: `${width}%`
+  };
+}
+
+function deadlineToneFor(deadline: string) {
+  const days = daysUntil(deadline);
+  return days < 0 ? "danger" : days <= 14 ? "warning" : "good";
+}
+
+function daysBetween(start: string, end: string) {
+  return Math.round((dateFromKey(end).getTime() - dateFromKey(start).getTime()) / 86_400_000);
+}
+
+function dateFromKey(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 function formatDate(value: string) {

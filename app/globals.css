@@ -745,23 +745,183 @@ td .inline-bar {
   margin-bottom: 14px;
 }
 
-.project-table {
-  min-width: 980px;
+.project-timeline-wrap {
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
-.project-table th,
-.project-table td {
-  padding-right: 18px;
+.project-timeline {
+  min-width: 900px;
 }
 
-.project-table th:last-child,
-.project-table td:last-child {
-  padding-right: 0;
+.project-timeline-header,
+.project-timeline-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.95fr) minmax(460px, 2.6fr) minmax(132px, 0.55fr);
+  column-gap: 18px;
 }
 
-.project-action-cell {
+.project-timeline-header {
+  align-items: end;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.project-timeline-summary-heading {
   text-align: right;
+}
+
+.project-timeline-axis {
+  position: relative;
+  height: 30px;
+}
+
+.project-timeline-axis__tick {
+  position: absolute;
+  bottom: 0;
+  height: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.project-timeline-axis__tick > span {
+  position: absolute;
+  bottom: 12px;
+  left: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  transform: translateX(-50%);
   white-space: nowrap;
+}
+
+.project-timeline-axis__tick--start > span {
+  transform: none;
+}
+
+.project-timeline-axis__tick--end > span {
+  transform: translateX(-100%);
+}
+
+.project-timeline-axis__tick--start.project-timeline-axis__tick--end > span {
+  transform: none;
+}
+
+.project-timeline-row {
+  min-height: 106px;
+  align-items: stretch;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-timeline-details,
+.project-timeline-summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.project-timeline-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-timeline-title-row .row-title {
+  flex: 1;
+}
+
+.project-timeline-track {
+  position: relative;
+  min-height: 76px;
+  overflow: hidden;
+  background: var(--surface-strong);
+}
+
+.project-timeline-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(95, 107, 118, 0.22);
+}
+
+.project-timeline-bar {
+  position: absolute;
+  top: 20px;
+  display: block;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--good);
+  box-shadow: inset 0 0 0 1px rgba(7, 95, 83, 0.2);
+}
+
+.project-timeline-deadline {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  bottom: 26px;
+  width: 2px;
+  transform: translateX(-1px);
+}
+
+.project-timeline-deadline--good {
+  background: var(--good);
+}
+
+.project-timeline-deadline--warning {
+  background: var(--warning);
+}
+
+.project-timeline-deadline--danger {
+  background: var(--danger);
+}
+
+.project-timeline-dates {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  left: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.project-timeline-summary {
+  align-items: flex-end;
+  gap: 6px;
+  text-align: right;
+}
+
+.project-timeline-summary > strong {
+  font-size: 14px;
+}
+
+.project-timeline-deadline-label {
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.project-timeline-deadline-label--good {
+  color: #075f53;
+}
+
+.project-timeline-deadline-label--warning {
+  color: #8a5200;
+}
+
+.project-timeline-deadline-label--danger {
+  color: var(--danger);
 }
 
 .project-completion-form {
@@ -789,13 +949,7 @@ td .inline-bar {
   opacity: 0.62;
 }
 
-.table-number {
-  text-align: right;
-  white-space: nowrap;
-}
-
-.project-tag,
-.deadline {
+.project-tag {
   display: inline-flex;
   min-height: 28px;
   align-items: center;
@@ -806,32 +960,14 @@ td .inline-bar {
   white-space: nowrap;
 }
 
-.project-tag--good,
-.deadline--good {
+.project-tag--good {
   background: var(--good-soft);
   color: #075f53;
 }
 
-.project-tag--neutral,
-.deadline--neutral {
+.project-tag--neutral {
   background: var(--neutral-soft);
   color: #536272;
-}
-
-.deadline--warning {
-  background: var(--warning-soft);
-  color: #8a5200;
-}
-
-.deadline--danger {
-  background: #fde8e5;
-  color: var(--danger);
-}
-
-.date-range {
-  color: var(--muted);
-  font-size: 13px;
-  white-space: nowrap;
 }
 
 .sr-only {
