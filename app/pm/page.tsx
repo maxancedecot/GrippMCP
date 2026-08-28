@@ -61,7 +61,6 @@ type CapacitySummary = {
 
 type CalendarItemHoursSummary = {
   hours: number;
-  itemCount: number;
 };
 
 type EmployeeCapacityRow = {
@@ -79,9 +78,7 @@ type EmployeeBillabilityRow = EmployeeCapacityRow & {
   unbillableLoggedHours: number;
   capacityRemainingHours: number;
   calendarItemHours: number;
-  calendarItemCount: number;
   planningWithoutTaskHours: number;
-  planningWithoutTaskItemCount: number;
   billability: number;
 };
 
@@ -281,14 +278,8 @@ export default async function PmDashboardPage() {
                     </td>
                     <td>{formatHours(employee.billableHours)}</td>
                     <td>{formatHours(employee.availableHours)}</td>
-                    <td>
-                      {formatHours(employee.calendarItemHours)}
-                      <span className="cell-muted">{formatPlanningItemCount(employee.calendarItemCount)}</span>
-                    </td>
-                    <td>
-                      {formatHours(employee.planningWithoutTaskHours)}
-                      <span className="cell-muted">{formatPlanningItemCount(employee.planningWithoutTaskItemCount)}</span>
-                    </td>
+                    <td>{formatHours(employee.calendarItemHours)}</td>
+                    <td>{formatHours(employee.planningWithoutTaskHours)}</td>
                     <td>{formatHours(employee.leaveHours)}</td>
                     <td>{formatHours(employee.capacityRemainingHours)}</td>
                   </tr>
@@ -1117,9 +1108,8 @@ function buildCalendarItemHoursByEmployeeId(calendarItems: JsonRecord[], period:
       continue;
     }
 
-    const current = calendarItemHoursByEmployeeId.get(employeeId) ?? { hours: 0, itemCount: 0 };
+    const current = calendarItemHoursByEmployeeId.get(employeeId) ?? { hours: 0 };
     current.hours += amount;
-    current.itemCount += 1;
     calendarItemHoursByEmployeeId.set(employeeId, current);
   }
 
@@ -1181,8 +1171,8 @@ function buildEmployeeBillabilityRows(
     .map((row) => {
       const loggedHours = loggedHoursByEmployeeId.get(row.employeeId) ?? 0;
       const billableHours = billableHoursByEmployeeId.get(row.employeeId) ?? 0;
-      const calendarItemHours = calendarItemHoursByEmployeeId.get(row.employeeId) ?? { hours: 0, itemCount: 0 };
-      const planningWithoutTask = planningWithoutTaskByEmployeeId.get(row.employeeId) ?? { hours: 0, itemCount: 0 };
+      const calendarItemHours = calendarItemHoursByEmployeeId.get(row.employeeId) ?? { hours: 0 };
+      const planningWithoutTask = planningWithoutTaskByEmployeeId.get(row.employeeId) ?? { hours: 0 };
 
       return {
         ...row,
@@ -1191,9 +1181,7 @@ function buildEmployeeBillabilityRows(
         unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
         capacityRemainingHours: row.availableHours - calendarItemHours.hours,
         calendarItemHours: calendarItemHours.hours,
-        calendarItemCount: calendarItemHours.itemCount,
         planningWithoutTaskHours: planningWithoutTask.hours,
-        planningWithoutTaskItemCount: planningWithoutTask.itemCount,
         billability: percent(billableHours, row.availableHours)
       };
     })
@@ -1850,10 +1838,6 @@ function formatCurrencyPerHour(value: number) {
 
 function formatEmployeeCount(value: number) {
   return `${value} werknemer${value === 1 ? "" : "s"}`;
-}
-
-function formatPlanningItemCount(value: number) {
-  return `${value} planningregel${value === 1 ? "" : "s"}`;
 }
 
 function formatDate(value: string) {
