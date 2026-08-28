@@ -35,7 +35,7 @@ type BillabilitySources = {
 
 type CapacitySources = {
   employees: JsonRecord[];
-  employmentContracts: JsonRecord[];
+  workingHoursByEmployeeId: Map<number, number>;
   absenceRequestLines: JsonRecord[];
   absenceRequestsById: Map<number, JsonRecord>;
 };
@@ -45,7 +45,7 @@ type CapacitySummary = {
   leaveHours: number;
   availableHours: number;
   employeeCount: number;
-  fallbackContractEmployeeCount: number;
+  fallbackWorkingHoursEmployeeCount: number;
 };
 
 type MonthRevenue = {
@@ -71,7 +71,7 @@ type PmDashboardData = {
   invoiceCount: number;
   hourCount: number;
   employeeCount: number;
-  fallbackContractEmployeeCount: number;
+  fallbackWorkingHoursEmployeeCount: number;
   revenueByMonth: MonthRevenue[];
   lastUpdated: string;
 };
@@ -80,12 +80,9 @@ const PAGE_SIZE = 250;
 const MAX_INVOICE_PAGES = 80;
 const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
-const MAX_EMPLOYMENT_CONTRACT_PAGES = 40;
 const MAX_ABSENCE_LINE_PAGES = 80;
+const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
-const CONTRACT_WEEK_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
-const CONTRACT_WEEK_TYPES = ["odd", "even"] as const;
-const CONTRACT_HOUR_FIELDS = CONTRACT_WEEK_DAYS.flatMap((day) => CONTRACT_WEEK_TYPES.map((weekType) => `hours_${day}_${weekType}`));
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -182,15 +179,15 @@ export default async function PmDashboardPage() {
 
           <dl className="pm-formula-list">
             <FormulaItem label="Omzet" detail={`${dashboard.invoiceCount} verkoopfacturen met rapportagedatum in ${dashboard.period.year}`} value={formatCurrency(dashboard.revenue)} />
-            <FormulaItem label="Contractwerktijd" detail={`${dashboard.employeeCount} werknemers vanaf hun begindatum; leeg contract valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
+            <FormulaItem label="Werktijd" detail={`${dashboard.employeeCount} werknemers vanaf hun begindatum; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
             <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
-            <FormulaItem label="Beschikbaar" detail="Contractwerktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
+            <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
             <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een factuur- of opdrachtregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
             <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels van alle medewerkers; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
             <FormulaItem label="Per gelogd uur" detail="Omzet / gelogde uren" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} />
             <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
-            {dashboard.fallbackContractEmployeeCount > 0 ? (
-              <FormulaItem label="Fallback" detail="Werknemers zonder contracturen in Gripp zijn met 40u/week gerekend" value={String(dashboard.fallbackContractEmployeeCount)} />
+            {dashboard.fallbackWorkingHoursEmployeeCount > 0 ? (
+              <FormulaItem label="Fallback" detail="Werknemers zonder werktijden in Gripp zijn met 40u/week gerekend" value={String(dashboard.fallbackWorkingHoursEmployeeCount)} />
             ) : null}
           </dl>
         </article>
@@ -285,19 +282,21 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
       requiredData("uren", () => fetchHoursForPeriod(client, period))
     ]);
-    const [employees, employmentContracts, absenceRequestLines, billabilitySources] = await Promise.all([
+    const [employees, absenceRequestLines, billabilitySources] = await Promise.all([
       optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
-      optionalData(issues, "arbeidsovereenkomsten", [], () => fetchEmploymentContracts(client)),
       optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period)),
       fetchBillabilitySources(client, hours, issues)
     ]);
     const absenceRequestsById = await optionalData(issues, "verlofaanvragen", new Map<number, JsonRecord>(), () =>
       fetchAbsenceRequestsById(client, absenceRequestLines)
     );
+    const workingHoursByEmployeeId = await optionalData(issues, "werktijden", new Map<number, number>(), () =>
+      fetchWorkingHoursForEmployees(client, employees, hours, absenceRequestLines, absenceRequestsById, period)
+    );
 
     return buildPmDashboardData(invoices, hours, billabilitySources, {
       employees,
-      employmentContracts,
+      workingHoursByEmployeeId,
       absenceRequestLines,
       absenceRequestsById
     }, period, {
@@ -416,28 +415,6 @@ async function fetchEmployees(client: GrippClient) {
   return records;
 }
 
-async function fetchEmploymentContracts(client: GrippClient) {
-  const records: JsonRecord[] = [];
-
-  for (let page = 0; page < MAX_EMPLOYMENT_CONTRACT_PAGES; page += 1) {
-    const result = await client.call("employmentcontract.get", [
-      [],
-      {
-        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
-        orderings: [{ field: "employmentcontract.id", direction: "asc" }]
-      }
-    ] as JsonValue[]);
-    const pageRecords = asRecords(result);
-    records.push(...pageRecords);
-
-    if (pageRecords.length < PAGE_SIZE) {
-      break;
-    }
-  }
-
-  return records;
-}
-
 async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Period) {
   const records: JsonRecord[] = [];
   const filters: JsonValue[] = [
@@ -487,6 +464,43 @@ async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines
   }
 
   return absenceRequestsById;
+}
+
+async function fetchWorkingHoursForEmployees(
+  client: GrippClient,
+  employees: JsonRecord[],
+  hours: JsonRecord[],
+  absenceRequestLines: JsonRecord[],
+  absenceRequestsById: Map<number, JsonRecord>,
+  period: Period
+) {
+  const leaveByEmployeeId = buildLeaveByEmployeeId(absenceRequestLines, absenceRequestsById, period);
+  const entries = workingHourEmployeeEntries(employees, hours, leaveByEmployeeId, period);
+  const workingHoursByEmployeeId = new Map<number, number>();
+  const callableEntries = entries.filter((entry) => {
+    if (entry.start > period.end) {
+      workingHoursByEmployeeId.set(entry.employeeId, 0);
+      return false;
+    }
+
+    return true;
+  });
+
+  for (let index = 0; index < callableEntries.length; index += WORKING_HOURS_BATCH_SIZE) {
+    const chunk = callableEntries.slice(index, index + WORKING_HOURS_BATCH_SIZE);
+    const results = await client.batch(
+      chunk.map((entry) => ({
+        method: "employee.getWorkingHours",
+        params: [[entry.employeeId], entry.start, period.end, false] as JsonValue[]
+      }))
+    );
+
+    results.forEach((result, resultIndex) => {
+      workingHoursByEmployeeId.set(chunk[resultIndex].employeeId, workingHoursTotalFromResult(result));
+    });
+  }
+
+  return workingHoursByEmployeeId;
 }
 
 async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[], issues: string[] = []): Promise<BillabilitySources> {
@@ -617,7 +631,7 @@ function buildPmDashboardData(
     invoiceCount,
     hourCount,
     employeeCount: capacity.employeeCount,
-    fallbackContractEmployeeCount: capacity.fallbackContractEmployeeCount,
+    fallbackWorkingHoursEmployeeCount: capacity.fallbackWorkingHoursEmployeeCount,
     revenueByMonth: makeMonthBuckets(period).map((bucket) => ({
       ...bucket,
       revenue: revenueByMonth.get(bucket.key) ?? 0
@@ -673,12 +687,9 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
     }
   }
 
-  const contractsByEmployeeId = groupRecordsByRelationId(capacitySources.employmentContracts, "employee");
   const leaveByEmployeeId = buildLeaveByEmployeeId(capacitySources.absenceRequestLines, capacitySources.absenceRequestsById, period);
   const referencedEmployeeIds = new Set<number>([
-    ...Array.from(contractsByEmployeeId.keys()).filter((employeeId) =>
-      (contractsByEmployeeId.get(employeeId) ?? []).some((contract) => contractOverlapsPeriod(contract, period))
-    ),
+    ...Array.from(capacitySources.workingHoursByEmployeeId.keys()),
     ...Array.from(leaveByEmployeeId.keys()),
     ...hours.map((hour) => relationId(hour, "employee")).filter((employeeId): employeeId is number => employeeId !== null)
   ]);
@@ -694,22 +705,23 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
     .map(([employeeId, employee]) => ({ employeeId, employee }));
   let contractHours = 0;
   let leaveHours = 0;
-  let fallbackContractEmployeeCount = 0;
+  let fallbackWorkingHoursEmployeeCount = 0;
   let countedEmployees = 0;
 
   for (const { employeeId, employee } of employees) {
-    const employeeContracts = (contractsByEmployeeId.get(employeeId) ?? []).sort(compareContracts);
-    const employeeStart = employeeStartDate(employee, employeeContracts);
+    const employeeStart = employeeStartDate(employee);
     const capacityStart = maxDateKey(period.start, employeeStart);
     if (capacityStart > period.end) {
       continue;
     }
 
     countedEmployees += 1;
-    const contractResult = calculateContractHoursForEmployee(employeeContracts, capacityStart, period.end);
-    contractHours += contractResult.hours;
-    if (contractResult.usedFallback) {
-      fallbackContractEmployeeCount += 1;
+    const workingHours = capacitySources.workingHoursByEmployeeId.get(employeeId);
+    if (workingHours === undefined) {
+      contractHours += calculateDefaultContractHours(capacityStart, period.end);
+      fallbackWorkingHoursEmployeeCount += 1;
+    } else {
+      contractHours += Math.max(0, workingHours);
     }
 
     leaveHours += leaveHoursForEmployee(leaveByEmployeeId.get(employeeId) ?? [], capacityStart, period.end);
@@ -722,25 +734,8 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
     leaveHours,
     availableHours,
     employeeCount: countedEmployees,
-    fallbackContractEmployeeCount
+    fallbackWorkingHoursEmployeeCount
   };
-}
-
-function groupRecordsByRelationId(records: JsonRecord[], field: string) {
-  const grouped = new Map<number, JsonRecord[]>();
-
-  for (const record of records) {
-    const id = relationId(record, field);
-    if (id === null) {
-      continue;
-    }
-
-    const values = grouped.get(id) ?? [];
-    values.push(record);
-    grouped.set(id, values);
-  }
-
-  return grouped;
 }
 
 function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceRequestsById: Map<number, JsonRecord>, period: Period) {
@@ -772,93 +767,215 @@ function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceReques
   return leaveByEmployeeId;
 }
 
-function employeeStartDate(employee: JsonRecord, employeeContracts: JsonRecord[]) {
-  const employeeSince = dateKeyFromValue(readField(employee, "employeesince"));
-  const firstContractStart = employeeContracts
-    .map((contract) => dateKeyFromValue(readField(contract, "startdate")))
-    .filter((date): date is string => Boolean(date))
-    .sort()[0];
+function workingHourEmployeeEntries(
+  employees: JsonRecord[],
+  hours: JsonRecord[],
+  leaveByEmployeeId: Map<number, JsonRecord[]>,
+  period: Period
+) {
+  const employeesById = new Map<number, JsonRecord>();
+  const referencedEmployeeIds = new Set<number>([
+    ...Array.from(leaveByEmployeeId.keys()),
+    ...hours.map((hour) => relationId(hour, "employee")).filter((employeeId): employeeId is number => employeeId !== null)
+  ]);
 
-  return employeeSince ?? firstContractStart ?? "0001-01-01";
+  for (const employee of employees) {
+    const employeeId = idFrom(readField(employee, "id"));
+    if (employeeId !== null) {
+      employeesById.set(employeeId, employee);
+    }
+  }
+
+  for (const employeeId of referencedEmployeeIds) {
+    if (!employeesById.has(employeeId)) {
+      employeesById.set(employeeId, { id: employeeId, active: true });
+    }
+  }
+
+  return Array.from(employeesById.entries())
+    .filter(([employeeId, employee]) => booleanFrom(readField(employee, "active")) !== false || referencedEmployeeIds.has(employeeId))
+    .map(([employeeId, employee]) => ({
+      employeeId,
+      start: maxDateKey(period.start, employeeStartDate(employee))
+    }));
 }
 
-function calculateContractHoursForEmployee(employeeContracts: JsonRecord[], start: string, end: string) {
-  const overlappingContracts = employeeContracts.filter((contract) => contractOverlapsRange(contract, start, end));
-  const useFallbackForWholePeriod = overlappingContracts.length === 0;
-  let hours = 0;
-  let usedFallback = useFallbackForWholePeriod;
+function workingHoursTotalFromResult(value: unknown) {
+  const explicitTotal = explicitWorkingHoursTotal(value);
+  const total = explicitTotal ?? sumWorkingHourEntries(value);
+  return Math.max(0, total);
+}
 
-  for (const date of datesInRange(start, end)) {
-    const contract = contractForDate(overlappingContracts, date);
-    if (!contract) {
-      if (useFallbackForWholePeriod) {
-        hours += defaultDailyContractHours(date);
+function explicitWorkingHoursTotal(value: unknown): number | null {
+  const primitive = primitiveNumberFrom(value);
+  if (primitive !== null) {
+    return primitive;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return 0;
+    }
+
+    const firstPrimitive = primitiveNumberFrom(value[0]);
+    if (firstPrimitive !== null) {
+      return firstPrimitive;
+    }
+
+    for (const item of value) {
+      const record = asRecord(item);
+      if (!record) {
+        continue;
       }
-      continue;
+
+      const recordTotal = explicitTotalFromRecord(record);
+      if (recordTotal !== null) {
+        return recordTotal;
+      }
+
+      const nestedTotal = explicitWorkingHoursTotalFromSingleValueRecord(record);
+      if (nestedTotal !== null) {
+        return nestedTotal;
+      }
     }
 
-    const contractHours = contractDailyHours(contract, date);
-    if (contractHours.usedFallback) {
-      usedFallback = true;
+    return null;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  return explicitTotalFromRecord(record) ?? explicitWorkingHoursTotalFromSingleValueRecord(record);
+}
+
+function explicitWorkingHoursTotalFromSingleValueRecord(record: JsonRecord) {
+  const meaningfulEntries = Object.entries(record).filter(([key]) => !isIgnoredWorkingHoursKey(key));
+  if (meaningfulEntries.length !== 1) {
+    return null;
+  }
+
+  return explicitWorkingHoursTotal(meaningfulEntries[0][1]);
+}
+
+function explicitTotalFromRecord(record: JsonRecord) {
+  for (const field of ["totalworkinghours", "totalWorkingHours", "workinghourstotal", "workingHoursTotal", "totalhours", "totalHours", "total", "sum"]) {
+    const value = numberFrom(readField(record, field));
+    if (value !== null) {
+      return value;
     }
-    hours += contractHours.hours;
   }
 
-  return { hours, usedFallback };
-}
-
-function contractForDate(contracts: JsonRecord[], date: string) {
-  return contracts
-    .filter((contract) => contractOverlapsRange(contract, date, date))
-    .sort(compareContracts)
-    .at(-1);
-}
-
-function contractOverlapsPeriod(contract: JsonRecord, period: Period) {
-  return contractOverlapsRange(contract, period.start, period.end);
-}
-
-function contractOverlapsRange(contract: JsonRecord, start: string, end: string) {
-  const contractStart = dateKeyFromValue(readField(contract, "startdate")) ?? "0001-01-01";
-  const contractEnd = dateKeyFromValue(readField(contract, "enddate")) ?? "9999-12-31";
-  return contractStart <= end && contractEnd >= start;
-}
-
-function compareContracts(left: JsonRecord, right: JsonRecord) {
-  const leftStart = dateKeyFromValue(readField(left, "startdate")) ?? "0001-01-01";
-  const rightStart = dateKeyFromValue(readField(right, "startdate")) ?? "0001-01-01";
-  const leftId = idFrom(readField(left, "id")) ?? 0;
-  const rightId = idFrom(readField(right, "id")) ?? 0;
-  return leftStart.localeCompare(rightStart) || leftId - rightId;
-}
-
-function contractDailyHours(contract: JsonRecord, date: string) {
-  if (!contractHasHourFields(contract)) {
-    return { hours: defaultDailyContractHours(date), usedFallback: true };
+  if (hasDateMarker(record)) {
+    return null;
   }
 
-  const parsedDate = parseDateKey(date);
-  if (!parsedDate) {
-    return { hours: 0, usedFallback: false };
+  for (const field of ["workinghours", "workingHours", "working_hours", "hours", "amount", "value", "rawValue", "rawvalue"]) {
+    const value = numberFrom(readField(record, field));
+    if (value !== null) {
+      return value;
+    }
   }
 
-  const day = dayName(parsedDate);
-  const preferredWeekType = isEvenIsoWeek(parsedDate) ? "even" : "odd";
-  const fallbackWeekType = preferredWeekType === "even" ? "odd" : "even";
-  const preferredValue = numberFrom(readField(contract, `hours_${day}_${preferredWeekType}`));
-  if (preferredValue !== null) {
-    return { hours: Math.max(0, preferredValue), usedFallback: false };
-  }
-
-  const fallbackValue = numberFrom(readField(contract, `hours_${day}_${fallbackWeekType}`));
-  return { hours: Math.max(0, fallbackValue ?? 0), usedFallback: false };
+  return null;
 }
 
-function contractHasHourFields(contract: JsonRecord) {
-  return CONTRACT_HOUR_FIELDS.some((field) => {
-    const amount = numberFrom(readField(contract, field));
-    return amount !== null && amount > 0;
-  });
+function sumWorkingHourEntries(value: unknown): number {
+  const primitive = primitiveNumberFrom(value);
+  if (primitive !== null) {
+    return primitive;
+  }
+
+  if (Array.isArray(value)) {
+    return value.reduce((total, item) => total + sumWorkingHourEntries(item), 0);
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    return 0;
+  }
+
+  const rowAmount = workingHourAmountFromRecord(record);
+  if (rowAmount !== null) {
+    return rowAmount;
+  }
+
+  return Object.entries(record).reduce((total, [key, nestedValue]) => {
+    if (isIgnoredWorkingHoursKey(key)) {
+      return total;
+    }
+
+    return total + sumWorkingHourEntries(nestedValue);
+  }, 0);
+}
+
+function workingHourAmountFromRecord(record: JsonRecord) {
+  if (hasDateMarker(record)) {
+    for (const field of ["workinghours", "workingHours", "working_hours", "hours", "amount", "value", "rawValue", "rawvalue"]) {
+      const value = numberFrom(readField(record, field));
+      if (value !== null) {
+        return value;
+      }
+    }
+  }
+
+  return explicitTotalFromRecord(record);
+}
+
+function primitiveNumberFrom(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = normalizeNumberString(value);
+    if (normalized && Number.isFinite(Number(normalized))) {
+      return Number(normalized);
+    }
+  }
+
+  return null;
+}
+
+function hasDateMarker(record: JsonRecord) {
+  return Boolean(
+    dateKeyFromValue(readField(record, "date")) ||
+      dateKeyFromValue(readField(record, "day")) ||
+      dateKeyFromValue(readField(record, "datum")) ||
+      Object.keys(record).some((key) => isDateKey(key))
+  );
+}
+
+function isIgnoredWorkingHoursKey(key: string) {
+  return [
+    "id",
+    "employee",
+    "employeeid",
+    "medewerker",
+    "medewerkerid",
+    "date",
+    "day",
+    "datum",
+    "startdate",
+    "stopdate",
+    "enddate",
+    "name",
+    "screenname",
+    "searchname",
+    "label",
+    "displayvalue",
+    "active",
+    "status"
+  ].includes(key.toLowerCase().replace(/[._-]/g, ""));
+}
+
+function employeeStartDate(employee: JsonRecord) {
+  return dateKeyFromValue(readField(employee, "employeesince")) ?? "0001-01-01";
+}
+
+function calculateDefaultContractHours(start: string, end: string) {
+  return datesInRange(start, end).reduce((total, date) => total + defaultDailyContractHours(date), 0);
 }
 
 function defaultDailyContractHours(date: string) {
@@ -1197,22 +1314,6 @@ function maxDateKey(left: string, right: string) {
   return left > right ? left : right;
 }
 
-function dayName(date: Date) {
-  return CONTRACT_WEEK_DAYS[(date.getDay() + 6) % 7];
-}
-
-function isEvenIsoWeek(date: Date) {
-  return isoWeekNumber(date) % 2 === 0;
-}
-
-function isoWeekNumber(date: Date) {
-  const normalized = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNumber = normalized.getUTCDay() || 7;
-  normalized.setUTCDate(normalized.getUTCDate() + 4 - dayNumber);
-  const yearStart = new Date(Date.UTC(normalized.getUTCFullYear(), 0, 1));
-  return Math.ceil(((normalized.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
-}
-
 function normalizeNumberString(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -1303,12 +1404,11 @@ function createDemoCapacitySources(period: Period): CapacitySources {
     { id: 3, screenname: "Jasmijn Bakker", employeesince: `${period.year}-01-15`, active: true },
     { id: 4, screenname: "Daan Smit", employeesince: `${period.year}-03-01`, active: true }
   ];
-  const employmentContracts = [
-    fullTimeContract(1, 1, `${period.year}-01-01`),
-    fullTimeContract(2, 2, `${period.year}-02-01`),
-    partTimeContract(3, 3, `${period.year}-01-15`, 32),
-    { id: 4, employee: 4, startdate: `${period.year}-03-01` }
-  ];
+  const workingHoursByEmployeeId = new Map<number, number>([
+    [1, calculateDefaultContractHours(`${period.year}-01-01`, period.end)],
+    [2, calculateDefaultContractHours(`${period.year}-02-01`, period.end)],
+    [3, calculateDefaultContractHours(`${period.year}-01-15`, period.end) * 0.8]
+  ]);
   const absenceRequestsById = new Map<number, JsonRecord>([
     [1, { id: 1, employee: 1 }],
     [2, { id: 2, employee: 2 }],
@@ -1322,45 +1422,8 @@ function createDemoCapacitySources(period: Period): CapacitySources {
 
   return {
     employees,
-    employmentContracts,
+    workingHoursByEmployeeId,
     absenceRequestLines,
     absenceRequestsById
-  };
-}
-
-function fullTimeContract(id: number, employee: number, startdate: string): JsonRecord {
-  return {
-    id,
-    employee,
-    startdate,
-    hours_monday_odd: 8,
-    hours_tuesday_odd: 8,
-    hours_wednesday_odd: 8,
-    hours_thursday_odd: 8,
-    hours_friday_odd: 8,
-    hours_monday_even: 8,
-    hours_tuesday_even: 8,
-    hours_wednesday_even: 8,
-    hours_thursday_even: 8,
-    hours_friday_even: 8
-  };
-}
-
-function partTimeContract(id: number, employee: number, startdate: string, weeklyHours: number): JsonRecord {
-  const dailyHours = weeklyHours / 4;
-  return {
-    id,
-    employee,
-    startdate,
-    hours_monday_odd: dailyHours,
-    hours_tuesday_odd: dailyHours,
-    hours_wednesday_odd: dailyHours,
-    hours_thursday_odd: dailyHours,
-    hours_friday_odd: 0,
-    hours_monday_even: dailyHours,
-    hours_tuesday_even: dailyHours,
-    hours_wednesday_even: dailyHours,
-    hours_thursday_even: dailyHours,
-    hours_friday_even: 0
   };
 }
