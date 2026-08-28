@@ -827,10 +827,12 @@ async function fetchWorkingHoursForEmployees(
     );
 
     chunk.forEach((entry, chunkIndex) => {
-      const workingHours = workingHoursTotalFromResult(results[chunkIndex * 2]);
-      const workingHoursIncludingAbsence = workingHoursTotalFromResult(results[chunkIndex * 2 + 1]);
-      workingHoursByEmployeeId.set(entry.employeeId, workingHours);
-      leaveHoursByEmployeeId.set(entry.employeeId, Math.max(0, workingHours - workingHoursIncludingAbsence));
+      const workingHoursWithoutAbsenceFlag = workingHoursTotalFromResult(results[chunkIndex * 2]);
+      const workingHoursWithAbsenceFlag = workingHoursTotalFromResult(results[chunkIndex * 2 + 1]);
+      const grossWorkingHours = Math.max(workingHoursWithoutAbsenceFlag, workingHoursWithAbsenceFlag);
+      const absenceHours = Math.abs(workingHoursWithAbsenceFlag - workingHoursWithoutAbsenceFlag);
+      workingHoursByEmployeeId.set(entry.employeeId, grossWorkingHours);
+      leaveHoursByEmployeeId.set(entry.employeeId, absenceHours);
     });
   }
 
