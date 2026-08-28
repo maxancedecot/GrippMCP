@@ -36,8 +36,14 @@ type BillabilitySources = {
 type CapacitySources = {
   employees: JsonRecord[];
   workingHoursByEmployeeId: Map<number, number>;
+  leaveHoursFromWorkingHoursByEmployeeId: Map<number, number>;
   absenceRequestLines: JsonRecord[];
   absenceRequestsById: Map<number, JsonRecord>;
+};
+
+type WorkingHoursCapacity = {
+  workingHoursByEmployeeId: Map<number, number>;
+  leaveHoursByEmployeeId: Map<number, number>;
 };
 
 type CapacitySummary = {
@@ -180,7 +186,7 @@ export default async function PmDashboardPage() {
           <dl className="pm-formula-list">
             <FormulaItem label="Omzet" detail={`${dashboard.invoiceCount} verkoopfacturen met rapportagedatum in ${dashboard.period.year}`} value={formatCurrency(dashboard.revenue)} />
             <FormulaItem label="Werktijd" detail={`${dashboard.employeeCount} werknemers vanaf hun begindatum; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
-            <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
+            <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties of afwezigheid uit Gripp-werktijden in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
             <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
             <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een factuur- of opdrachtregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
             <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels van alle medewerkers; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
@@ -290,13 +296,14 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
     const absenceRequestsById = await optionalData(issues, "verlofaanvragen", new Map<number, JsonRecord>(), () =>
       fetchAbsenceRequestsById(client, absenceRequestLines)
     );
-    const workingHoursByEmployeeId = await optionalData(issues, "werktijden", new Map<number, number>(), () =>
+    const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
       fetchWorkingHoursForEmployees(client, employees, hours, absenceRequestLines, absenceRequestsById, period)
     );
 
     return buildPmDashboardData(invoices, hours, billabilitySources, {
       employees,
-      workingHoursByEmployeeId,
+      workingHoursByEmployeeId: workingHoursCapacity.workingHoursByEmployeeId,
+      leaveHoursFromWorkingHoursByEmployeeId: workingHoursCapacity.leaveHoursByEmployeeId,
       absenceRequestLines,
       absenceRequestsById
     }, period, {
@@ -335,6 +342,13 @@ function liveSourceMessage(issues: string[]) {
   }
 
   return `Live data geladen met fallback: ${issues.join("; ")}.`;
+}
+
+function emptyWorkingHoursCapacity(): WorkingHoursCapacity {
+  return {
+    workingHoursByEmployeeId: new Map<number, number>(),
+    leaveHoursByEmployeeId: new Map<number, number>()
+  };
 }
 
 function errorCode(error: unknown) {
@@ -477,9 +491,11 @@ async function fetchWorkingHoursForEmployees(
   const leaveByEmployeeId = buildLeaveByEmployeeId(absenceRequestLines, absenceRequestsById, period);
   const entries = workingHourEmployeeEntries(employees, hours, leaveByEmployeeId, period);
   const workingHoursByEmployeeId = new Map<number, number>();
+  const leaveHoursByEmployeeId = new Map<number, number>();
   const callableEntries = entries.filter((entry) => {
     if (entry.start > period.end) {
       workingHoursByEmployeeId.set(entry.employeeId, 0);
+      leaveHoursByEmployeeId.set(entry.employeeId, 0);
       return false;
     }
 
@@ -489,18 +505,27 @@ async function fetchWorkingHoursForEmployees(
   for (let index = 0; index < callableEntries.length; index += WORKING_HOURS_BATCH_SIZE) {
     const chunk = callableEntries.slice(index, index + WORKING_HOURS_BATCH_SIZE);
     const results = await client.batch(
-      chunk.map((entry) => ({
-        method: "employee.getWorkingHours",
-        params: [[entry.employeeId], entry.start, period.end, false] as JsonValue[]
-      }))
+      chunk.flatMap((entry) => [
+        {
+          method: "employee.getWorkingHours",
+          params: [[entry.employeeId], entry.start, period.end, false] as JsonValue[]
+        },
+        {
+          method: "employee.getWorkingHours",
+          params: [[entry.employeeId], entry.start, period.end, true] as JsonValue[]
+        }
+      ])
     );
 
-    results.forEach((result, resultIndex) => {
-      workingHoursByEmployeeId.set(chunk[resultIndex].employeeId, workingHoursTotalFromResult(result));
+    chunk.forEach((entry, chunkIndex) => {
+      const workingHours = workingHoursTotalFromResult(results[chunkIndex * 2]);
+      const workingHoursIncludingAbsence = workingHoursTotalFromResult(results[chunkIndex * 2 + 1]);
+      workingHoursByEmployeeId.set(entry.employeeId, workingHours);
+      leaveHoursByEmployeeId.set(entry.employeeId, Math.max(0, workingHours - workingHoursIncludingAbsence));
     });
   }
 
-  return workingHoursByEmployeeId;
+  return { workingHoursByEmployeeId, leaveHoursByEmployeeId };
 }
 
 async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[], issues: string[] = []): Promise<BillabilitySources> {
@@ -724,7 +749,9 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
       contractHours += Math.max(0, workingHours);
     }
 
-    leaveHours += leaveHoursForEmployee(leaveByEmployeeId.get(employeeId) ?? [], capacityStart, period.end);
+    const leaveFromRequestLines = leaveHoursForEmployee(leaveByEmployeeId.get(employeeId) ?? [], capacityStart, period.end);
+    const leaveFromWorkingHours = capacitySources.leaveHoursFromWorkingHoursByEmployeeId.get(employeeId) ?? 0;
+    leaveHours += Math.max(leaveFromRequestLines, leaveFromWorkingHours);
   }
 
   const availableHours = Math.max(0, contractHours - leaveHours);
@@ -833,9 +860,11 @@ function explicitWorkingHoursTotal(value: unknown): number | null {
         return recordTotal;
       }
 
-      const nestedTotal = explicitWorkingHoursTotalFromSingleValueRecord(record);
-      if (nestedTotal !== null) {
-        return nestedTotal;
+      if (!hasDateMarker(record)) {
+        const nestedTotal = explicitWorkingHoursTotalFromSingleValueRecord(record);
+        if (nestedTotal !== null) {
+          return nestedTotal;
+        }
       }
     }
 
@@ -1423,6 +1452,7 @@ function createDemoCapacitySources(period: Period): CapacitySources {
   return {
     employees,
     workingHoursByEmployeeId,
+    leaveHoursFromWorkingHoursByEmployeeId: new Map<number, number>(),
     absenceRequestLines,
     absenceRequestsById
   };
