@@ -150,7 +150,6 @@ const currencyPerHourFormatter = new Intl.NumberFormat("nl-BE", {
 
 export default async function PmDashboardPage() {
   const dashboard = await getPmDashboardData();
-  const gaugeProgress = Math.max(0, Math.min(dashboard.billability, 100));
   const maxMonthlyRevenue = Math.max(1, ...dashboard.revenueByMonth.map((row) => Math.abs(row.revenue)));
 
   return (
@@ -176,38 +175,6 @@ export default async function PmDashboardPage() {
         <MetricCard label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
         <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
         <MetricCard label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Omzet gedeeld door billable uren" tone="warning" />
-      </section>
-
-      <section className="dashboard-grid dashboard-grid--single">
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Uren</p>
-              <h2>Billableheid</h2>
-            </div>
-            <span className="panel-total">{formatHours(dashboard.availableHours)} beschikbaar</span>
-          </div>
-
-          <div className="distribution-layout">
-            <div className="gauge" aria-label={`Billableheid ${formatPercent(dashboard.billability)} procent`}>
-              <svg className="gauge-ring" viewBox="0 0 120 120" aria-hidden="true">
-                <circle className="gauge-ring-track" cx="60" cy="60" r="52" pathLength={100} />
-                <circle className="gauge-ring-fill" cx="60" cy="60" r="52" pathLength={100} strokeDasharray={`${gaugeProgress} ${100 - gaugeProgress}`} />
-              </svg>
-              <div className="gauge-inner">
-                <strong>{formatPercent(dashboard.billability)}%</strong>
-                <span>billable</span>
-              </div>
-            </div>
-
-            <dl className="legend-list">
-              <LegendItem label="Billable" value={`${formatHours(dashboard.billableHours)} uur`} className="legend-dot--good" />
-              <LegendItem label="Rest beschikbaar" value={`${formatHours(dashboard.capacityRemainingHours)} uur`} className="legend-dot--neutral" />
-              <LegendItem label="Verlof" value={`${formatHours(dashboard.leaveHours)} uur`} className="legend-dot--warning" />
-              <LegendItem label="Gelogd totaal" value={`${formatHours(dashboard.loggedHours)} uur`} className="legend-dot--blue" />
-            </dl>
-          </div>
-        </article>
       </section>
 
       <section className="panel">
@@ -309,18 +276,6 @@ function MetricCard({
       <strong>{value}</strong>
       <p>{detail}</p>
     </article>
-  );
-}
-
-function LegendItem({ label, value, className }: { label: string; value: string; className: string }) {
-  return (
-    <div>
-      <dt>
-        <span className={`legend-dot ${className}`} />
-        {label}
-      </dt>
-      <dd>{value}</dd>
-    </div>
   );
 }
 
