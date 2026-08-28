@@ -861,6 +861,23 @@ td .inline-bar {
   background: var(--good);
 }
 
+.pm-rest-cell {
+  --rest-color-weight: 35%;
+  font-weight: 780;
+}
+
+.pm-rest-cell--negative {
+  color: color-mix(in srgb, var(--good) var(--rest-color-weight), var(--ink));
+}
+
+.pm-rest-cell--positive {
+  color: color-mix(in srgb, var(--danger) var(--rest-color-weight), var(--ink));
+}
+
+.pm-rest-cell--neutral {
+  color: var(--muted);
+}
+
 .project-list-panel {
   margin-bottom: 14px;
 }

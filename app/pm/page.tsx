@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { CSSProperties } from "react";
 import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
 
@@ -121,6 +122,7 @@ const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
+const REST_TONE_MAX_HOURS = 160;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
 
@@ -220,7 +222,9 @@ export default async function PmDashboardPage() {
                     <td>{formatHours(employee.calendarItemHours)}</td>
                     <td>{formatHours(employee.planningWithoutTaskHours)}</td>
                     <td>{formatHours(employee.leaveHours)}</td>
-                    <td>{formatHours(employee.capacityRemainingHours)}</td>
+                    <td className={restCellClassName(employee.capacityRemainingHours)} style={restCellStyle(employee.capacityRemainingHours)}>
+                      {formatHours(employee.capacityRemainingHours)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1786,6 +1790,23 @@ function divideCurrency(value: number, denominator: number) {
 
 function formatHours(value: number) {
   return hoursFormatter.format(value);
+}
+
+function restCellClassName(value: number) {
+  if (Math.abs(value) < 0.05) {
+    return "pm-rest-cell pm-rest-cell--neutral";
+  }
+
+  return `pm-rest-cell ${value < 0 ? "pm-rest-cell--negative" : "pm-rest-cell--positive"}`;
+}
+
+function restCellStyle(value: number): CSSProperties | undefined {
+  if (Math.abs(value) < 0.05) {
+    return undefined;
+  }
+
+  const intensity = Math.min(1, Math.abs(value) / REST_TONE_MAX_HOURS);
+  return { "--rest-color-weight": `${Math.round(35 + intensity * 45)}%` } as CSSProperties;
 }
 
 function formatPercent(value: number) {
