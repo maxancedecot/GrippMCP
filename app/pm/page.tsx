@@ -124,6 +124,7 @@ const MAX_CALENDAR_ITEM_PAGES = 160;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
+const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -223,7 +224,7 @@ export default async function PmDashboardPage() {
             <FormulaItem label="Werktijd" detail={`${formatEmployeeCount(dashboard.employeeCount)} zonder rechtenprofiel beheerder; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
             <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties of afwezigheid uit Gripp-werktijden in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
             <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
-            <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een product-/itemregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
+            <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een product-/itemregel met klantprijs boven 0 euro of handmatig billable gemarkeerd" value={`${formatHours(dashboard.billableHours)} uur`} />
             <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels zonder rechtenprofiel beheerder; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
             <FormulaItem label="Per gelogd uur" detail="Omzet / gelogde uren" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} />
             <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
@@ -993,6 +994,11 @@ function buildPmDashboardData(
 }
 
 function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources) {
+  const taskId = relationId(hour, "task");
+  if (taskId !== null && FORCED_BILLABLE_TASK_IDS.has(taskId)) {
+    return true;
+  }
+
   const invoiceLineId = relationId(hour, "invoiceline");
   const invoiceLine = invoiceLineId === null ? undefined : billabilitySources.invoiceLines.get(invoiceLineId);
   if (invoiceLine) {
