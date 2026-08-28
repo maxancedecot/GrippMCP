@@ -150,7 +150,6 @@ const currencyPerHourFormatter = new Intl.NumberFormat("nl-BE", {
 
 export default async function PmDashboardPage() {
   const dashboard = await getPmDashboardData();
-  const maxMonthlyRevenue = Math.max(1, ...dashboard.revenueByMonth.map((row) => Math.abs(row.revenue)));
 
   return (
     <main className="dashboard-shell pm-shell">
@@ -241,19 +240,7 @@ export default async function PmDashboardPage() {
           <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
         </div>
 
-        <div className="pm-month-list">
-          {dashboard.revenueByMonth.map((row) => (
-            <div className="stack-row" key={row.key}>
-              <div className="stack-label">
-                <span>{row.label}</span>
-                <span>{formatCurrency(row.revenue)}</span>
-              </div>
-              <div className="inline-bar" aria-hidden="true">
-                <span className="bar-segment bar-segment--blue" style={{ width: `${Math.max(0, (Math.abs(row.revenue) / maxMonthlyRevenue) * 100)}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
+        <RevenueLineChart rows={dashboard.revenueByMonth} />
       </section>
     </main>
   );
@@ -293,6 +280,50 @@ function MetricCard({
     <article className={className}>
       {content}
     </article>
+  );
+}
+
+function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
+  const width = Math.max(640, rows.length * 120);
+  const height = 320;
+  const padding = { top: 42, right: 56, bottom: 62, left: 56 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const maximum = Math.max(0, ...rows.map((row) => row.revenue));
+  const minimum = Math.min(0, ...rows.map((row) => row.revenue));
+  const range = Math.max(1, maximum - minimum);
+  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
+  const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
+  const points = rows.map((row, index) => `${xFor(index)},${yFor(row.revenue)}`).join(" ");
+  const zeroY = yFor(0);
+
+  return (
+    <div className="revenue-line-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} ${formatCurrency(row.revenue)}`).join(", ")}`}
+      >
+        <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
+        <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
+        {rows.length > 1 ? <polyline className="revenue-line-path" points={points} /> : null}
+        {rows.map((row, index) => {
+          const x = xFor(index);
+          const y = yFor(row.revenue);
+          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+          const valueY = y < padding.top + 24 ? y + 22 : y - 12;
+
+          return (
+            <g key={row.key}>
+              <title>{`${row.label}: ${formatCurrency(row.revenue)}`}</title>
+              <circle className="revenue-line-point" cx={x} cy={y} r="5" />
+              <text className="revenue-line-value" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
+              <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 

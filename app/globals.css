@@ -773,12 +773,6 @@ td .inline-bar {
   color: var(--muted);
 }
 
-.pm-month-list {
-  display: grid;
-  gap: 14px;
-  margin: 0;
-}
-
 .pm-employee-table-wrap {
   overflow-x: auto;
   overscroll-behavior-x: contain;
