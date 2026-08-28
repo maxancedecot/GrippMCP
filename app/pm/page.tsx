@@ -59,7 +59,7 @@ type CapacitySummary = {
   fallbackWorkingHoursEmployeeCount: number;
 };
 
-type PlanningWithoutTaskSummary = {
+type CalendarItemHoursSummary = {
   hours: number;
   itemCount: number;
 };
@@ -78,6 +78,8 @@ type EmployeeBillabilityRow = EmployeeCapacityRow & {
   billableHours: number;
   unbillableLoggedHours: number;
   capacityRemainingHours: number;
+  calendarItemHours: number;
+  calendarItemCount: number;
   planningWithoutTaskHours: number;
   planningWithoutTaskItemCount: number;
   billability: number;
@@ -254,6 +256,7 @@ export default async function PmDashboardPage() {
                   <th scope="col">Billable</th>
                   <th scope="col">Beschikbaar</th>
                   <th scope="col">Gelogd</th>
+                  <th scope="col">Agenda-uren</th>
                   <th scope="col">Niet geassigned</th>
                   <th scope="col">Verlof</th>
                   <th scope="col">Rest</th>
@@ -277,6 +280,10 @@ export default async function PmDashboardPage() {
                     <td>{formatHours(employee.billableHours)}</td>
                     <td>{formatHours(employee.availableHours)}</td>
                     <td>{formatHours(employee.loggedHours)}</td>
+                    <td>
+                      {formatHours(employee.calendarItemHours)}
+                      <span className="cell-muted">{formatPlanningItemCount(employee.calendarItemCount)}</span>
+                    </td>
                     <td>
                       {formatHours(employee.planningWithoutTaskHours)}
                       <span className="cell-muted">{formatPlanningItemCount(employee.planningWithoutTaskItemCount)}</span>
@@ -1091,12 +1098,12 @@ function buildCapacitySummary(employeeCapacityRows: EmployeeCapacityRow[]): Capa
   };
 }
 
-function buildPlanningWithoutTaskByEmployeeId(calendarItems: JsonRecord[], period: Period) {
-  const planningWithoutTaskByEmployeeId = new Map<number, PlanningWithoutTaskSummary>();
+function buildCalendarItemHoursByEmployeeId(calendarItems: JsonRecord[], period: Period, onlyWithoutTask = false) {
+  const calendarItemHoursByEmployeeId = new Map<number, CalendarItemHoursSummary>();
 
   for (const calendarItem of calendarItems) {
     const date = dateKeyFromValue(readField(calendarItem, "date"));
-    if (!date || date < period.start || date > period.end || hasAssignedTask(calendarItem)) {
+    if (!date || date < period.start || date > period.end || (onlyWithoutTask && hasAssignedTask(calendarItem))) {
       continue;
     }
 
@@ -1110,13 +1117,13 @@ function buildPlanningWithoutTaskByEmployeeId(calendarItems: JsonRecord[], perio
       continue;
     }
 
-    const current = planningWithoutTaskByEmployeeId.get(employeeId) ?? { hours: 0, itemCount: 0 };
+    const current = calendarItemHoursByEmployeeId.get(employeeId) ?? { hours: 0, itemCount: 0 };
     current.hours += amount;
     current.itemCount += 1;
-    planningWithoutTaskByEmployeeId.set(employeeId, current);
+    calendarItemHoursByEmployeeId.set(employeeId, current);
   }
 
-  return planningWithoutTaskByEmployeeId;
+  return calendarItemHoursByEmployeeId;
 }
 
 function hasAssignedTask(record: JsonRecord) {
@@ -1154,7 +1161,8 @@ function buildEmployeeBillabilityRows(
 ) {
   const loggedHoursByEmployeeId = new Map<number, number>();
   const billableHoursByEmployeeId = new Map<number, number>();
-  const planningWithoutTaskByEmployeeId = buildPlanningWithoutTaskByEmployeeId(calendarItems, period);
+  const calendarItemHoursByEmployeeId = buildCalendarItemHoursByEmployeeId(calendarItems, period);
+  const planningWithoutTaskByEmployeeId = buildCalendarItemHoursByEmployeeId(calendarItems, period, true);
 
   for (const hour of hours) {
     const employeeId = relationId(hour, "employee");
@@ -1173,6 +1181,7 @@ function buildEmployeeBillabilityRows(
     .map((row) => {
       const loggedHours = loggedHoursByEmployeeId.get(row.employeeId) ?? 0;
       const billableHours = billableHoursByEmployeeId.get(row.employeeId) ?? 0;
+      const calendarItemHours = calendarItemHoursByEmployeeId.get(row.employeeId) ?? { hours: 0, itemCount: 0 };
       const planningWithoutTask = planningWithoutTaskByEmployeeId.get(row.employeeId) ?? { hours: 0, itemCount: 0 };
 
       return {
@@ -1181,6 +1190,8 @@ function buildEmployeeBillabilityRows(
         billableHours,
         unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
         capacityRemainingHours: row.availableHours - loggedHours,
+        calendarItemHours: calendarItemHours.hours,
+        calendarItemCount: calendarItemHours.itemCount,
         planningWithoutTaskHours: planningWithoutTask.hours,
         planningWithoutTaskItemCount: planningWithoutTask.itemCount,
         billability: percent(billableHours, row.availableHours)
