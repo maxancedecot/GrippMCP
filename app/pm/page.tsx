@@ -45,6 +45,15 @@ type WorkingHoursCapacity = {
   leaveHoursByEmployeeId: Map<number, number>;
 };
 
+type RevenueResponsibilitySources = {
+  invoiceLines: JsonRecord[];
+  projects: Map<number, JsonRecord>;
+  offers: Map<number, JsonRecord>;
+  contracts: Map<number, JsonRecord>;
+  contractLines: Map<number, JsonRecord>;
+  offerProjectLines: Map<number, JsonRecord>;
+};
+
 type PmEmployeeScope = {
   employees: JsonRecord[];
   excludedEmployeeIds: Set<number>;
@@ -74,6 +83,7 @@ type EmployeeCapacityRow = {
 };
 
 type EmployeeBillabilityRow = EmployeeCapacityRow & {
+  responsibleRevenue: number;
   loggedHours: number;
   billableHours: number;
   unbillableLoggedHours: number;
@@ -118,10 +128,12 @@ type PmDashboardData = {
 const PAGE_SIZE = 250;
 const MAX_INVOICE_PAGES = 80;
 const MAX_HOUR_PAGES = 160;
+const MAX_INVOICE_LINE_PAGES = 200;
 const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const WORKING_HOURS_BATCH_SIZE = 25;
+const RELATION_FETCH_BATCH_SIZE = 100;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
@@ -253,6 +265,7 @@ export default async function PmDashboardPage() {
               <thead>
                 <tr>
                   <th scope="col">Medewerker</th>
+                  <th scope="col">Omzet</th>
                   <th scope="col">Billableheid</th>
                   <th scope="col">Billable</th>
                   <th scope="col">Beschikbaar</th>
@@ -271,6 +284,7 @@ export default async function PmDashboardPage() {
                         <span>{employee.usedWorkingHoursFallback ? "40u/week fallback" : "Gripp werktijden"}</span>
                       </span>
                     </th>
+                    <td>{formatCurrency(employee.responsibleRevenue)}</td>
                     <td className="pm-employee-percent">
                       <strong>{formatPercent(employee.billability)}%</strong>
                       <span className="pm-employee-bar" aria-hidden="true">
@@ -400,6 +414,7 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
     );
     const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
     const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
+    const revenueResponsibilitySources = await fetchRevenueResponsibilitySources(client, invoices, issues);
     const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
       fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
     );
@@ -421,7 +436,8 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
         message: liveSourceMessage(issues)
       },
       employeeScope.excludedEmployeeCount,
-      scopedCalendarItems
+      scopedCalendarItems,
+      revenueResponsibilitySources
     );
   } catch (error) {
     return buildDemoPmDashboardData(period, {
@@ -447,7 +463,8 @@ function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
     period,
     source,
     employeeScope.excludedEmployeeCount,
-    scopedCalendarItems
+    scopedCalendarItems,
+    emptyRevenueResponsibilitySources()
   );
 }
 
@@ -480,6 +497,17 @@ function emptyWorkingHoursCapacity(): WorkingHoursCapacity {
   return {
     workingHoursByEmployeeId: new Map<number, number>(),
     leaveHoursByEmployeeId: new Map<number, number>()
+  };
+}
+
+function emptyRevenueResponsibilitySources(): RevenueResponsibilitySources {
+  return {
+    invoiceLines: [],
+    projects: new Map<number, JsonRecord>(),
+    offers: new Map<number, JsonRecord>(),
+    contracts: new Map<number, JsonRecord>(),
+    contractLines: new Map<number, JsonRecord>(),
+    offerProjectLines: new Map<number, JsonRecord>()
   };
 }
 
@@ -696,6 +724,97 @@ async function fetchHoursForPeriod(client: GrippClient, period: Period) {
   return records;
 }
 
+async function fetchInvoiceLinesForInvoices(client: GrippClient, invoices: JsonRecord[]) {
+  const records: JsonRecord[] = [];
+  const invoiceIds = uniqueNumbers(invoices.map((invoice) => idFrom(readField(invoice, "id"))).filter((id): id is number => id !== null));
+
+  for (let index = 0; index < invoiceIds.length; index += RELATION_FETCH_BATCH_SIZE) {
+    const idChunk = invoiceIds.slice(index, index + RELATION_FETCH_BATCH_SIZE);
+
+    for (let page = 0; page < MAX_INVOICE_LINE_PAGES; page += 1) {
+      const result = await client.call("invoiceline.get", [
+        [{ field: "invoiceline.invoice", operator: "in", value: idChunk }],
+        {
+          paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
+          orderings: [{ field: "invoiceline.id", direction: "asc" }]
+        }
+      ] as JsonValue[]);
+      const pageRecords = asRecords(result);
+      records.push(...pageRecords);
+
+      if (pageRecords.length < PAGE_SIZE) {
+        break;
+      }
+    }
+  }
+
+  return records;
+}
+
+async function fetchRecordsByIds(client: GrippClient, entity: string, ids: number[]) {
+  const recordsById = new Map<number, JsonRecord>();
+
+  for (let index = 0; index < ids.length; index += RELATION_FETCH_BATCH_SIZE) {
+    const idChunk = ids.slice(index, index + RELATION_FETCH_BATCH_SIZE);
+    const result = await client.call(`${entity}.get`, [
+      [{ field: `${entity}.id`, operator: "in", value: idChunk }],
+      {
+        paging: { firstresult: 0, maxresults: PAGE_SIZE },
+        orderings: [{ field: `${entity}.id`, direction: "asc" }]
+      }
+    ] as JsonValue[]);
+
+    for (const record of asRecords(result)) {
+      const id = idFrom(readField(record, "id"));
+      if (id !== null) {
+        recordsById.set(id, record);
+      }
+    }
+  }
+
+  return recordsById;
+}
+
+async function fetchRevenueResponsibilitySources(
+  client: GrippClient,
+  invoices: JsonRecord[],
+  issues: string[] = []
+): Promise<RevenueResponsibilitySources> {
+  const invoiceLines = await optionalData(issues, "factuurregels voor omzetverantwoordelijkheid", [], () => fetchInvoiceLinesForInvoices(client, invoices));
+  const [contractLines, offerProjectLines] = await Promise.all([
+    optionalData(issues, "contractregels voor omzetverantwoordelijkheid", new Map<number, JsonRecord>(), () =>
+      fetchRecordsByIds(client, "contractline", uniqueRelationIds(invoiceLines, "contractline"))
+    ),
+    optionalData(issues, "onderdelen voor omzetverantwoordelijkheid", new Map<number, JsonRecord>(), () =>
+      fetchRecordsByIds(
+        client,
+        "offerprojectline",
+        uniqueNumbers([...uniqueRelationIds(invoiceLines, "part"), ...uniqueRelationIds(invoiceLines, "offerprojectline")])
+      )
+    )
+  ]);
+  const offerProjectBaseIds = uniqueRelationIds(Array.from(offerProjectLines.values()), "offerprojectbase");
+  const projectIds = uniqueNumbers([...uniqueRelationIds(invoiceLines, "project"), ...offerProjectBaseIds]);
+  const contractIds = uniqueNumbers([
+    ...uniqueRelationIds(invoiceLines, "contract"),
+    ...uniqueRelationIds(Array.from(contractLines.values()), "contract")
+  ]);
+  const [projects, offers, contracts] = await Promise.all([
+    optionalData(issues, "projecten voor omzetverantwoordelijkheid", new Map<number, JsonRecord>(), () => fetchRecordsByIds(client, "project", projectIds)),
+    optionalData(issues, "offertes voor omzetverantwoordelijkheid", new Map<number, JsonRecord>(), () => fetchRecordsByIds(client, "offer", offerProjectBaseIds)),
+    optionalData(issues, "contracten voor omzetverantwoordelijkheid", new Map<number, JsonRecord>(), () => fetchRecordsByIds(client, "contract", contractIds))
+  ]);
+
+  return {
+    invoiceLines,
+    projects,
+    offers,
+    contracts,
+    contractLines,
+    offerProjectLines
+  };
+}
+
 async function fetchCalendarItemsForPeriod(client: GrippClient, period: Period) {
   const records: JsonRecord[] = [];
   const filters: JsonValue[] = [
@@ -910,7 +1029,8 @@ function buildPmDashboardData(
   period: Period,
   source: DashboardSource,
   excludedEmployeeCount = 0,
-  calendarItems: JsonRecord[] = []
+  calendarItems: JsonRecord[] = [],
+  revenueResponsibilitySources: RevenueResponsibilitySources = emptyRevenueResponsibilitySources()
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
@@ -920,24 +1040,14 @@ function buildPmDashboardData(
   const revenueByMonth = new Map<string, number>();
 
   for (const invoice of invoices) {
-    if (stringFrom(readField(invoice, "status"))?.toUpperCase() === "CONCEPT") {
+    const revenueEntry = invoiceRevenueEntry(invoice, period);
+    if (!revenueEntry) {
       continue;
     }
 
-    const reportDate = dateKeyFromValue(readField(invoice, "reportdate"));
-    const monthKey = monthKeyForDateInPeriod(reportDate, period);
-    if (!monthKey) {
-      continue;
-    }
-
-    const amount = numberFrom(readField(invoice, "totalincldiscountexclvat"));
-    if (amount === null) {
-      continue;
-    }
-
-    revenue += amount;
+    revenue += revenueEntry.amount;
     invoiceCount += 1;
-    revenueByMonth.set(monthKey, (revenueByMonth.get(monthKey) ?? 0) + amount);
+    revenueByMonth.set(revenueEntry.monthKey, (revenueByMonth.get(revenueEntry.monthKey) ?? 0) + revenueEntry.amount);
   }
 
   for (const hour of hours) {
@@ -955,8 +1065,17 @@ function buildPmDashboardData(
   }
 
   const employeeCapacityRows = buildEmployeeCapacityRows(capacitySources, hours, period);
+  const responsibleEmployeeIds = new Set(employeeCapacityRows.map((row) => row.employeeId));
+  const responsibleRevenueByEmployeeId = buildResponsibleRevenueByEmployeeId(invoices, revenueResponsibilitySources, period, responsibleEmployeeIds);
   const capacity = buildCapacitySummary(employeeCapacityRows);
-  const employeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources, calendarItems, period);
+  const employeeBillability = buildEmployeeBillabilityRows(
+    employeeCapacityRows,
+    hours,
+    billabilitySources,
+    calendarItems,
+    period,
+    responsibleRevenueByEmployeeId
+  );
   const capacityRemainingHours = employeeBillability.reduce((total, row) => total + row.capacityRemainingHours, 0);
 
   return {
@@ -1013,6 +1132,21 @@ function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources
 function lineHasPositiveUnitPrice(line: JsonRecord) {
   const sellingPrice = numberFrom(readField(line, "sellingprice"));
   return sellingPrice !== null && sellingPrice > 0;
+}
+
+function invoiceRevenueEntry(invoice: JsonRecord, period: Period) {
+  if (stringFrom(readField(invoice, "status"))?.toUpperCase() === "CONCEPT") {
+    return null;
+  }
+
+  const reportDate = dateKeyFromValue(readField(invoice, "reportdate"));
+  const monthKey = monthKeyForDateInPeriod(reportDate, period);
+  if (!monthKey) {
+    return null;
+  }
+
+  const amount = numberFrom(readField(invoice, "totalincldiscountexclvat"));
+  return amount === null ? null : { amount, monthKey };
 }
 
 function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: JsonRecord[], period: Period): EmployeeCapacityRow[] {
@@ -1148,7 +1282,8 @@ function buildEmployeeBillabilityRows(
   hours: JsonRecord[],
   billabilitySources: BillabilitySources,
   calendarItems: JsonRecord[],
-  period: Period
+  period: Period,
+  responsibleRevenueByEmployeeId: Map<number, number>
 ) {
   const loggedHoursByEmployeeId = new Map<number, number>();
   const billableHoursByEmployeeId = new Map<number, number>();
@@ -1177,6 +1312,7 @@ function buildEmployeeBillabilityRows(
 
       return {
         ...row,
+        responsibleRevenue: responsibleRevenueByEmployeeId.get(row.employeeId) ?? 0,
         loggedHours,
         billableHours,
         unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
@@ -1189,6 +1325,155 @@ function buildEmployeeBillabilityRows(
       };
     })
     .sort(compareEmployeeBillabilityRows);
+}
+
+function buildResponsibleRevenueByEmployeeId(
+  invoices: JsonRecord[],
+  sources: RevenueResponsibilitySources,
+  period: Period,
+  eligibleEmployeeIds: Set<number>
+) {
+  const revenueByEmployeeId = new Map<number, number>();
+  const invoiceLinesByInvoiceId = new Map<number, JsonRecord[]>();
+
+  for (const line of sources.invoiceLines) {
+    const invoiceId = relationId(line, "invoice");
+    if (invoiceId === null) {
+      continue;
+    }
+
+    const lines = invoiceLinesByInvoiceId.get(invoiceId) ?? [];
+    lines.push(line);
+    invoiceLinesByInvoiceId.set(invoiceId, lines);
+  }
+
+  for (const invoice of invoices) {
+    const revenueEntry = invoiceRevenueEntry(invoice, period);
+    if (!revenueEntry) {
+      continue;
+    }
+
+    const invoiceId = idFrom(readField(invoice, "id"));
+    const invoiceEmployeeIds = responsibleEmployeeIdsFromRecord(invoice);
+    const invoiceLines = invoiceId === null ? [] : invoiceLinesByInvoiceId.get(invoiceId) ?? [];
+    if (invoiceLines.length === 0) {
+      addRevenueShare(revenueByEmployeeId, invoiceEmployeeIds, revenueEntry.amount, eligibleEmployeeIds);
+      continue;
+    }
+
+    const lineAmounts = invoiceLines
+      .map((line) => ({ line, amount: invoiceLineNetRevenue(line) }))
+      .filter((row): row is { line: JsonRecord; amount: number } => row.amount !== null);
+    const lineTotal = lineAmounts.reduce((total, row) => total + row.amount, 0);
+    if (lineAmounts.length === 0 || lineTotal === 0) {
+      addRevenueShare(revenueByEmployeeId, invoiceEmployeeIds, revenueEntry.amount, eligibleEmployeeIds);
+      continue;
+    }
+
+    for (const { line, amount } of lineAmounts) {
+      const lineEmployeeIds = responsibleEmployeeIdsForInvoiceLine(line, sources);
+      const employeeIds = lineEmployeeIds.length > 0 ? lineEmployeeIds : invoiceEmployeeIds;
+      const lineRevenue = revenueEntry.amount * (amount / lineTotal);
+      addRevenueShare(revenueByEmployeeId, employeeIds, lineRevenue, eligibleEmployeeIds);
+    }
+  }
+
+  return revenueByEmployeeId;
+}
+
+function responsibleEmployeeIdsForInvoiceLine(line: JsonRecord, sources: RevenueResponsibilitySources) {
+  const directIds = responsibleEmployeeIdsFromRecord(line);
+  if (directIds.length > 0) {
+    return directIds;
+  }
+
+  const projectId = relationId(line, "project");
+  const projectIds = new Set<number>();
+  if (projectId !== null) {
+    projectIds.add(projectId);
+  }
+
+  const partId = relationId(line, "part") ?? relationId(line, "offerprojectline");
+  const offerProjectLine = partId === null ? undefined : sources.offerProjectLines.get(partId);
+  const offerProjectBaseId = offerProjectLine ? relationId(offerProjectLine, "offerprojectbase") : null;
+  if (offerProjectBaseId !== null) {
+    projectIds.add(offerProjectBaseId);
+  }
+
+  for (const id of projectIds) {
+    const projectIdsFromProject = responsibleEmployeeIdsFromRecord(sources.projects.get(id));
+    if (projectIdsFromProject.length > 0) {
+      return projectIdsFromProject;
+    }
+  }
+
+  if (offerProjectBaseId !== null) {
+    const offerIds = responsibleEmployeeIdsFromRecord(sources.offers.get(offerProjectBaseId));
+    if (offerIds.length > 0) {
+      return offerIds;
+    }
+  }
+
+  const contractId = relationId(line, "contract");
+  const contractLineId = relationId(line, "contractline");
+  const contractLine = contractLineId === null ? undefined : sources.contractLines.get(contractLineId);
+  const contractLineContractId = contractLine ? relationId(contractLine, "contract") : null;
+  const contract = sources.contracts.get(contractId ?? contractLineContractId ?? -1);
+  const contractIds = responsibleEmployeeIdsFromRecord(contract);
+  return contractIds;
+}
+
+function responsibleEmployeeIdsFromRecord(record: JsonRecord | undefined) {
+  const starredIds = relationIds(record, "employees_starred");
+  if (starredIds.length > 0) {
+    return starredIds;
+  }
+
+  const employeeIds = relationIds(record, "employees");
+  if (employeeIds.length > 0) {
+    return employeeIds;
+  }
+
+  return uniqueNumbers([
+    ...relationIds(record, "accountmanager"),
+    ...relationIds(record, "salesassociate"),
+    ...relationIds(record, "preferredemployee")
+  ]);
+}
+
+function invoiceLineNetRevenue(line: JsonRecord) {
+  for (const field of ["totalincldiscountexclvat", "totalexclvat"]) {
+    const total = numberFrom(readField(line, field));
+    if (total !== null) {
+      return total;
+    }
+  }
+
+  const amount = numberFrom(readField(line, "amount"));
+  const sellingPrice = numberFrom(readField(line, "sellingprice"));
+  if (amount === null || sellingPrice === null) {
+    return null;
+  }
+
+  const discount = numberFrom(readField(line, "discount")) ?? 0;
+  return amount * sellingPrice * (1 - discount / 100);
+}
+
+function addRevenueShare(
+  revenueByEmployeeId: Map<number, number>,
+  employeeIds: number[],
+  amount: number,
+  eligibleEmployeeIds: Set<number>
+) {
+  const eligibleIds = employeeIds.filter((employeeId) => eligibleEmployeeIds.has(employeeId));
+  if (eligibleIds.length === 0) {
+    return;
+  }
+
+  const share = amount / eligibleIds.length;
+  for (const employeeId of eligibleIds) {
+    revenueByEmployeeId.set(employeeId, (revenueByEmployeeId.get(employeeId) ?? 0) + share);
+  }
 }
 
 function compareEmployeeCapacityRows(left: EmployeeCapacityRow, right: EmployeeCapacityRow) {
@@ -1541,10 +1826,14 @@ function uniqueRelationIds(records: JsonRecord[], field: string) {
   return Array.from(
     new Set(
       records
-        .map((record) => relationId(record, field))
+        .flatMap((record) => relationIds(record, field))
         .filter((id): id is number => id !== null)
     )
   );
+}
+
+function uniqueNumbers(values: number[]) {
+  return Array.from(new Set(values.filter((value) => Number.isFinite(value))));
 }
 
 function asRecords(value: JsonValue): JsonRecord[] {
@@ -1580,8 +1869,12 @@ function readField(record: JsonRecord | undefined, field: string) {
     record[field] ??
     record[`hour.${field}`] ??
     record[`invoice.${field}`] ??
+    record[`project.${field}`] ??
+    record[`offer.${field}`] ??
     record[`offerprojectline.${field}`] ??
     record[`invoiceline.${field}`] ??
+    record[`contract.${field}`] ??
+    record[`contractline.${field}`] ??
     record[`employee.${field}`] ??
     record[`employmentcontract.${field}`] ??
     record[`absencerequestline.${field}`] ??
@@ -1596,18 +1889,55 @@ function readField(record: JsonRecord | undefined, field: string) {
   return matchingKey ? record[matchingKey] : undefined;
 }
 
+function relationIds(record: JsonRecord | undefined, field: string) {
+  if (!record) {
+    return [];
+  }
+
+  const ids = new Set<number>();
+  const normalizedField = field.toLowerCase();
+  const addValue = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(addValue);
+      return;
+    }
+
+    const id = idFrom(value);
+    if (id !== null) {
+      ids.add(id);
+    }
+  };
+
+  addValue(readField(record, field));
+  addValue(record[`${field}.id`]);
+  addValue(record[`hour.${field}.id`]);
+  addValue(record[`invoice.${field}.id`]);
+  addValue(record[`project.${field}.id`]);
+  addValue(record[`offer.${field}.id`]);
+  addValue(record[`offerprojectline.${field}.id`]);
+  addValue(record[`invoiceline.${field}.id`]);
+  addValue(record[`contract.${field}.id`]);
+  addValue(record[`contractline.${field}.id`]);
+  addValue(record[`employee.${field}.id`]);
+  addValue(record[`employmentcontract.${field}.id`]);
+  addValue(record[`absencerequestline.${field}.id`]);
+  addValue(record[`absencerequest.${field}.id`]);
+  addValue(record[`calendaritem.${field}.id`]);
+
+  for (const [key, value] of Object.entries(record)) {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey === normalizedField || normalizedKey.endsWith(`.${normalizedField}`) || normalizedKey.endsWith(`.${normalizedField}.id`)) {
+      addValue(value);
+    }
+  }
+
+  return Array.from(ids);
+}
+
 function relationId(record: JsonRecord, field: string) {
   return (
-    idFrom(readField(record, field)) ??
-    idFrom(record[`${field}.id`]) ??
-    idFrom(record[`hour.${field}.id`]) ??
-    idFrom(record[`invoice.${field}.id`]) ??
-    idFrom(record[`employee.${field}.id`]) ??
-    idFrom(record[`employmentcontract.${field}.id`]) ??
-    idFrom(record[`absencerequestline.${field}.id`]) ??
-    idFrom(record[`absencerequest.${field}.id`]) ??
-    idFrom(record[`calendaritem.${field}.id`]) ??
-    idFrom(Object.entries(record).find(([key]) => key.toLowerCase().endsWith(`.${field.toLowerCase()}.id`))?.[1])
+    relationIds(record, field)[0] ??
+    null
   );
 }
 
@@ -1907,6 +2237,7 @@ function createDemoInvoices(period: Period): JsonRecord[] {
     id: 9000 + index,
     reportdate: `${bucket.key}-15`,
     status: "SENT",
+    employees_starred: index % 4 === 3 ? [1, 2] : [(index % 3) + 1],
     totalincldiscountexclvat: [18500, 22400, 26350, 19800, 28900, 24400][index % 6]
   }));
 }
