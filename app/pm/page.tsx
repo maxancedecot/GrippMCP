@@ -280,17 +280,20 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
 
   try {
     const client = new GrippClient();
-    const [invoices, hours, employees, employmentContracts, absenceRequestLines] = await Promise.all([
-      fetchInvoicesForPeriod(client, period),
-      fetchHoursForPeriod(client, period),
-      fetchEmployees(client),
-      fetchEmploymentContracts(client),
-      fetchAbsenceRequestLinesForPeriod(client, period)
+    const issues: string[] = [];
+    const [invoices, hours] = await Promise.all([
+      requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
+      requiredData("uren", () => fetchHoursForPeriod(client, period))
     ]);
-    const [billabilitySources, absenceRequestsById] = await Promise.all([
-      fetchBillabilitySources(client, hours),
+    const [employees, employmentContracts, absenceRequestLines, billabilitySources] = await Promise.all([
+      optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
+      optionalData(issues, "arbeidsovereenkomsten", [], () => fetchEmploymentContracts(client)),
+      optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period)),
+      fetchBillabilitySources(client, hours, issues)
+    ]);
+    const absenceRequestsById = await optionalData(issues, "verlofaanvragen", new Map<number, JsonRecord>(), () =>
       fetchAbsenceRequestsById(client, absenceRequestLines)
-    ]);
+    );
 
     return buildPmDashboardData(invoices, hours, billabilitySources, {
       employees,
@@ -299,7 +302,7 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       absenceRequestsById
     }, period, {
       mode: "live",
-      message: ""
+      message: liveSourceMessage(issues)
     });
   } catch (error) {
     const demoHours = createDemoHours(period);
@@ -310,12 +313,41 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
   }
 }
 
+async function requiredData<T>(label: string, loader: () => Promise<T>) {
+  try {
+    return await loader();
+  } catch (error) {
+    throw new Error(`${label} niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
+  }
+}
+
+async function optionalData<T>(issues: string[], label: string, fallback: T, loader: () => Promise<T>) {
+  try {
+    return await loader();
+  } catch (error) {
+    issues.push(`${label} niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
+    return fallback;
+  }
+}
+
+function liveSourceMessage(issues: string[]) {
+  if (issues.length === 0) {
+    return "";
+  }
+
+  return `Live data geladen met fallback: ${issues.join("; ")}.`;
+}
+
+function errorCode(error: unknown) {
+  const record = asRecord(error);
+  return typeof record?.code === "string" ? record.code : "";
+}
+
 async function fetchInvoicesForPeriod(client: GrippClient, period: Period) {
   const records: JsonRecord[] = [];
   const filters: JsonValue[] = [
     { field: "invoice.reportdate", operator: "greaterequals", value: period.start },
-    { field: "invoice.reportdate", operator: "lessequals", value: period.end },
-    { field: "invoice.status", operator: "equals", value: "SENT" }
+    { field: "invoice.reportdate", operator: "lessequals", value: period.end }
   ];
 
   for (let page = 0; page < MAX_INVOICE_PAGES; page += 1) {
@@ -362,7 +394,6 @@ async function fetchHoursForPeriod(client: GrippClient, period: Period) {
 
   return records;
 }
-
 async function fetchEmployees(client: GrippClient) {
   const records: JsonRecord[] = [];
 
@@ -393,10 +424,7 @@ async function fetchEmploymentContracts(client: GrippClient) {
       [],
       {
         paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
-        orderings: [
-          { field: "employmentcontract.employee", direction: "asc" },
-          { field: "employmentcontract.startdate", direction: "asc" }
-        ]
+        orderings: [{ field: "employmentcontract.id", direction: "asc" }]
       }
     ] as JsonValue[]);
     const pageRecords = asRecords(result);
@@ -414,8 +442,7 @@ async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Pe
   const records: JsonRecord[] = [];
   const filters: JsonValue[] = [
     { field: "absencerequestline.date", operator: "greaterequals", value: period.start },
-    { field: "absencerequestline.date", operator: "lessequals", value: period.end },
-    { field: "absencerequestline.absencerequeststatus", operator: "equals", value: "APPROVED" }
+    { field: "absencerequestline.date", operator: "lessequals", value: period.end }
   ];
 
   for (let page = 0; page < MAX_ABSENCE_LINE_PAGES; page += 1) {
@@ -462,52 +489,60 @@ async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines
   return absenceRequestsById;
 }
 
-async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[]): Promise<BillabilitySources> {
+async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[], issues: string[] = []): Promise<BillabilitySources> {
   const offerProjectLines = new Map<number, LineBillability>();
   const invoiceLines = new Map<number, LineBillability>();
   const offerProjectLineIds = uniqueRelationIds(hours, "offerprojectline");
   const invoiceLineIds = uniqueRelationIds(hours, "invoiceline");
 
-  for (let index = 0; index < offerProjectLineIds.length; index += 100) {
-    const idChunk = offerProjectLineIds.slice(index, index + 100);
-    const result = await client.call("offerprojectline.get", [
-      [{ field: "offerprojectline.id", operator: "in", value: idChunk }],
-      {
-        paging: { firstresult: 0, maxresults: PAGE_SIZE },
-        orderings: [{ field: "offerprojectline.id", direction: "asc" }]
-      }
-    ] as JsonValue[]);
+  try {
+    for (let index = 0; index < offerProjectLineIds.length; index += 100) {
+      const idChunk = offerProjectLineIds.slice(index, index + 100);
+      const result = await client.call("offerprojectline.get", [
+        [{ field: "offerprojectline.id", operator: "in", value: idChunk }],
+        {
+          paging: { firstresult: 0, maxresults: PAGE_SIZE },
+          orderings: [{ field: "offerprojectline.id", direction: "asc" }]
+        }
+      ] as JsonValue[]);
 
-    for (const offerProjectLine of asRecords(result)) {
-      const id = idFrom(readField(offerProjectLine, "id"));
-      const invoiceBasis = stringFrom(readField(offerProjectLine, "invoicebasis"))?.toUpperCase();
-      if (id !== null) {
-        offerProjectLines.set(id, {
-          invoiceBasis,
-          hasPositiveValue: lineHasPositiveValue(offerProjectLine)
-        });
+      for (const offerProjectLine of asRecords(result)) {
+        const id = idFrom(readField(offerProjectLine, "id"));
+        const invoiceBasis = stringFrom(readField(offerProjectLine, "invoicebasis"))?.toUpperCase();
+        if (id !== null) {
+          offerProjectLines.set(id, {
+            invoiceBasis,
+            hasPositiveValue: lineHasPositiveValue(offerProjectLine)
+          });
+        }
       }
     }
+  } catch (error) {
+    issues.push(`opdrachtregelprijzen niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
   }
 
-  for (let index = 0; index < invoiceLineIds.length; index += 100) {
-    const idChunk = invoiceLineIds.slice(index, index + 100);
-    const result = await client.call("invoiceline.get", [
-      [{ field: "invoiceline.id", operator: "in", value: idChunk }],
-      {
-        paging: { firstresult: 0, maxresults: PAGE_SIZE },
-        orderings: [{ field: "invoiceline.id", direction: "asc" }]
-      }
-    ] as JsonValue[]);
+  try {
+    for (let index = 0; index < invoiceLineIds.length; index += 100) {
+      const idChunk = invoiceLineIds.slice(index, index + 100);
+      const result = await client.call("invoiceline.get", [
+        [{ field: "invoiceline.id", operator: "in", value: idChunk }],
+        {
+          paging: { firstresult: 0, maxresults: PAGE_SIZE },
+          orderings: [{ field: "invoiceline.id", direction: "asc" }]
+        }
+      ] as JsonValue[]);
 
-    for (const invoiceLine of asRecords(result)) {
-      const id = idFrom(readField(invoiceLine, "id"));
-      if (id !== null) {
-        invoiceLines.set(id, {
-          hasPositiveValue: lineHasPositiveValue(invoiceLine)
-        });
+      for (const invoiceLine of asRecords(result)) {
+        const id = idFrom(readField(invoiceLine, "id"));
+        if (id !== null) {
+          invoiceLines.set(id, {
+            hasPositiveValue: lineHasPositiveValue(invoiceLine)
+          });
+        }
       }
     }
+  } catch (error) {
+    issues.push(`factuurregelprijzen niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
   }
 
   return { offerProjectLines, invoiceLines };
@@ -648,12 +683,19 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
     ...hours.map((hour) => relationId(hour, "employee")).filter((employeeId): employeeId is number => employeeId !== null)
   ]);
 
+  for (const employeeId of referencedEmployeeIds) {
+    if (!employeesById.has(employeeId)) {
+      employeesById.set(employeeId, { id: employeeId, active: true });
+    }
+  }
+
   const employees = Array.from(employeesById.entries())
     .filter(([employeeId, employee]) => booleanFrom(readField(employee, "active")) !== false || referencedEmployeeIds.has(employeeId))
     .map(([employeeId, employee]) => ({ employeeId, employee }));
   let contractHours = 0;
   let leaveHours = 0;
   let fallbackContractEmployeeCount = 0;
+  let countedEmployees = 0;
 
   for (const { employeeId, employee } of employees) {
     const employeeContracts = (contractsByEmployeeId.get(employeeId) ?? []).sort(compareContracts);
@@ -663,6 +705,7 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
       continue;
     }
 
+    countedEmployees += 1;
     const contractResult = calculateContractHoursForEmployee(employeeContracts, capacityStart, period.end);
     contractHours += contractResult.hours;
     if (contractResult.usedFallback) {
@@ -678,7 +721,7 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
     contractHours,
     leaveHours,
     availableHours,
-    employeeCount: employees.length,
+    employeeCount: countedEmployees,
     fallbackContractEmployeeCount
   };
 }
