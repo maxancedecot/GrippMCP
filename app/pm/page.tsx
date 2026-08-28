@@ -178,7 +178,7 @@ export default async function PmDashboardPage() {
         <MetricCard label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Omzet gedeeld door billable uren" tone="warning" />
       </section>
 
-      <section className="dashboard-grid">
+      <section className="dashboard-grid dashboard-grid--single">
         <article className="panel">
           <div className="panel-heading">
             <div>
@@ -207,33 +207,6 @@ export default async function PmDashboardPage() {
               <LegendItem label="Gelogd totaal" value={`${formatHours(dashboard.loggedHours)} uur`} className="legend-dot--blue" />
             </dl>
           </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Berekening</p>
-              <h2>Omzet per uur</h2>
-            </div>
-          </div>
-
-          <dl className="pm-formula-list">
-            <FormulaItem label="Omzet" detail={`${dashboard.invoiceCount} verkoopfacturen met rapportagedatum in ${dashboard.period.year}`} value={formatCurrency(dashboard.revenue)} />
-            <FormulaItem label="Werktijd" detail={`${formatEmployeeCount(dashboard.employeeCount)} zonder rechtenprofiel beheerder; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
-            <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties of afwezigheid uit Gripp-werktijden in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
-            <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
-            <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een onderdeel met Prijs p.e. boven 0 euro of handmatig billable gemarkeerd" value={`${formatHours(dashboard.billableHours)} uur`} />
-            <FormulaItem label="Agenda-uren" detail="Ingegeven agenda-uren zonder rechtenprofiel beheerder" value={`${formatHours(dashboard.calendarItemHours)} uur`} />
-            <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels zonder rechtenprofiel beheerder; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
-            <FormulaItem label="Per agenda-uur" detail="Omzet / agenda-uren" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} />
-            <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
-            {dashboard.excludedEmployeeCount > 0 ? (
-              <FormulaItem label="Uitgesloten" detail="Rechtenprofiel beheerder telt niet mee in uren, verlof en capaciteit" value={formatEmployeeCount(dashboard.excludedEmployeeCount)} />
-            ) : null}
-            {dashboard.fallbackWorkingHoursEmployeeCount > 0 ? (
-              <FormulaItem label="Fallback" detail="Werknemers zonder werktijden in Gripp zijn met 40u/week gerekend" value={String(dashboard.fallbackWorkingHoursEmployeeCount)} />
-            ) : null}
-          </dl>
         </article>
       </section>
 
@@ -345,18 +318,6 @@ function LegendItem({ label, value, className }: { label: string; value: string;
       <dt>
         <span className={`legend-dot ${className}`} />
         {label}
-      </dt>
-      <dd>{value}</dd>
-    </div>
-  );
-}
-
-function FormulaItem({ label, detail, value }: { label: string; detail: string; value: string }) {
-  return (
-    <div className="pm-formula-row">
-      <dt>
-        <span>{label}</span>
-        <small>{detail}</small>
       </dt>
       <dd>{value}</dd>
     </div>

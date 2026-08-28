@@ -749,50 +749,10 @@ td .inline-bar {
   color: var(--muted);
 }
 
-.pm-formula-list,
 .pm-month-list {
   display: grid;
   gap: 14px;
   margin: 0;
-}
-
-.pm-formula-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.pm-formula-row:last-child {
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-
-.pm-formula-row dt,
-.pm-formula-row dd {
-  margin: 0;
-}
-
-.pm-formula-row dt {
-  display: grid;
-  gap: 4px;
-}
-
-.pm-formula-row dt span,
-.pm-formula-row dd {
-  font-weight: 740;
-}
-
-.pm-formula-row small {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.pm-formula-row dd {
-  white-space: nowrap;
 }
 
 .pm-employee-table-wrap {
