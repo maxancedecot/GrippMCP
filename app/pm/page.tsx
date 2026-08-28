@@ -29,7 +29,7 @@ type LineBillability = {
 
 type BillabilitySources = {
   offerProjectLines: Map<number, LineBillability>;
-  invoiceLines: Map<number, LineBillability>;
+  taskOfferProjectLineIds: Map<number, number>;
 };
 
 type CapacitySources = {
@@ -224,7 +224,7 @@ export default async function PmDashboardPage() {
             <FormulaItem label="Werktijd" detail={`${formatEmployeeCount(dashboard.employeeCount)} zonder rechtenprofiel beheerder; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
             <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties of afwezigheid uit Gripp-werktijden in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
             <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
-            <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een product-/itemregel met klantprijs boven 0 euro of handmatig billable gemarkeerd" value={`${formatHours(dashboard.billableHours)} uur`} />
+            <FormulaItem label="Billable uren" detail="Uren op een taak waarvan de gekoppelde opdrachtregel klantprijs boven 0 euro heeft of handmatig billable is gemarkeerd" value={`${formatHours(dashboard.billableHours)} uur`} />
             <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels zonder rechtenprofiel beheerder; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
             <FormulaItem label="Per gelogd uur" detail="Omzet / gelogde uren" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} />
             <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
@@ -847,11 +847,34 @@ async function fetchWorkingHoursForEmployees(
 
 async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[], issues: string[] = []): Promise<BillabilitySources> {
   const offerProjectLines = new Map<number, LineBillability>();
-  const invoiceLines = new Map<number, LineBillability>();
-  const offerProjectLineIds = uniqueRelationIds(hours, "offerprojectline");
-  const invoiceLineIds = uniqueRelationIds(hours, "invoiceline");
+  const taskOfferProjectLineIds = new Map<number, number>();
+  const taskIds = uniqueRelationIds(hours, "task");
 
   try {
+    for (let index = 0; index < taskIds.length; index += 100) {
+      const idChunk = taskIds.slice(index, index + 100);
+      const result = await client.call("task.get", [
+        [{ field: "task.id", operator: "in", value: idChunk }],
+        {
+          paging: { firstresult: 0, maxresults: PAGE_SIZE },
+          orderings: [{ field: "task.id", direction: "asc" }]
+        }
+      ] as JsonValue[]);
+
+      for (const task of asRecords(result)) {
+        const taskId = idFrom(readField(task, "id"));
+        const offerProjectLineId = relationId(task, "offerprojectline");
+        if (taskId !== null && offerProjectLineId !== null) {
+          taskOfferProjectLineIds.set(taskId, offerProjectLineId);
+        }
+      }
+    }
+  } catch (error) {
+    issues.push(`taakkoppelingen niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
+  }
+
+  try {
+    const offerProjectLineIds = Array.from(new Set(taskOfferProjectLineIds.values()));
     for (let index = 0; index < offerProjectLineIds.length; index += 100) {
       const idChunk = offerProjectLineIds.slice(index, index + 100);
       const result = await client.call("offerprojectline.get", [
@@ -875,31 +898,7 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
     issues.push(`opdrachtregelprijzen niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
   }
 
-  try {
-    for (let index = 0; index < invoiceLineIds.length; index += 100) {
-      const idChunk = invoiceLineIds.slice(index, index + 100);
-      const result = await client.call("invoiceline.get", [
-        [{ field: "invoiceline.id", operator: "in", value: idChunk }],
-        {
-          paging: { firstresult: 0, maxresults: PAGE_SIZE },
-          orderings: [{ field: "invoiceline.id", direction: "asc" }]
-        }
-      ] as JsonValue[]);
-
-      for (const invoiceLine of asRecords(result)) {
-        const id = idFrom(readField(invoiceLine, "id"));
-        if (id !== null) {
-          invoiceLines.set(id, {
-            hasPositiveValue: lineHasPositiveValue(invoiceLine)
-          });
-        }
-      }
-    }
-  } catch (error) {
-    issues.push(`factuurregelprijzen niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
-  }
-
-  return { offerProjectLines, invoiceLines };
+  return { offerProjectLines, taskOfferProjectLineIds };
 }
 
 function buildPmDashboardData(
@@ -998,20 +997,13 @@ function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources
   if (taskId !== null && FORCED_BILLABLE_TASK_IDS.has(taskId)) {
     return true;
   }
-
-  const invoiceLineId = relationId(hour, "invoiceline");
-  const invoiceLine = invoiceLineId === null ? undefined : billabilitySources.invoiceLines.get(invoiceLineId);
-  if (invoiceLine) {
-    return invoiceLine.hasPositiveValue;
+  if (taskId === null) {
+    return false;
   }
 
-  const offerProjectLineId = relationId(hour, "offerprojectline");
-  const offerProjectLine = offerProjectLineId === null ? undefined : billabilitySources.offerProjectLines.get(offerProjectLineId);
-  if (offerProjectLine) {
-    return offerProjectLine.hasPositiveValue;
-  }
-
-  return lineHasPositiveValue(hour);
+  const offerProjectLineId = billabilitySources.taskOfferProjectLineIds.get(taskId);
+  const offerProjectLine = offerProjectLineId === undefined ? undefined : billabilitySources.offerProjectLines.get(offerProjectLineId);
+  return offerProjectLine?.hasPositiveValue === true;
 }
 
 function lineHasPositiveValue(line: JsonRecord) {
@@ -1876,10 +1868,10 @@ function createDemoHours(period: Period): JsonRecord[] {
   return makeMonthBuckets(period).flatMap((bucket, index) => {
     const month = bucket.key;
     return [
-      { id: index * 4 + 1, date: `${month}-05`, amount: 138 + (index % 3) * 4, employee: 1, offerprojectline: 1000 + index * 4 },
-      { id: index * 4 + 2, date: `${month}-12`, amount: 126 + (index % 4) * 3, employee: 2, offerprojectline: 1001 + index * 4 },
-      { id: index * 4 + 3, date: `${month}-19`, amount: 114 + (index % 2) * 5, employee: 3, offerprojectline: 1002 + index * 4 },
-      { id: index * 4 + 4, date: `${month}-24`, amount: 32 + (index % 3) * 2, employee: 4, offerprojectline: 1003 + index * 4 }
+      { id: index * 4 + 1, date: `${month}-05`, amount: 138 + (index % 3) * 4, employee: 1, task: 6000 + index * 4, offerprojectline: 1000 + index * 4 },
+      { id: index * 4 + 2, date: `${month}-12`, amount: 126 + (index % 4) * 3, employee: 2, task: 6001 + index * 4, offerprojectline: 1001 + index * 4 },
+      { id: index * 4 + 3, date: `${month}-19`, amount: 114 + (index % 2) * 5, employee: 3, task: 6002 + index * 4, offerprojectline: 1002 + index * 4 },
+      { id: index * 4 + 4, date: `${month}-24`, amount: 32 + (index % 3) * 2, employee: 4, task: 6003 + index * 4, offerprojectline: 1003 + index * 4 }
     ];
   });
 }
@@ -1897,7 +1889,7 @@ function createDemoCalendarItems(period: Period): JsonRecord[] {
 
 function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
   const offerProjectLines = new Map<number, LineBillability>();
-  const invoiceLines = new Map<number, LineBillability>();
+  const taskOfferProjectLineIds = new Map<number, number>();
 
   uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
     offerProjectLines.set(id, {
@@ -1905,7 +1897,15 @@ function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
     });
   });
 
-  return { offerProjectLines, invoiceLines };
+  for (const hour of hours) {
+    const taskId = relationId(hour, "task");
+    const offerProjectLineId = relationId(hour, "offerprojectline");
+    if (taskId !== null && offerProjectLineId !== null) {
+      taskOfferProjectLineIds.set(taskId, offerProjectLineId);
+    }
+  }
+
+  return { offerProjectLines, taskOfferProjectLineIds };
 }
 
 function createDemoInvoices(period: Period): JsonRecord[] {
