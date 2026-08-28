@@ -60,6 +60,11 @@ type CapacitySummary = {
   fallbackWorkingHoursEmployeeCount: number;
 };
 
+type PlanningWithoutTaskSummary = {
+  hours: number;
+  itemCount: number;
+};
+
 type EmployeeCapacityRow = {
   employeeId: number;
   name: string;
@@ -94,6 +99,8 @@ type PmDashboardData = {
   leaveHours: number;
   availableHours: number;
   capacityRemainingHours: number;
+  planningWithoutTaskHours: number;
+  planningWithoutTaskItemCount: number;
   billability: number;
   revenuePerLoggedHour: number;
   revenuePerBillableHour: number;
@@ -112,6 +119,7 @@ const MAX_INVOICE_PAGES = 80;
 const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
+const MAX_CALENDAR_ITEM_PAGES = 160;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
@@ -195,6 +203,7 @@ export default async function PmDashboardPage() {
             <dl className="legend-list">
               <LegendItem label="Billable" value={`${formatHours(dashboard.billableHours)} uur`} className="legend-dot--good" />
               <LegendItem label="Rest beschikbaar" value={`${formatHours(dashboard.capacityRemainingHours)} uur`} className="legend-dot--neutral" />
+              <LegendItem label="Planning zonder taak" value={`${formatHours(dashboard.planningWithoutTaskHours)} uur`} className="legend-dot--overtime" />
               <LegendItem label="Verlof" value={`${formatHours(dashboard.leaveHours)} uur`} className="legend-dot--warning" />
               <LegendItem label="Gelogd totaal" value={`${formatHours(dashboard.loggedHours)} uur`} className="legend-dot--blue" />
             </dl>
@@ -216,6 +225,7 @@ export default async function PmDashboardPage() {
             <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
             <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een factuur- of opdrachtregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
             <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels zonder rechtenprofiel beheerder; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
+            <FormulaItem label="Planning zonder taak" detail={`${formatPlanningItemCount(dashboard.planningWithoutTaskItemCount)} zonder gekoppelde taak`} value={`${formatHours(dashboard.planningWithoutTaskHours)} uur`} />
             <FormulaItem label="Per gelogd uur" detail="Omzet / gelogde uren" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} />
             <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
             {dashboard.excludedEmployeeCount > 0 ? (
@@ -369,12 +379,14 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
       requiredData("uren", () => fetchHoursForPeriod(client, period))
     ]);
-    const [employees, absenceRequestLines] = await Promise.all([
+    const [employees, absenceRequestLines, calendarItems] = await Promise.all([
       optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
-      optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period))
+      optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period)),
+      optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, period))
     ]);
     const employeeScope = buildPmEmployeeScope(employees);
     const scopedHours = hoursForEmployeeScope(hours, employeeScope);
+    const scopedCalendarItems = calendarItemsForEmployeeScope(calendarItems, employeeScope);
     const absenceRequestsById = await optionalData(issues, "verlofaanvragen", new Map<number, JsonRecord>(), () =>
       fetchAbsenceRequestsById(client, absenceRequestLines)
     );
@@ -384,16 +396,25 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
     );
 
-    return buildPmDashboardData(invoices, scopedHours, billabilitySources, {
-      employees: employeeScope.employees,
-      workingHoursByEmployeeId: workingHoursCapacity.workingHoursByEmployeeId,
-      leaveHoursFromWorkingHoursByEmployeeId: workingHoursCapacity.leaveHoursByEmployeeId,
-      absenceRequestLines: scopedAbsenceRequestLines,
-      absenceRequestsById
-    }, period, {
-      mode: "live",
-      message: liveSourceMessage(issues)
-    }, employeeScope.excludedEmployeeCount);
+    return buildPmDashboardData(
+      invoices,
+      scopedHours,
+      billabilitySources,
+      {
+        employees: employeeScope.employees,
+        workingHoursByEmployeeId: workingHoursCapacity.workingHoursByEmployeeId,
+        leaveHoursFromWorkingHoursByEmployeeId: workingHoursCapacity.leaveHoursByEmployeeId,
+        absenceRequestLines: scopedAbsenceRequestLines,
+        absenceRequestsById
+      },
+      period,
+      {
+        mode: "live",
+        message: liveSourceMessage(issues)
+      },
+      employeeScope.excludedEmployeeCount,
+      scopedCalendarItems
+    );
   } catch (error) {
     return buildDemoPmDashboardData(period, {
       mode: "demo",
@@ -407,6 +428,7 @@ function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
   const capacitySources = createDemoCapacitySources(period);
   const employeeScope = buildPmEmployeeScope(capacitySources.employees);
   const scopedHours = hoursForEmployeeScope(demoHours, employeeScope);
+  const scopedCalendarItems = calendarItemsForEmployeeScope(createDemoCalendarItems(period), employeeScope);
   const scopedCapacitySources = capacitySourcesForEmployeeScope(capacitySources, employeeScope);
 
   return buildPmDashboardData(
@@ -416,7 +438,8 @@ function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
     scopedCapacitySources,
     period,
     source,
-    employeeScope.excludedEmployeeCount
+    employeeScope.excludedEmployeeCount,
+    scopedCalendarItems
   );
 }
 
@@ -502,6 +525,17 @@ function absenceRequestLinesForEmployeeScope(
     const absenceRequestId = relationId(line, "absencerequest");
     const absenceRequest = absenceRequestId === null ? undefined : absenceRequestsById.get(absenceRequestId);
     const employeeId = relationId(absenceRequest ?? line, "employee");
+    return employeeId === null || !employeeScope.excludedEmployeeIds.has(employeeId);
+  });
+}
+
+function calendarItemsForEmployeeScope(calendarItems: JsonRecord[], employeeScope: PmEmployeeScope) {
+  if (employeeScope.excludedEmployeeIds.size === 0) {
+    return calendarItems;
+  }
+
+  return calendarItems.filter((calendarItem) => {
+    const employeeId = relationId(calendarItem, "calendaritememployee") ?? relationId(calendarItem, "employee");
     return employeeId === null || !employeeScope.excludedEmployeeIds.has(employeeId);
   });
 }
@@ -653,6 +687,33 @@ async function fetchHoursForPeriod(client: GrippClient, period: Period) {
 
   return records;
 }
+
+async function fetchCalendarItemsForPeriod(client: GrippClient, period: Period) {
+  const records: JsonRecord[] = [];
+  const filters: JsonValue[] = [
+    { field: "calendaritem.date", operator: "greaterequals", value: period.start },
+    { field: "calendaritem.date", operator: "lessequals", value: period.end }
+  ];
+
+  for (let page = 0; page < MAX_CALENDAR_ITEM_PAGES; page += 1) {
+    const result = await client.call("calendaritem.get", [
+      filters,
+      {
+        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
+        orderings: [{ field: "calendaritem.date", direction: "asc" }]
+      }
+    ] as JsonValue[]);
+    const pageRecords = asRecords(result);
+    records.push(...pageRecords);
+
+    if (pageRecords.length < PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return records;
+}
+
 async function fetchEmployees(client: GrippClient) {
   const records: JsonRecord[] = [];
 
@@ -840,7 +901,8 @@ function buildPmDashboardData(
   capacitySources: CapacitySources,
   period: Period,
   source: DashboardSource,
-  excludedEmployeeCount = 0
+  excludedEmployeeCount = 0,
+  calendarItems: JsonRecord[] = []
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
@@ -887,6 +949,7 @@ function buildPmDashboardData(
   const employeeCapacityRows = buildEmployeeCapacityRows(capacitySources, hours, period);
   const capacity = buildCapacitySummary(employeeCapacityRows);
   const employeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources);
+  const planningWithoutTask = buildPlanningWithoutTaskSummary(calendarItems, period);
 
   return {
     period,
@@ -899,6 +962,8 @@ function buildPmDashboardData(
     leaveHours: capacity.leaveHours,
     availableHours: capacity.availableHours,
     capacityRemainingHours: capacity.availableHours - loggedHours,
+    planningWithoutTaskHours: planningWithoutTask.hours,
+    planningWithoutTaskItemCount: planningWithoutTask.itemCount,
     billability: percent(billableHours, capacity.availableHours),
     revenuePerLoggedHour: divideCurrency(revenue, loggedHours),
     revenuePerBillableHour: divideCurrency(revenue, billableHours),
@@ -1026,6 +1091,54 @@ function buildCapacitySummary(employeeCapacityRows: EmployeeCapacityRow[]): Capa
     employeeCount: employeeCapacityRows.length,
     fallbackWorkingHoursEmployeeCount: employeeCapacityRows.filter((row) => row.usedWorkingHoursFallback).length
   };
+}
+
+function buildPlanningWithoutTaskSummary(calendarItems: JsonRecord[], period: Period): PlanningWithoutTaskSummary {
+  let hours = 0;
+  let itemCount = 0;
+
+  for (const calendarItem of calendarItems) {
+    const date = dateKeyFromValue(readField(calendarItem, "date"));
+    if (!date || date < period.start || date > period.end || hasAssignedTask(calendarItem)) {
+      continue;
+    }
+
+    const amount = Math.max(0, numberFrom(readField(calendarItem, "hours")) ?? 0);
+    if (amount === 0) {
+      continue;
+    }
+
+    hours += amount;
+    itemCount += 1;
+  }
+
+  return { hours, itemCount };
+}
+
+function hasAssignedTask(record: JsonRecord) {
+  const taskId = relationId(record, "task");
+  if (taskId !== null) {
+    return taskId > 0;
+  }
+
+  const value = readField(record, "task");
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  const scalar = scalarFrom(value);
+  if (typeof scalar === "number") {
+    return scalar > 0;
+  }
+  if (typeof scalar === "string") {
+    const trimmed = scalar.trim();
+    return trimmed !== "" && trimmed !== "0";
+  }
+  if (typeof scalar === "boolean") {
+    return scalar;
+  }
+
+  return true;
 }
 
 function buildEmployeeBillabilityRows(employeeCapacityRows: EmployeeCapacityRow[], hours: JsonRecord[], billabilitySources: BillabilitySources) {
@@ -1456,7 +1569,8 @@ function readField(record: JsonRecord | undefined, field: string) {
     record[`employee.${field}`] ??
     record[`employmentcontract.${field}`] ??
     record[`absencerequestline.${field}`] ??
-    record[`absencerequest.${field}`];
+    record[`absencerequest.${field}`] ??
+    record[`calendaritem.${field}`];
   if (direct !== undefined) {
     return direct;
   }
@@ -1476,6 +1590,7 @@ function relationId(record: JsonRecord, field: string) {
     idFrom(record[`employmentcontract.${field}.id`]) ??
     idFrom(record[`absencerequestline.${field}.id`]) ??
     idFrom(record[`absencerequest.${field}.id`]) ??
+    idFrom(record[`calendaritem.${field}.id`]) ??
     idFrom(Object.entries(record).find(([key]) => key.toLowerCase().endsWith(`.${field.toLowerCase()}.id`))?.[1])
   );
 }
@@ -1565,7 +1680,7 @@ function scalarFrom(value: unknown): unknown {
 }
 
 function looksLikeEntity(record: JsonRecord) {
-  return ["id", "amount", "date", "reportdate", "searchname", "offerprojectline", "totalincldiscountexclvat", "employee", "startdate"].some(
+  return ["id", "amount", "hours", "date", "reportdate", "searchname", "offerprojectline", "calendaritememployee", "totalincldiscountexclvat", "employee", "startdate"].some(
     (field) => readField(record, field) !== undefined
   );
 }
@@ -1712,6 +1827,10 @@ function formatEmployeeCount(value: number) {
   return `${value} werknemer${value === 1 ? "" : "s"}`;
 }
 
+function formatPlanningItemCount(value: number) {
+  return `${value} planningregel${value === 1 ? "" : "s"}`;
+}
+
 function formatDate(value: string) {
   const date = parseDateKey(value);
   return date
@@ -1731,6 +1850,17 @@ function createDemoHours(period: Period): JsonRecord[] {
       { id: index * 4 + 2, date: `${month}-12`, amount: 126 + (index % 4) * 3, employee: 2, offerprojectline: 1001 + index * 4 },
       { id: index * 4 + 3, date: `${month}-19`, amount: 114 + (index % 2) * 5, employee: 3, offerprojectline: 1002 + index * 4 },
       { id: index * 4 + 4, date: `${month}-24`, amount: 32 + (index % 3) * 2, employee: 4, offerprojectline: 1003 + index * 4 }
+    ];
+  });
+}
+
+function createDemoCalendarItems(period: Period): JsonRecord[] {
+  return makeMonthBuckets(period).flatMap((bucket, index) => {
+    const month = bucket.key;
+    return [
+      { id: index * 3 + 7000, date: `${month}-06`, hours: 6 + (index % 3), calendaritememployee: 1, task: null },
+      { id: index * 3 + 7001, date: `${month}-13`, hours: 4, calendaritememployee: 2, task: 8000 + index },
+      { id: index * 3 + 7002, date: `${month}-20`, hours: 3, calendaritememployee: 4, task: null }
     ];
   });
 }
