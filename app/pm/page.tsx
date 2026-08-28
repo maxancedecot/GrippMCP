@@ -898,7 +898,7 @@ function buildPmDashboardData(
     contractHours: capacity.contractHours,
     leaveHours: capacity.leaveHours,
     availableHours: capacity.availableHours,
-    capacityRemainingHours: Math.max(0, capacity.availableHours - billableHours),
+    capacityRemainingHours: Math.max(0, capacity.availableHours - loggedHours),
     billability: percent(billableHours, capacity.availableHours),
     revenuePerLoggedHour: divideCurrency(revenue, loggedHours),
     revenuePerBillableHour: divideCurrency(revenue, billableHours),
@@ -1055,7 +1055,7 @@ function buildEmployeeBillabilityRows(employeeCapacityRows: EmployeeCapacityRow[
         loggedHours,
         billableHours,
         unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
-        capacityRemainingHours: Math.max(0, row.availableHours - billableHours),
+        capacityRemainingHours: Math.max(0, row.availableHours - loggedHours),
         billability: percent(billableHours, row.availableHours)
       };
     })
