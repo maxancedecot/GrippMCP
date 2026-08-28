@@ -257,7 +257,7 @@ export default async function PmDashboardPage() {
                   <th scope="col">Beschikbaar</th>
                   <th scope="col">Gelogd</th>
                   <th scope="col">Agenda-uren</th>
-                  <th scope="col">Niet geassigned</th>
+                  <th scope="col">Agenda niet geassigned</th>
                   <th scope="col">Verlof</th>
                   <th scope="col">Rest</th>
                 </tr>
