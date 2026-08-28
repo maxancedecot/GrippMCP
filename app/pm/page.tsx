@@ -166,7 +166,7 @@ export default async function PmDashboardPage() {
       <section className="metric-grid pm-metric-grid" aria-label="Kerncijfers management">
         <MetricCard label="Omzet dit jaar" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
         <MetricCard label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
-        <MetricCard label="Omzet / gelogd uur" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} detail="Omzet gedeeld door gelogde uren zonder beheerder" tone="neutral" />
+        <MetricCard label="Omzet / gelogd uur" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} detail="Omzet gedeeld door uren van actieve niet-beheerders" tone="neutral" />
         <MetricCard label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Omzet gedeeld door billable uren" tone="warning" />
       </section>
 
@@ -211,15 +211,15 @@ export default async function PmDashboardPage() {
 
           <dl className="pm-formula-list">
             <FormulaItem label="Omzet" detail={`${dashboard.invoiceCount} verkoopfacturen met rapportagedatum in ${dashboard.period.year}`} value={formatCurrency(dashboard.revenue)} />
-            <FormulaItem label="Werktijd" detail={`${formatEmployeeCount(dashboard.employeeCount)} zonder rechtenprofiel beheerder; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
+            <FormulaItem label="Werktijd" detail={`${formatEmployeeCount(dashboard.employeeCount)} actief en zonder rechtenprofiel beheerder; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
             <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties of afwezigheid uit Gripp-werktijden in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
             <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
             <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een factuur- of opdrachtregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
-            <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels zonder rechtenprofiel beheerder; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
+            <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels van actieve niet-beheerders; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
             <FormulaItem label="Per gelogd uur" detail="Omzet / gelogde uren" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} />
             <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
             {dashboard.excludedEmployeeCount > 0 ? (
-              <FormulaItem label="Uitgesloten" detail="Rechtenprofiel beheerder telt niet mee in uren, verlof en capaciteit" value={formatEmployeeCount(dashboard.excludedEmployeeCount)} />
+              <FormulaItem label="Uitgesloten" detail="Inactieve medewerkers en rechtenprofiel beheerder tellen niet mee in uren, verlof en capaciteit" value={formatEmployeeCount(dashboard.excludedEmployeeCount)} />
             ) : null}
             {dashboard.fallbackWorkingHoursEmployeeCount > 0 ? (
               <FormulaItem label="Fallback" detail="Werknemers zonder werktijden in Gripp zijn met 40u/week gerekend" value={String(dashboard.fallbackWorkingHoursEmployeeCount)} />
@@ -460,7 +460,7 @@ function buildPmEmployeeScope(employees: JsonRecord[]): PmEmployeeScope {
 
   for (const employee of employees) {
     const employeeId = idFrom(readField(employee, "id"));
-    if (employeeHasExcludedPmRole(employee, excludedRoleIds)) {
+    if (employeeIsInactive(employee) || employeeHasExcludedPmRole(employee, excludedRoleIds)) {
       excludedEmployeeCount += 1;
       if (employeeId !== null) {
         excludedEmployeeIds.add(employeeId);
@@ -537,6 +537,10 @@ function employeeHasExcludedPmRole(employee: JsonRecord, excludedRoleIds: Set<nu
   }
 
   return employeeRoleTextValues(employee).some((value) => isExcludedPmRoleName(value));
+}
+
+function employeeIsInactive(employee: JsonRecord) {
+  return booleanFrom(readField(employee, "active")) === false;
 }
 
 function excludedPmRoleIds() {
@@ -977,7 +981,7 @@ function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: Json
   }
 
   const employees = Array.from(employeesById.entries())
-    .filter(([employeeId, employee]) => booleanFrom(readField(employee, "active")) !== false || referencedEmployeeIds.has(employeeId))
+    .filter(([, employee]) => !employeeIsInactive(employee))
     .map(([employeeId, employee]) => ({ employeeId, employee }));
   const rows: EmployeeCapacityRow[] = [];
 
@@ -1125,7 +1129,7 @@ function workingHourEmployeeEntries(
   }
 
   return Array.from(employeesById.entries())
-    .filter(([employeeId, employee]) => booleanFrom(readField(employee, "active")) !== false || referencedEmployeeIds.has(employeeId))
+    .filter(([, employee]) => !employeeIsInactive(employee))
     .map(([employeeId, employee]) => ({
       employeeId,
       start: maxDateKey(period.start, employeeStartDate(employee))
@@ -1763,7 +1767,8 @@ function createDemoCapacitySources(period: Period): CapacitySources {
     { id: 1, screenname: "Noor de Vries", employeesince: `${period.year}-01-01`, active: true, role: { id: 2, searchname: "Medewerker" } },
     { id: 2, screenname: "Milan Jansen", employeesince: `${period.year}-02-01`, active: true, role: { id: 2, searchname: "Medewerker" } },
     { id: 3, screenname: "Jasmijn Bakker", employeesince: `${period.year}-01-15`, active: true, role: { id: 2, searchname: "Medewerker" } },
-    { id: 4, screenname: "Daan Smit", employeesince: `${period.year}-03-01`, active: true, role: { id: 1, searchname: "Beheerder" } }
+    { id: 4, screenname: "Daan Smit", employeesince: `${period.year}-03-01`, active: true, role: { id: 1, searchname: "Beheerder" } },
+    { id: 5, screenname: "Sanne Peeters", employeesince: `${period.year}-01-01`, active: false, role: { id: 2, searchname: "Medewerker" } }
   ];
   const workingHoursByEmployeeId = new Map<number, number>([
     [1, calculateDefaultContractHours(`${period.year}-01-01`, period.end)],
