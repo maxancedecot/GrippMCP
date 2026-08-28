@@ -956,6 +956,7 @@ function buildPmDashboardData(
   const employeeCapacityRows = buildEmployeeCapacityRows(capacitySources, hours, period);
   const capacity = buildCapacitySummary(employeeCapacityRows);
   const employeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources, calendarItems, period);
+  const capacityRemainingHours = employeeBillability.reduce((total, row) => total + row.capacityRemainingHours, 0);
 
   return {
     period,
@@ -967,7 +968,7 @@ function buildPmDashboardData(
     contractHours: capacity.contractHours,
     leaveHours: capacity.leaveHours,
     availableHours: capacity.availableHours,
-    capacityRemainingHours: capacity.availableHours - loggedHours,
+    capacityRemainingHours,
     billability: percent(billableHours, capacity.availableHours),
     revenuePerLoggedHour: divideCurrency(revenue, loggedHours),
     revenuePerBillableHour: divideCurrency(revenue, billableHours),
@@ -1187,7 +1188,7 @@ function buildEmployeeBillabilityRows(
         loggedHours,
         billableHours,
         unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
-        capacityRemainingHours: row.availableHours - loggedHours,
+        capacityRemainingHours: row.availableHours - calendarItemHours.hours,
         calendarItemHours: calendarItemHours.hours,
         calendarItemCount: calendarItemHours.itemCount,
         planningWithoutTaskHours: planningWithoutTask.hours,
