@@ -171,13 +171,13 @@ export default async function PmDashboardPage() {
       {dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 
       <section className="metric-grid pm-metric-grid" aria-label="Kerncijfers management">
-        <MetricCard label="Omzet dit jaar" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
-        <MetricCard label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
+        <MetricCard href="#pm-revenue-detail" label="Omzet dit jaar" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
+        <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
         <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
         <MetricCard label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Omzet gedeeld door billable uren" tone="warning" />
       </section>
 
-      <section className="panel">
+      <section className="panel pm-detail-panel" id="pm-billability-detail" tabIndex={-1}>
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Medewerkers</p>
@@ -232,7 +232,7 @@ export default async function PmDashboardPage() {
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel pm-detail-panel" id="pm-revenue-detail" tabIndex={-1}>
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Omzet</p>
@@ -260,21 +260,38 @@ export default async function PmDashboardPage() {
 }
 
 function MetricCard({
+  href,
   label,
   value,
   detail,
   tone
 }: {
+  href?: string;
   label: string;
   value: string;
   detail: string;
   tone: "good" | "blue" | "warning" | "neutral";
 }) {
-  return (
-    <article className={`metric-card metric-card--${tone}`}>
+  const className = `metric-card metric-card--${tone}${href ? " metric-card--link" : ""}`;
+  const content = (
+    <>
       <span>{label}</span>
       <strong>{value}</strong>
       <p>{detail}</p>
+    </>
+  );
+
+  if (href) {
+    return (
+      <a className={className} href={href}>
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <article className={className}>
+      {content}
     </article>
   );
 }
