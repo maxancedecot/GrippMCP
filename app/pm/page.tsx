@@ -46,6 +46,12 @@ type WorkingHoursCapacity = {
   leaveHoursByEmployeeId: Map<number, number>;
 };
 
+type PmEmployeeScope = {
+  employees: JsonRecord[];
+  excludedEmployeeIds: Set<number>;
+  excludedEmployeeCount: number;
+};
+
 type CapacitySummary = {
   contractHours: number;
   leaveHours: number;
@@ -77,6 +83,7 @@ type PmDashboardData = {
   invoiceCount: number;
   hourCount: number;
   employeeCount: number;
+  excludedEmployeeCount: number;
   fallbackWorkingHoursEmployeeCount: number;
   revenueByMonth: MonthRevenue[];
   lastUpdated: string;
@@ -89,6 +96,7 @@ const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
+const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -140,7 +148,7 @@ export default async function PmDashboardPage() {
       <section className="metric-grid pm-metric-grid" aria-label="Kerncijfers management">
         <MetricCard label="Omzet dit jaar" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
         <MetricCard label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
-        <MetricCard label="Omzet / gelogd uur" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} detail="Omzet gedeeld door alle gelogde uren" tone="neutral" />
+        <MetricCard label="Omzet / gelogd uur" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} detail="Omzet gedeeld door gelogde uren zonder beheerder" tone="neutral" />
         <MetricCard label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Omzet gedeeld door billable uren" tone="warning" />
       </section>
 
@@ -185,13 +193,16 @@ export default async function PmDashboardPage() {
 
           <dl className="pm-formula-list">
             <FormulaItem label="Omzet" detail={`${dashboard.invoiceCount} verkoopfacturen met rapportagedatum in ${dashboard.period.year}`} value={formatCurrency(dashboard.revenue)} />
-            <FormulaItem label="Werktijd" detail={`${dashboard.employeeCount} werknemers vanaf hun begindatum; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
+            <FormulaItem label="Werktijd" detail={`${formatEmployeeCount(dashboard.employeeCount)} zonder rechtenprofiel beheerder; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
             <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties of afwezigheid uit Gripp-werktijden in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
             <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
             <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een factuur- of opdrachtregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
-            <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels van alle medewerkers; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
+            <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels zonder rechtenprofiel beheerder; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
             <FormulaItem label="Per gelogd uur" detail="Omzet / gelogde uren" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} />
             <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
+            {dashboard.excludedEmployeeCount > 0 ? (
+              <FormulaItem label="Uitgesloten" detail="Rechtenprofiel beheerder telt niet mee in uren, verlof en capaciteit" value={formatEmployeeCount(dashboard.excludedEmployeeCount)} />
+            ) : null}
             {dashboard.fallbackWorkingHoursEmployeeCount > 0 ? (
               <FormulaItem label="Fallback" detail="Werknemers zonder werktijden in Gripp zijn met 40u/week gerekend" value={String(dashboard.fallbackWorkingHoursEmployeeCount)} />
             ) : null}
@@ -274,8 +285,7 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
   const period = getYearToDatePeriod();
 
   if (!process.env.GRIPP_API_TOKEN) {
-    const demoHours = createDemoHours(period);
-    return buildPmDashboardData(createDemoInvoices(period), demoHours, createDemoBillabilitySources(demoHours), createDemoCapacitySources(period), period, {
+    return buildDemoPmDashboardData(period, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-cijfers te tonen."
     });
@@ -288,35 +298,55 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
       requiredData("uren", () => fetchHoursForPeriod(client, period))
     ]);
-    const [employees, absenceRequestLines, billabilitySources] = await Promise.all([
+    const [employees, absenceRequestLines] = await Promise.all([
       optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
-      optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period)),
-      fetchBillabilitySources(client, hours, issues)
+      optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period))
     ]);
+    const employeeScope = buildPmEmployeeScope(employees);
+    const scopedHours = hoursForEmployeeScope(hours, employeeScope);
     const absenceRequestsById = await optionalData(issues, "verlofaanvragen", new Map<number, JsonRecord>(), () =>
       fetchAbsenceRequestsById(client, absenceRequestLines)
     );
+    const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
+    const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
     const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
-      fetchWorkingHoursForEmployees(client, employees, hours, absenceRequestLines, absenceRequestsById, period)
+      fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
     );
 
-    return buildPmDashboardData(invoices, hours, billabilitySources, {
-      employees,
+    return buildPmDashboardData(invoices, scopedHours, billabilitySources, {
+      employees: employeeScope.employees,
       workingHoursByEmployeeId: workingHoursCapacity.workingHoursByEmployeeId,
       leaveHoursFromWorkingHoursByEmployeeId: workingHoursCapacity.leaveHoursByEmployeeId,
-      absenceRequestLines,
+      absenceRequestLines: scopedAbsenceRequestLines,
       absenceRequestsById
     }, period, {
       mode: "live",
       message: liveSourceMessage(issues)
-    });
+    }, employeeScope.excludedEmployeeCount);
   } catch (error) {
-    const demoHours = createDemoHours(period);
-    return buildPmDashboardData(createDemoInvoices(period), demoHours, createDemoBillabilitySources(demoHours), createDemoCapacitySources(period), period, {
+    return buildDemoPmDashboardData(period, {
       mode: "demo",
       message: `Live PM-data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
     });
   }
+}
+
+function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
+  const demoHours = createDemoHours(period);
+  const capacitySources = createDemoCapacitySources(period);
+  const employeeScope = buildPmEmployeeScope(capacitySources.employees);
+  const scopedHours = hoursForEmployeeScope(demoHours, employeeScope);
+  const scopedCapacitySources = capacitySourcesForEmployeeScope(capacitySources, employeeScope);
+
+  return buildPmDashboardData(
+    createDemoInvoices(period),
+    scopedHours,
+    createDemoBillabilitySources(scopedHours),
+    scopedCapacitySources,
+    period,
+    source,
+    employeeScope.excludedEmployeeCount
+  );
 }
 
 async function requiredData<T>(label: string, loader: () => Promise<T>) {
@@ -349,6 +379,151 @@ function emptyWorkingHoursCapacity(): WorkingHoursCapacity {
     workingHoursByEmployeeId: new Map<number, number>(),
     leaveHoursByEmployeeId: new Map<number, number>()
   };
+}
+
+function buildPmEmployeeScope(employees: JsonRecord[]): PmEmployeeScope {
+  const excludedRoleIds = excludedPmRoleIds();
+  const excludedEmployeeIds = new Set<number>();
+  const scopedEmployees: JsonRecord[] = [];
+  let excludedEmployeeCount = 0;
+
+  for (const employee of employees) {
+    const employeeId = idFrom(readField(employee, "id"));
+    if (employeeHasExcludedPmRole(employee, excludedRoleIds)) {
+      excludedEmployeeCount += 1;
+      if (employeeId !== null) {
+        excludedEmployeeIds.add(employeeId);
+      }
+      continue;
+    }
+
+    scopedEmployees.push(employee);
+  }
+
+  return {
+    employees: scopedEmployees,
+    excludedEmployeeIds,
+    excludedEmployeeCount
+  };
+}
+
+function hoursForEmployeeScope(hours: JsonRecord[], employeeScope: PmEmployeeScope) {
+  if (employeeScope.excludedEmployeeIds.size === 0) {
+    return hours;
+  }
+
+  return hours.filter((hour) => {
+    const employeeId = relationId(hour, "employee");
+    return employeeId === null || !employeeScope.excludedEmployeeIds.has(employeeId);
+  });
+}
+
+function absenceRequestLinesForEmployeeScope(
+  absenceRequestLines: JsonRecord[],
+  absenceRequestsById: Map<number, JsonRecord>,
+  employeeScope: PmEmployeeScope
+) {
+  if (employeeScope.excludedEmployeeIds.size === 0) {
+    return absenceRequestLines;
+  }
+
+  return absenceRequestLines.filter((line) => {
+    const absenceRequestId = relationId(line, "absencerequest");
+    const absenceRequest = absenceRequestId === null ? undefined : absenceRequestsById.get(absenceRequestId);
+    const employeeId = relationId(absenceRequest ?? line, "employee");
+    return employeeId === null || !employeeScope.excludedEmployeeIds.has(employeeId);
+  });
+}
+
+function capacitySourcesForEmployeeScope(capacitySources: CapacitySources, employeeScope: PmEmployeeScope): CapacitySources {
+  const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(
+    capacitySources.absenceRequestLines,
+    capacitySources.absenceRequestsById,
+    employeeScope
+  );
+
+  return {
+    employees: employeeScope.employees,
+    workingHoursByEmployeeId: numberMapForEmployeeScope(capacitySources.workingHoursByEmployeeId, employeeScope),
+    leaveHoursFromWorkingHoursByEmployeeId: numberMapForEmployeeScope(capacitySources.leaveHoursFromWorkingHoursByEmployeeId, employeeScope),
+    absenceRequestLines: scopedAbsenceRequestLines,
+    absenceRequestsById: capacitySources.absenceRequestsById
+  };
+}
+
+function numberMapForEmployeeScope(source: Map<number, number>, employeeScope: PmEmployeeScope) {
+  if (employeeScope.excludedEmployeeIds.size === 0) {
+    return source;
+  }
+
+  return new Map(Array.from(source.entries()).filter(([employeeId]) => !employeeScope.excludedEmployeeIds.has(employeeId)));
+}
+
+function employeeHasExcludedPmRole(employee: JsonRecord, excludedRoleIds: Set<number>) {
+  const roleId = relationId(employee, "role");
+  if (roleId !== null && excludedRoleIds.has(roleId)) {
+    return true;
+  }
+
+  return employeeRoleTextValues(employee).some((value) => isExcludedPmRoleName(value));
+}
+
+function excludedPmRoleIds() {
+  return new Set(
+    (process.env.PM_EXCLUDED_ROLE_IDS ?? process.env.GRIPP_PM_EXCLUDED_ROLE_IDS ?? "")
+      .split(/[,\s;]+/)
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter((value) => Number.isFinite(value))
+  );
+}
+
+function employeeRoleTextValues(employee: JsonRecord) {
+  const values: string[] = [];
+  const seen = new Set<unknown>();
+  collectRoleTextValues(readField(employee, "role"), values, seen);
+
+  for (const [key, value] of Object.entries(employee)) {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey.includes("role") && !normalizedKey.endsWith(".id") && normalizedKey !== "role.id") {
+      collectRoleTextValues(value, values, seen);
+    }
+  }
+
+  return values;
+}
+
+function collectRoleTextValues(value: unknown, values: string[], seen: Set<unknown>) {
+  if (typeof value === "string") {
+    values.push(value);
+    return;
+  }
+
+  if (value === null || typeof value !== "object" || seen.has(value)) {
+    return;
+  }
+
+  seen.add(value);
+  const record = asRecord(value);
+  if (!record) {
+    return;
+  }
+
+  for (const key of ["displayvalue", "displayValue", "label", "name", "searchname", "screenname", "value", "rawValue", "rawvalue"]) {
+    const nestedValue = record[key];
+    if (nestedValue !== undefined && nestedValue !== null) {
+      collectRoleTextValues(nestedValue, values, seen);
+    }
+  }
+}
+
+function isExcludedPmRoleName(value: string) {
+  const normalizedValue = normalizeComparisonValue(value);
+  return EXCLUDED_PM_ROLE_NAMES.some((roleName) => {
+    const normalizedRoleName = normalizeComparisonValue(roleName);
+    return normalizedValue === normalizedRoleName || normalizedValue.includes(normalizedRoleName);
+  });
 }
 
 function errorCode(error: unknown) {
@@ -593,7 +768,8 @@ function buildPmDashboardData(
   billabilitySources: BillabilitySources,
   capacitySources: CapacitySources,
   period: Period,
-  source: DashboardSource
+  source: DashboardSource,
+  excludedEmployeeCount = 0
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
@@ -656,6 +832,7 @@ function buildPmDashboardData(
     invoiceCount,
     hourCount,
     employeeCount: capacity.employeeCount,
+    excludedEmployeeCount,
     fallbackWorkingHoursEmployeeCount: capacity.fallbackWorkingHoursEmployeeCount,
     revenueByMonth: makeMonthBuckets(period).map((bucket) => ({
       ...bucket,
@@ -1356,6 +1533,14 @@ function normalizeNumberString(value: string) {
   return trimmed.replace(",", ".");
 }
 
+function normalizeComparisonValue(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
 function percent(value: number, total: number) {
   return total > 0 ? (value / total) * 100 : 0;
 }
@@ -1378,6 +1563,10 @@ function formatCurrency(value: number) {
 
 function formatCurrencyPerHour(value: number) {
   return `${currencyPerHourFormatter.format(value)}/u`;
+}
+
+function formatEmployeeCount(value: number) {
+  return `${value} werknemer${value === 1 ? "" : "s"}`;
 }
 
 function formatDate(value: string) {
@@ -1428,10 +1617,10 @@ function createDemoInvoices(period: Period): JsonRecord[] {
 
 function createDemoCapacitySources(period: Period): CapacitySources {
   const employees = [
-    { id: 1, screenname: "Noor de Vries", employeesince: `${period.year}-01-01`, active: true },
-    { id: 2, screenname: "Milan Jansen", employeesince: `${period.year}-02-01`, active: true },
-    { id: 3, screenname: "Jasmijn Bakker", employeesince: `${period.year}-01-15`, active: true },
-    { id: 4, screenname: "Daan Smit", employeesince: `${period.year}-03-01`, active: true }
+    { id: 1, screenname: "Noor de Vries", employeesince: `${period.year}-01-01`, active: true, role: { id: 2, searchname: "Medewerker" } },
+    { id: 2, screenname: "Milan Jansen", employeesince: `${period.year}-02-01`, active: true, role: { id: 2, searchname: "Medewerker" } },
+    { id: 3, screenname: "Jasmijn Bakker", employeesince: `${period.year}-01-15`, active: true, role: { id: 2, searchname: "Medewerker" } },
+    { id: 4, screenname: "Daan Smit", employeesince: `${period.year}-03-01`, active: true, role: { id: 1, searchname: "Beheerder" } }
   ];
   const workingHoursByEmployeeId = new Map<number, number>([
     [1, calculateDefaultContractHours(`${period.year}-01-01`, period.end)],
