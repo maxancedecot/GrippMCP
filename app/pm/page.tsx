@@ -79,6 +79,8 @@ type EmployeeBillabilityRow = EmployeeCapacityRow & {
   billableHours: number;
   unbillableLoggedHours: number;
   capacityRemainingHours: number;
+  planningWithoutTaskHours: number;
+  planningWithoutTaskItemCount: number;
   billability: number;
 };
 
@@ -99,8 +101,6 @@ type PmDashboardData = {
   leaveHours: number;
   availableHours: number;
   capacityRemainingHours: number;
-  planningWithoutTaskHours: number;
-  planningWithoutTaskItemCount: number;
   billability: number;
   revenuePerLoggedHour: number;
   revenuePerBillableHour: number;
@@ -203,7 +203,6 @@ export default async function PmDashboardPage() {
             <dl className="legend-list">
               <LegendItem label="Billable" value={`${formatHours(dashboard.billableHours)} uur`} className="legend-dot--good" />
               <LegendItem label="Rest beschikbaar" value={`${formatHours(dashboard.capacityRemainingHours)} uur`} className="legend-dot--neutral" />
-              <LegendItem label="Planning zonder taak" value={`${formatHours(dashboard.planningWithoutTaskHours)} uur`} className="legend-dot--overtime" />
               <LegendItem label="Verlof" value={`${formatHours(dashboard.leaveHours)} uur`} className="legend-dot--warning" />
               <LegendItem label="Gelogd totaal" value={`${formatHours(dashboard.loggedHours)} uur`} className="legend-dot--blue" />
             </dl>
@@ -225,7 +224,6 @@ export default async function PmDashboardPage() {
             <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
             <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een factuur- of opdrachtregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
             <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels zonder rechtenprofiel beheerder; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
-            <FormulaItem label="Planning zonder taak" detail={`${formatPlanningItemCount(dashboard.planningWithoutTaskItemCount)} zonder gekoppelde taak`} value={`${formatHours(dashboard.planningWithoutTaskHours)} uur`} />
             <FormulaItem label="Per gelogd uur" detail="Omzet / gelogde uren" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} />
             <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
             {dashboard.excludedEmployeeCount > 0 ? (
@@ -257,6 +255,7 @@ export default async function PmDashboardPage() {
                   <th scope="col">Billable</th>
                   <th scope="col">Beschikbaar</th>
                   <th scope="col">Gelogd</th>
+                  <th scope="col">Niet geassigned</th>
                   <th scope="col">Verlof</th>
                   <th scope="col">Rest</th>
                 </tr>
@@ -279,6 +278,10 @@ export default async function PmDashboardPage() {
                     <td>{formatHours(employee.billableHours)}</td>
                     <td>{formatHours(employee.availableHours)}</td>
                     <td>{formatHours(employee.loggedHours)}</td>
+                    <td>
+                      {formatHours(employee.planningWithoutTaskHours)}
+                      <span className="cell-muted">{formatPlanningItemCount(employee.planningWithoutTaskItemCount)}</span>
+                    </td>
                     <td>{formatHours(employee.leaveHours)}</td>
                     <td>{formatHours(employee.capacityRemainingHours)}</td>
                   </tr>
@@ -948,8 +951,7 @@ function buildPmDashboardData(
 
   const employeeCapacityRows = buildEmployeeCapacityRows(capacitySources, hours, period);
   const capacity = buildCapacitySummary(employeeCapacityRows);
-  const employeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources);
-  const planningWithoutTask = buildPlanningWithoutTaskSummary(calendarItems, period);
+  const employeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources, calendarItems, period);
 
   return {
     period,
@@ -962,8 +964,6 @@ function buildPmDashboardData(
     leaveHours: capacity.leaveHours,
     availableHours: capacity.availableHours,
     capacityRemainingHours: capacity.availableHours - loggedHours,
-    planningWithoutTaskHours: planningWithoutTask.hours,
-    planningWithoutTaskItemCount: planningWithoutTask.itemCount,
     billability: percent(billableHours, capacity.availableHours),
     revenuePerLoggedHour: divideCurrency(revenue, loggedHours),
     revenuePerBillableHour: divideCurrency(revenue, billableHours),
@@ -1093,13 +1093,17 @@ function buildCapacitySummary(employeeCapacityRows: EmployeeCapacityRow[]): Capa
   };
 }
 
-function buildPlanningWithoutTaskSummary(calendarItems: JsonRecord[], period: Period): PlanningWithoutTaskSummary {
-  let hours = 0;
-  let itemCount = 0;
+function buildPlanningWithoutTaskByEmployeeId(calendarItems: JsonRecord[], period: Period) {
+  const planningWithoutTaskByEmployeeId = new Map<number, PlanningWithoutTaskSummary>();
 
   for (const calendarItem of calendarItems) {
     const date = dateKeyFromValue(readField(calendarItem, "date"));
     if (!date || date < period.start || date > period.end || hasAssignedTask(calendarItem)) {
+      continue;
+    }
+
+    const employeeId = relationId(calendarItem, "calendaritememployee") ?? relationId(calendarItem, "employee");
+    if (employeeId === null) {
       continue;
     }
 
@@ -1108,11 +1112,13 @@ function buildPlanningWithoutTaskSummary(calendarItems: JsonRecord[], period: Pe
       continue;
     }
 
-    hours += amount;
-    itemCount += 1;
+    const current = planningWithoutTaskByEmployeeId.get(employeeId) ?? { hours: 0, itemCount: 0 };
+    current.hours += amount;
+    current.itemCount += 1;
+    planningWithoutTaskByEmployeeId.set(employeeId, current);
   }
 
-  return { hours, itemCount };
+  return planningWithoutTaskByEmployeeId;
 }
 
 function hasAssignedTask(record: JsonRecord) {
@@ -1141,9 +1147,16 @@ function hasAssignedTask(record: JsonRecord) {
   return true;
 }
 
-function buildEmployeeBillabilityRows(employeeCapacityRows: EmployeeCapacityRow[], hours: JsonRecord[], billabilitySources: BillabilitySources) {
+function buildEmployeeBillabilityRows(
+  employeeCapacityRows: EmployeeCapacityRow[],
+  hours: JsonRecord[],
+  billabilitySources: BillabilitySources,
+  calendarItems: JsonRecord[],
+  period: Period
+) {
   const loggedHoursByEmployeeId = new Map<number, number>();
   const billableHoursByEmployeeId = new Map<number, number>();
+  const planningWithoutTaskByEmployeeId = buildPlanningWithoutTaskByEmployeeId(calendarItems, period);
 
   for (const hour of hours) {
     const employeeId = relationId(hour, "employee");
@@ -1162,6 +1175,7 @@ function buildEmployeeBillabilityRows(employeeCapacityRows: EmployeeCapacityRow[
     .map((row) => {
       const loggedHours = loggedHoursByEmployeeId.get(row.employeeId) ?? 0;
       const billableHours = billableHoursByEmployeeId.get(row.employeeId) ?? 0;
+      const planningWithoutTask = planningWithoutTaskByEmployeeId.get(row.employeeId) ?? { hours: 0, itemCount: 0 };
 
       return {
         ...row,
@@ -1169,6 +1183,8 @@ function buildEmployeeBillabilityRows(employeeCapacityRows: EmployeeCapacityRow[
         billableHours,
         unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
         capacityRemainingHours: row.availableHours - loggedHours,
+        planningWithoutTaskHours: planningWithoutTask.hours,
+        planningWithoutTaskItemCount: planningWithoutTask.itemCount,
         billability: percent(billableHours, row.availableHours)
       };
     })
