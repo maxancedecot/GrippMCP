@@ -60,6 +60,23 @@ type CapacitySummary = {
   fallbackWorkingHoursEmployeeCount: number;
 };
 
+type EmployeeCapacityRow = {
+  employeeId: number;
+  name: string;
+  contractHours: number;
+  leaveHours: number;
+  availableHours: number;
+  usedWorkingHoursFallback: boolean;
+};
+
+type EmployeeBillabilityRow = EmployeeCapacityRow & {
+  loggedHours: number;
+  billableHours: number;
+  unbillableLoggedHours: number;
+  capacityRemainingHours: number;
+  billability: number;
+};
+
 type MonthRevenue = {
   key: string;
   label: string;
@@ -85,6 +102,7 @@ type PmDashboardData = {
   employeeCount: number;
   excludedEmployeeCount: number;
   fallbackWorkingHoursEmployeeCount: number;
+  employeeBillability: EmployeeBillabilityRow[];
   revenueByMonth: MonthRevenue[];
   lastUpdated: string;
 };
@@ -208,6 +226,59 @@ export default async function PmDashboardPage() {
             ) : null}
           </dl>
         </article>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Medewerkers</p>
+            <h2>Billableheid per medewerker</h2>
+          </div>
+          <span className="panel-total">{formatEmployeeCount(dashboard.employeeBillability.length)}</span>
+        </div>
+
+        {dashboard.employeeBillability.length > 0 ? (
+          <div className="pm-employee-table-wrap">
+            <table className="pm-employee-table">
+              <thead>
+                <tr>
+                  <th scope="col">Medewerker</th>
+                  <th scope="col">Billableheid</th>
+                  <th scope="col">Billable</th>
+                  <th scope="col">Beschikbaar</th>
+                  <th scope="col">Gelogd</th>
+                  <th scope="col">Verlof</th>
+                  <th scope="col">Rest</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard.employeeBillability.map((employee) => (
+                  <tr key={employee.employeeId}>
+                    <th scope="row">
+                      <span className="pm-employee-name">
+                        <strong>{employee.name}</strong>
+                        <span>{employee.usedWorkingHoursFallback ? "40u/week fallback" : "Gripp werktijden"}</span>
+                      </span>
+                    </th>
+                    <td className="pm-employee-percent">
+                      <strong>{formatPercent(employee.billability)}%</strong>
+                      <span className="pm-employee-bar" aria-hidden="true">
+                        <span style={{ width: `${Math.max(0, Math.min(employee.billability, 100))}%` }} />
+                      </span>
+                    </td>
+                    <td>{formatHours(employee.billableHours)}</td>
+                    <td>{formatHours(employee.availableHours)}</td>
+                    <td>{formatHours(employee.loggedHours)}</td>
+                    <td>{formatHours(employee.leaveHours)}</td>
+                    <td>{formatHours(employee.capacityRemainingHours)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="empty-state">Geen medewerkers beschikbaar.</p>
+        )}
       </section>
 
       <section className="panel">
@@ -813,7 +884,9 @@ function buildPmDashboardData(
     }
   }
 
-  const capacity = buildCapacitySummary(capacitySources, hours, period);
+  const employeeCapacityRows = buildEmployeeCapacityRows(capacitySources, hours, period);
+  const capacity = buildCapacitySummary(employeeCapacityRows);
+  const employeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources);
 
   return {
     period,
@@ -834,6 +907,7 @@ function buildPmDashboardData(
     employeeCount: capacity.employeeCount,
     excludedEmployeeCount,
     fallbackWorkingHoursEmployeeCount: capacity.fallbackWorkingHoursEmployeeCount,
+    employeeBillability,
     revenueByMonth: makeMonthBuckets(period).map((bucket) => ({
       ...bucket,
       revenue: revenueByMonth.get(bucket.key) ?? 0
@@ -880,7 +954,7 @@ function lineHasPositiveValue(line: JsonRecord) {
   return discount === null || discount < 100;
 }
 
-function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecord[], period: Period): CapacitySummary {
+function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: JsonRecord[], period: Period): EmployeeCapacityRow[] {
   const employeesById = new Map<number, JsonRecord>();
   for (const employee of capacitySources.employees) {
     const employeeId = idFrom(readField(employee, "id"));
@@ -905,10 +979,7 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
   const employees = Array.from(employeesById.entries())
     .filter(([employeeId, employee]) => booleanFrom(readField(employee, "active")) !== false || referencedEmployeeIds.has(employeeId))
     .map(([employeeId, employee]) => ({ employeeId, employee }));
-  let contractHours = 0;
-  let leaveHours = 0;
-  let fallbackWorkingHoursEmployeeCount = 0;
-  let countedEmployees = 0;
+  const rows: EmployeeCapacityRow[] = [];
 
   for (const { employeeId, employee } of employees) {
     const employeeStart = employeeStartDate(employee);
@@ -917,29 +988,86 @@ function buildCapacitySummary(capacitySources: CapacitySources, hours: JsonRecor
       continue;
     }
 
-    countedEmployees += 1;
     const workingHours = capacitySources.workingHoursByEmployeeId.get(employeeId);
+    let contractHours = 0;
+    let usedWorkingHoursFallback = false;
     if (workingHours === undefined) {
       contractHours += calculateDefaultContractHours(capacityStart, period.end);
-      fallbackWorkingHoursEmployeeCount += 1;
+      usedWorkingHoursFallback = true;
     } else {
       contractHours += Math.max(0, workingHours);
     }
 
     const leaveFromRequestLines = leaveHoursForEmployee(leaveByEmployeeId.get(employeeId) ?? [], capacityStart, period.end);
     const leaveFromWorkingHours = capacitySources.leaveHoursFromWorkingHoursByEmployeeId.get(employeeId) ?? 0;
-    leaveHours += Math.max(leaveFromRequestLines, leaveFromWorkingHours);
+    const leaveHours = Math.max(leaveFromRequestLines, leaveFromWorkingHours);
+
+    rows.push({
+      employeeId,
+      name: employeeDisplayName(employee, employeeId),
+      contractHours,
+      leaveHours,
+      availableHours: Math.max(0, contractHours - leaveHours),
+      usedWorkingHoursFallback
+    });
   }
 
-  const availableHours = Math.max(0, contractHours - leaveHours);
+  return rows.sort(compareEmployeeCapacityRows);
+}
 
+function buildCapacitySummary(employeeCapacityRows: EmployeeCapacityRow[]): CapacitySummary {
+  const contractHours = employeeCapacityRows.reduce((total, row) => total + row.contractHours, 0);
+  const leaveHours = employeeCapacityRows.reduce((total, row) => total + row.leaveHours, 0);
+  const availableHours = Math.max(0, contractHours - leaveHours);
   return {
     contractHours,
     leaveHours,
     availableHours,
-    employeeCount: countedEmployees,
-    fallbackWorkingHoursEmployeeCount
+    employeeCount: employeeCapacityRows.length,
+    fallbackWorkingHoursEmployeeCount: employeeCapacityRows.filter((row) => row.usedWorkingHoursFallback).length
   };
+}
+
+function buildEmployeeBillabilityRows(employeeCapacityRows: EmployeeCapacityRow[], hours: JsonRecord[], billabilitySources: BillabilitySources) {
+  const loggedHoursByEmployeeId = new Map<number, number>();
+  const billableHoursByEmployeeId = new Map<number, number>();
+
+  for (const hour of hours) {
+    const employeeId = relationId(hour, "employee");
+    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
+    if (employeeId === null || amount === 0 || !dateKeyFromValue(readField(hour, "date"))) {
+      continue;
+    }
+
+    loggedHoursByEmployeeId.set(employeeId, (loggedHoursByEmployeeId.get(employeeId) ?? 0) + amount);
+    if (isBillableHour(hour, billabilitySources)) {
+      billableHoursByEmployeeId.set(employeeId, (billableHoursByEmployeeId.get(employeeId) ?? 0) + amount);
+    }
+  }
+
+  return employeeCapacityRows
+    .map((row) => {
+      const loggedHours = loggedHoursByEmployeeId.get(row.employeeId) ?? 0;
+      const billableHours = billableHoursByEmployeeId.get(row.employeeId) ?? 0;
+
+      return {
+        ...row,
+        loggedHours,
+        billableHours,
+        unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
+        capacityRemainingHours: Math.max(0, row.availableHours - billableHours),
+        billability: percent(billableHours, row.availableHours)
+      };
+    })
+    .sort(compareEmployeeBillabilityRows);
+}
+
+function compareEmployeeCapacityRows(left: EmployeeCapacityRow, right: EmployeeCapacityRow) {
+  return left.name.localeCompare(right.name, "nl") || left.employeeId - right.employeeId;
+}
+
+function compareEmployeeBillabilityRows(left: EmployeeBillabilityRow, right: EmployeeBillabilityRow) {
+  return right.billability - left.billability || right.billableHours - left.billableHours || compareEmployeeCapacityRows(left, right);
 }
 
 function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceRequestsById: Map<number, JsonRecord>, period: Period) {
@@ -1178,6 +1306,21 @@ function isIgnoredWorkingHoursKey(key: string) {
 
 function employeeStartDate(employee: JsonRecord) {
   return dateKeyFromValue(readField(employee, "employeesince")) ?? "0001-01-01";
+}
+
+function employeeDisplayName(employee: JsonRecord, employeeId: number) {
+  const fullName = [stringFrom(readField(employee, "firstname")), stringFrom(readField(employee, "infix")), stringFrom(readField(employee, "lastname"))]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const displayName =
+    stringFrom(readField(employee, "screenname")) ??
+    stringFrom(readField(employee, "searchname")) ??
+    (fullName || undefined) ??
+    stringFrom(readField(employee, "username")) ??
+    stringFrom(readField(employee, "email"));
+
+  return displayName ?? `Medewerker ${employeeId}`;
 }
 
 function calculateDefaultContractHours(start: string, end: string) {
