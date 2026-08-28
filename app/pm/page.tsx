@@ -255,7 +255,6 @@ export default async function PmDashboardPage() {
                   <th scope="col">Billableheid</th>
                   <th scope="col">Billable</th>
                   <th scope="col">Beschikbaar</th>
-                  <th scope="col">Gelogd</th>
                   <th scope="col">Agenda-uren</th>
                   <th scope="col">Agenda niet geassigned</th>
                   <th scope="col">Verlof</th>
@@ -279,7 +278,6 @@ export default async function PmDashboardPage() {
                     </td>
                     <td>{formatHours(employee.billableHours)}</td>
                     <td>{formatHours(employee.availableHours)}</td>
-                    <td>{formatHours(employee.loggedHours)}</td>
                     <td>
                       {formatHours(employee.calendarItemHours)}
                       <span className="cell-muted">{formatPlanningItemCount(employee.calendarItemCount)}</span>
