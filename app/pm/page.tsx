@@ -24,7 +24,6 @@ type DashboardSource = {
 };
 
 type LineBillability = {
-  invoiceBasis?: string;
   hasPositiveValue: boolean;
 };
 
@@ -222,7 +221,7 @@ export default async function PmDashboardPage() {
             <FormulaItem label="Werktijd" detail={`${formatEmployeeCount(dashboard.employeeCount)} zonder rechtenprofiel beheerder; ontbrekende werktijd valt terug op 40u/week`} value={`${formatHours(dashboard.contractHours)} uur`} />
             <FormulaItem label="Verlof" detail="Goedgekeurde verlofmutaties of afwezigheid uit Gripp-werktijden in dezelfde periode" value={`${formatHours(dashboard.leaveHours)} uur`} />
             <FormulaItem label="Beschikbaar" detail="Werktijd min verlof" value={`${formatHours(dashboard.availableHours)} uur`} />
-            <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een factuur- of opdrachtregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
+            <FormulaItem label="Billable uren" detail="Uren gekoppeld aan een product-/itemregel met klantprijs boven 0 euro" value={`${formatHours(dashboard.billableHours)} uur`} />
             <FormulaItem label="Gelogde uren" detail={`${dashboard.hourCount} urenregels zonder rechtenprofiel beheerder; ${formatHours(dashboard.unbillableLoggedHours)} uur niet billable`} value={`${formatHours(dashboard.loggedHours)} uur`} />
             <FormulaItem label="Per gelogd uur" detail="Omzet / gelogde uren" value={formatCurrencyPerHour(dashboard.revenuePerLoggedHour)} />
             <FormulaItem label="Per billable uur" detail="Omzet / billable uren" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} />
@@ -857,10 +856,8 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
 
       for (const offerProjectLine of asRecords(result)) {
         const id = idFrom(readField(offerProjectLine, "id"));
-        const invoiceBasis = stringFrom(readField(offerProjectLine, "invoicebasis"))?.toUpperCase();
         if (id !== null) {
           offerProjectLines.set(id, {
-            invoiceBasis,
             hasPositiveValue: lineHasPositiveValue(offerProjectLine)
           });
         }
@@ -988,7 +985,6 @@ function buildPmDashboardData(
 }
 
 function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources) {
-  const directInvoiceBasis = stringFrom(readField(hour, "invoicebasis"))?.toUpperCase();
   const invoiceLineId = relationId(hour, "invoiceline");
   const invoiceLine = invoiceLineId === null ? undefined : billabilitySources.invoiceLines.get(invoiceLineId);
   if (invoiceLine) {
@@ -998,10 +994,10 @@ function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources
   const offerProjectLineId = relationId(hour, "offerprojectline");
   const offerProjectLine = offerProjectLineId === null ? undefined : billabilitySources.offerProjectLines.get(offerProjectLineId);
   if (offerProjectLine) {
-    return offerProjectLine.invoiceBasis !== "NONBILLABLE" && offerProjectLine.hasPositiveValue;
+    return offerProjectLine.hasPositiveValue;
   }
 
-  return Boolean(directInvoiceBasis && directInvoiceBasis !== "NONBILLABLE" && lineHasPositiveValue(hour));
+  return lineHasPositiveValue(hour);
 }
 
 function lineHasPositiveValue(line: JsonRecord) {
@@ -1887,7 +1883,6 @@ function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
 
   uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
     offerProjectLines.set(id, {
-      invoiceBasis: index % 5 === 4 ? "NONBILLABLE" : "COSTING",
       hasPositiveValue: index % 5 !== 4
     });
   });
