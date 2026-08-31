@@ -389,10 +389,13 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
     );
     const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
     const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
-    const [assignedRegieBillabilitySources, billableRevenueSources] = await Promise.all([
-      optionalDataWithTimeout(issues, "regieplanning", emptyBillabilitySources(), 8_000, () => fetchBillabilitySources(client, scopedCalendarItems)),
-      optionalDataWithTimeout(issues, "factureerbare omzet", emptyBillableRevenueSources(), 8_000, () => fetchBillableRevenueSources(client, period))
-    ]);
+    const billableRevenueSources = await optionalDataWithTimeout(
+      issues,
+      "factureerbare omzet",
+      emptyBillableRevenueSources(),
+      8_000,
+      () => fetchBillableRevenueSources(client, period)
+    );
     const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
       fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
     );
@@ -415,8 +418,7 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       },
       employeeScope.excludedEmployeeCount,
       scopedCalendarItems,
-      billableRevenueSources,
-      assignedRegieBillabilitySources
+      billableRevenueSources
     );
   } catch (error) {
     return buildDemoPmDashboardData(period, {
@@ -434,7 +436,6 @@ function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
   const scopedCalendarItems = calendarItemsForEmployeeScope(createDemoCalendarItems(period), employeeScope);
   const scopedCapacitySources = capacitySourcesForEmployeeScope(capacitySources, employeeScope);
   const billabilitySources = createDemoBillabilitySources(scopedHours);
-  const assignedRegieBillabilitySources = createDemoBillabilitySources(scopedCalendarItems);
 
   return buildPmDashboardData(
     createDemoInvoices(period),
@@ -445,8 +446,7 @@ function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
     source,
     employeeScope.excludedEmployeeCount,
     scopedCalendarItems,
-    createDemoBillableRevenueSources(period),
-    assignedRegieBillabilitySources
+    createDemoBillableRevenueSources(period)
   );
 }
 
@@ -1091,8 +1091,7 @@ function buildPmDashboardData(
   source: DashboardSource,
   excludedEmployeeCount = 0,
   calendarItems: JsonRecord[] = [],
-  billableRevenueSources: BillableRevenueSources = emptyBillableRevenueSources(),
-  assignedRegieBillabilitySources: BillabilitySources = billabilitySources
+  billableRevenueSources: BillableRevenueSources = emptyBillableRevenueSources()
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
@@ -1100,7 +1099,7 @@ function buildPmDashboardData(
   let billableHours = 0;
   let hourCount = 0;
   const revenueByMonth = new Map<string, number>();
-  const billableRevenueByMonth = buildBillableRevenueByMonth(calendarItems, assignedRegieBillabilitySources, billableRevenueSources, period);
+  const billableRevenueByMonth = buildBillableRevenueByMonth(hours, billabilitySources, billableRevenueSources, period);
   const billableRevenue = Array.from(billableRevenueByMonth.values()).reduce((total, amount) => total + amount, 0);
 
   for (const invoice of invoices) {
@@ -1172,7 +1171,7 @@ function buildPmDashboardData(
 }
 
 function buildBillableRevenueByMonth(
-  calendarItems: JsonRecord[],
+  hours: JsonRecord[],
   billabilitySources: BillabilitySources,
   billableRevenueSources: BillableRevenueSources,
   period: Period
@@ -1180,8 +1179,8 @@ function buildBillableRevenueByMonth(
   const revenueByMonth = new Map<string, number>();
 
   addCompletedProjectRevenue(revenueByMonth, billableRevenueSources.completedProjects, billableRevenueSources.projectTagNames, period);
-  addAssignedCostingRevenue(revenueByMonth, calendarItems, billabilitySources, period);
-  addContractRevenue(revenueByMonth, billableRevenueSources.contracts, billableRevenueSources.contractLines, period);
+  addExecutedCostingHourRevenue(revenueByMonth, hours, billabilitySources, period);
+  addContractStartRevenue(revenueByMonth, billableRevenueSources.contracts, billableRevenueSources.contractLines, period);
 
   return revenueByMonth;
 }
@@ -1197,25 +1196,25 @@ function addCompletedProjectRevenue(revenueByMonth: Map<string, number>, project
   }
 }
 
-function addAssignedCostingRevenue(
+function addExecutedCostingHourRevenue(
   revenueByMonth: Map<string, number>,
-  calendarItems: JsonRecord[],
+  hours: JsonRecord[],
   billabilitySources: BillabilitySources,
   period: Period
 ) {
-  for (const calendarItem of calendarItems) {
-    const line = offerProjectLineForRecord(calendarItem, billabilitySources);
-    const hours = Math.max(0, numberFrom(readField(calendarItem, "hours")) ?? 0);
+  for (const hour of hours) {
+    const line = offerProjectLineForRecord(hour, billabilitySources);
+    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
 
-    if (hours === 0 || !line || line.invoiceBasis !== "COSTING" || line.contractLineId !== null) {
+    if (amount === 0 || !line || line.invoiceBasis !== "COSTING" || line.contractLineId !== null) {
       continue;
     }
 
-    addMonthlyRevenue(revenueByMonth, readField(calendarItem, "date"), hours * line.sellingPrice * discountMultiplier(line.discount), period);
+    addMonthlyRevenue(revenueByMonth, readField(hour, "date"), amount * line.sellingPrice * discountMultiplier(line.discount), period);
   }
 }
 
-function addContractRevenue(revenueByMonth: Map<string, number>, contracts: JsonRecord[], contractLines: JsonRecord[], period: Period) {
+function addContractStartRevenue(revenueByMonth: Map<string, number>, contracts: JsonRecord[], contractLines: JsonRecord[], period: Period) {
   const contractsById = new Map<number, JsonRecord>();
   for (const contract of contracts) {
     const id = idFrom(readField(contract, "id"));
@@ -1233,10 +1232,16 @@ function addContractRevenue(revenueByMonth: Map<string, number>, contracts: Json
       continue;
     }
 
-    for (const occurrenceDate of contractOccurrenceDates(contract, line, period)) {
-      addMonthlyRevenue(revenueByMonth, occurrenceDate, lineRevenueExclVat(line), period);
-    }
+    addMonthlyRevenue(revenueByMonth, contractLineBillableFromDate(contract, line), lineRevenueExclVat(line), period);
   }
+}
+
+function contractLineBillableFromDate(contract: JsonRecord, line: JsonRecord) {
+  return (
+    dateKeyFromValue(readField(line, "startdate")) ??
+    dateKeyFromValue(readField(contract, "date_original")) ??
+    dateKeyFromValue(readField(contract, "date"))
+  );
 }
 
 function addMonthlyRevenue(revenueByMonth: Map<string, number>, dateValue: unknown, amount: number, period: Period) {
@@ -1298,99 +1303,6 @@ function hasProjectTag(project: JsonRecord, tagNames: Map<number, string>) {
     const tagName = relationLabelFromValue(tag) ?? (tagId === null ? undefined : tagNames.get(tagId));
     return normalizeComparisonValue(tagName ?? "") === "project";
   });
-}
-
-function contractOccurrenceDates(contract: JsonRecord, line: JsonRecord, period: Period) {
-  const contractStart = dateKeyFromValue(readField(contract, "date_original")) ?? dateKeyFromValue(readField(contract, "date"));
-  const lineStart = dateKeyFromValue(readField(line, "startdate"));
-  const start = maxOptionalDateKey(contractStart, lineStart);
-  const contractEnd = dateKeyFromValue(readField(contract, "expirydate"));
-  const lineEnd = dateKeyFromValue(readField(line, "enddate"));
-  const stop = minOptionalDateKey(period.end, contractEnd, lineEnd) ?? period.end;
-  const interval = contractFrequencyInterval(stringFrom(readField(contract, "frequency")));
-  const status = stringFrom(readField(contract, "status"))?.toUpperCase();
-  const sendMaxTimes = booleanFrom(readField(contract, "sendmaxtimescheckbox")) === true
-    ? Math.max(0, Math.floor(numberFrom(readField(contract, "sendmaxtimes")) ?? 0))
-    : null;
-
-  if (!start || start > stop || !interval || (status === "ENDED" && !contractEnd)) {
-    return [];
-  }
-
-  const startDate = parseDateKey(start);
-  if (!startDate) {
-    return [];
-  }
-
-  const dates: string[] = [];
-  for (let occurrenceIndex = 0; occurrenceIndex < 1_000; occurrenceIndex += 1) {
-    if (sendMaxTimes !== null && occurrenceIndex >= sendMaxTimes) {
-      break;
-    }
-
-    const occurrenceDate = contractOccurrenceDate(startDate, interval, occurrenceIndex);
-    const occurrenceKey = dateKey(occurrenceDate);
-    if (occurrenceKey > stop) {
-      break;
-    }
-
-    if (occurrenceKey >= period.start) {
-      dates.push(occurrenceKey);
-    }
-  }
-
-  return dates;
-}
-
-function contractFrequencyInterval(frequency: string | undefined): { unit: "month" | "day"; amount: number } | null {
-  switch (frequency?.toUpperCase()) {
-    case "EVERYWEEK":
-      return { unit: "day", amount: 7 };
-    case "EVERYTWOWEEKS":
-      return { unit: "day", amount: 14 };
-    case "EVERYTHREEWEEKS":
-      return { unit: "day", amount: 21 };
-    case "EVERYFOURWEEKS":
-      return { unit: "day", amount: 28 };
-    case "EVERY2MONTHS":
-      return { unit: "month", amount: 2 };
-    case "EVERYQUARTER":
-      return { unit: "month", amount: 3 };
-    case "EVERY4MONTHS":
-      return { unit: "month", amount: 4 };
-    case "EVERY6MONTHS":
-      return { unit: "month", amount: 6 };
-    case "EVERYYEAR":
-      return { unit: "month", amount: 12 };
-    case "EVERY18MONTHS":
-      return { unit: "month", amount: 18 };
-    case "EVERYTWOYEARS":
-      return { unit: "month", amount: 24 };
-    case "EVERYTHREEYEARS":
-      return { unit: "month", amount: 36 };
-    case "EVERYFOURYEARS":
-      return { unit: "month", amount: 48 };
-    case "EVERYFIVEYEARS":
-      return { unit: "month", amount: 60 };
-    case "EVERYMONTH":
-      return { unit: "month", amount: 1 };
-    default:
-      return frequency ? null : { unit: "month", amount: 1 };
-  }
-}
-
-function contractOccurrenceDate(start: Date, interval: { unit: "month" | "day"; amount: number }, occurrenceIndex: number) {
-  if (interval.unit === "day") {
-    const date = new Date(start);
-    date.setDate(date.getDate() + interval.amount * occurrenceIndex);
-    return date;
-  }
-
-  const monthOffset = interval.amount * occurrenceIndex;
-  const date = new Date(start.getFullYear(), start.getMonth() + monthOffset, 1);
-  const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  date.setDate(Math.min(start.getDate(), monthEnd));
-  return date;
 }
 
 function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources) {
@@ -2258,16 +2170,6 @@ function maxDateKey(left: string, right: string) {
   return left > right ? left : right;
 }
 
-function minOptionalDateKey(...values: Array<string | undefined>) {
-  const dates = values.filter((value): value is string => isDateKey(value)).sort();
-  return dates[0];
-}
-
-function maxOptionalDateKey(...values: Array<string | undefined>) {
-  const dates = values.filter((value): value is string => isDateKey(value)).sort();
-  return dates[dates.length - 1];
-}
-
 function normalizeNumberString(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -2362,7 +2264,7 @@ function createDemoCalendarItems(period: Period): JsonRecord[] {
     const month = bucket.key;
     return [
       { id: index * 3 + 7000, date: `${month}-06`, hours: 6 + (index % 3), calendaritememployee: 1, task: null },
-      { id: index * 3 + 7001, date: `${month}-13`, hours: 4, calendaritememployee: 2, task: 8000 + index, offerprojectline: 3000 + index },
+      { id: index * 3 + 7001, date: `${month}-13`, hours: 4, calendaritememployee: 2, task: 8000 + index },
       { id: index * 3 + 7002, date: `${month}-20`, hours: 3, calendaritememployee: 4, task: null }
     ];
   });
@@ -2373,11 +2275,10 @@ function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
   const taskOfferProjectLineIds = new Map<number, number>();
 
   uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
-    const isAssignedRegieLine = id >= 3000;
-    const sellingPrice = isAssignedRegieLine ? 95 + (index % 4) * 10 : index % 5 === 4 ? 0 : 110;
+    const sellingPrice = index % 5 === 4 ? 0 : 95 + (index % 4) * 10;
     offerProjectLines.set(id, {
       hasPositiveUnitPrice: sellingPrice > 0,
-      invoiceBasis: isAssignedRegieLine ? "COSTING" : index % 5 === 4 ? "NONBILLABLE" : "FIXED",
+      invoiceBasis: sellingPrice === 0 ? "NONBILLABLE" : index % 3 === 0 ? "FIXED" : "COSTING",
       sellingPrice,
       discount: 0,
       contractLineId: null
