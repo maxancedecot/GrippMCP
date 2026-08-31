@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { CSSProperties } from "react";
 import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
+import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 
 export const dynamic = "force-dynamic";
@@ -294,19 +295,27 @@ function MetricCard({
 }
 
 function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
-  const width = Math.max(640, rows.length * 120);
-  const height = 320;
-  const padding = { top: 42, right: 56, bottom: 62, left: 56 };
+  const width = Math.max(720, rows.length * 112);
+  const height = 300;
+  const padding = { top: 26, right: 30, bottom: 48, left: 78 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
   const values = rows.map((row) => row.revenue);
-  const maximum = Math.max(0, ...values);
+  const rawMaximum = Math.max(0, ...values);
   const minimum = Math.min(0, ...values);
+  const maximum = rawMaximum === minimum ? rawMaximum + 1 : rawMaximum;
   const range = Math.max(1, maximum - minimum);
   const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
   const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
-  const invoicePoints = rows.map((row, index) => `${xFor(index)},${yFor(row.revenue)}`).join(" ");
+  const chartPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.revenue) }));
+  const invoiceLinePath = smoothLinePath(chartPoints);
+  const invoiceAreaPath = smoothAreaPath(chartPoints, yFor(0));
+  const gridTicks = Array.from({ length: 5 }, (_, index) => {
+    const value = maximum - (range * index) / 4;
+    return { key: index, value, y: yFor(value) };
+  });
   const zeroY = yFor(0);
+  const gradientId = "pm-revenue-line-gradient";
 
   return (
     <div className="revenue-line-chart">
@@ -318,19 +327,33 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
         role="img"
         aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}`).join(", ")}`}
       >
-        <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1={padding.top} y2={height - padding.bottom} gradientUnits="userSpaceOnUse">
+            <stop className="revenue-line-gradient-start" offset="0%" />
+            <stop className="revenue-line-gradient-end" offset="100%" />
+          </linearGradient>
+        </defs>
+        <rect className="revenue-line-plot-bg" x={padding.left} y={padding.top} width={chartWidth} height={chartHeight} rx="6" />
+        {gridTicks.map((tick) => (
+          <g key={tick.key}>
+            <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={tick.y} y2={tick.y} />
+            <text className="revenue-line-y-label" x={padding.left - 12} y={tick.y + 4} textAnchor="end">
+              {formatCurrency(tick.value)}
+            </text>
+          </g>
+        ))}
         <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
-        {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--invoice" points={invoicePoints} /> : null}
+        {rows.length > 1 ? <path className="revenue-line-area revenue-line-area--invoice" d={invoiceAreaPath} fill={`url(#${gradientId})`} /> : null}
+        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--invoice" d={invoiceLinePath} /> : null}
         {rows.map((row, index) => {
-          const x = xFor(index);
-          const invoiceY = yFor(row.revenue);
+          const { x, y: invoiceY } = chartPoints[index];
           const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
           const valueY = invoiceY < padding.top + 24 ? invoiceY + 22 : invoiceY - 12;
 
           return (
             <g key={row.key}>
               <title>{`${row.label}: ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}`}</title>
-              <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="5" />
+              <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="4" />
               <text className="revenue-line-value revenue-line-value--invoice" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
               <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
             </g>

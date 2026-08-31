@@ -773,17 +773,19 @@ select {
 
 .revenue-line-chart {
   overflow-x: auto;
-  padding: 8px 0 2px;
+  padding: 2px 0 0;
+  scrollbar-color: var(--border) transparent;
 }
 
 .revenue-line-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 8px;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-bottom: 6px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .revenue-line-legend span {
@@ -793,54 +795,93 @@ select {
 }
 
 .revenue-line-legend-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
-  background: var(--blue);
+  border: 3px solid var(--overtime);
+  background: transparent;
 }
 
 .revenue-line-chart svg {
   display: block;
   width: 100%;
-  min-width: 640px;
+  min-width: 720px;
   height: auto;
   border-radius: 8px;
 }
 
-.revenue-line-grid,
+.revenue-line-plot-bg {
+  fill: var(--surface);
+}
+
+.revenue-line-gradient-start {
+  stop-color: var(--overtime);
+  stop-opacity: 0.2;
+}
+
+.revenue-line-gradient-end {
+  stop-color: var(--overtime);
+  stop-opacity: 0;
+}
+
+.revenue-line-grid {
+  stroke: var(--surface-strong);
+  stroke-width: 1;
+}
+
 .revenue-line-axis {
   stroke: var(--border);
   stroke-width: 1;
 }
 
-.revenue-line-axis {
-  stroke: var(--muted);
-}
-
 .revenue-line-path {
   fill: none;
-  stroke: var(--blue);
+  stroke: var(--overtime);
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 3;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.revenue-line-area {
+  pointer-events: none;
 }
 
 .revenue-line-point {
   fill: var(--surface);
-  stroke: var(--blue);
-  stroke-width: 3;
+  stroke: var(--overtime);
+  stroke-width: 2;
+  opacity: 0;
+  transition: opacity 160ms ease;
 }
 
 .revenue-line-value {
   fill: var(--ink);
-  font-size: 13px;
-  font-weight: 760;
+  stroke: var(--surface);
+  stroke-width: 4;
+  paint-order: stroke;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 160ms ease;
 }
 
 .revenue-line-label {
   fill: var(--muted);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.revenue-line-y-label {
+  fill: var(--neutral);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.revenue-line-chart:hover .revenue-line-point,
+.revenue-line-chart:hover .revenue-line-value {
+  opacity: 1;
 }
 
 .table-wrap {
