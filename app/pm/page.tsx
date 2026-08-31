@@ -26,10 +26,6 @@ type DashboardSource = {
 
 type LineBillability = {
   hasPositiveUnitPrice: boolean;
-  invoiceBasis?: string;
-  sellingPrice: number;
-  discount: number;
-  contractLineId: number | null;
 };
 
 type BillabilitySources = {
@@ -91,21 +87,19 @@ type MonthRevenue = {
   key: string;
   label: string;
   revenue: number;
-  billableRevenue: number;
+  completedProjectRevenue: number;
 };
 
-type BillableRevenueSources = {
+type CompletedProjectRevenueSources = {
   completedProjects: JsonRecord[];
   projectTagNames: Map<number, string>;
-  contracts: JsonRecord[];
-  contractLines: JsonRecord[];
 };
 
 type PmDashboardData = {
   period: Period;
   source: DashboardSource;
   revenue: number;
-  billableRevenue: number;
+  completedProjectRevenue: number;
   loggedHours: number;
   billableHours: number;
   unbillableLoggedHours: number;
@@ -134,8 +128,6 @@ const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const MAX_PROJECT_PAGES = 80;
-const MAX_CONTRACT_PAGES = 80;
-const MAX_CONTRACT_LINE_PAGES = 80;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
@@ -259,7 +251,7 @@ export default async function PmDashboardPage() {
           </div>
           <div className="panel-actions">
             <span className="panel-total panel-total--invoice">Verkoopfacturen {formatCurrency(dashboard.revenue)}</span>
-            <span className="panel-total panel-total--billable">Factureerbaar {formatCurrency(dashboard.billableRevenue)}</span>
+            <span className="panel-total panel-total--billable">Afgewerkte opdrachten {formatCurrency(dashboard.completedProjectRevenue)}</span>
           </div>
         </div>
 
@@ -312,43 +304,43 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
   const padding = { top: 42, right: 56, bottom: 62, left: 56 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const values = rows.flatMap((row) => [row.revenue, row.billableRevenue]);
+  const values = rows.flatMap((row) => [row.revenue, row.completedProjectRevenue]);
   const maximum = Math.max(0, ...values);
   const minimum = Math.min(0, ...values);
   const range = Math.max(1, maximum - minimum);
   const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
   const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
   const invoicePoints = rows.map((row, index) => `${xFor(index)},${yFor(row.revenue)}`).join(" ");
-  const billablePoints = rows.map((row, index) => `${xFor(index)},${yFor(row.billableRevenue)}`).join(" ");
+  const completedProjectPoints = rows.map((row, index) => `${xFor(index)},${yFor(row.completedProjectRevenue)}`).join(" ");
   const zeroY = yFor(0);
 
   return (
     <div className="revenue-line-chart">
       <div className="revenue-line-legend" aria-hidden="true">
         <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />Verkoopfacturen</span>
-        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--billable" />Factureerbaar</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--billable" />Afgewerkte opdrachten</span>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} verkoopfacturen ${formatCurrency(row.revenue)}, factureerbaar ${formatCurrency(row.billableRevenue)}`).join(", ")}`}
+        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} verkoopfacturen ${formatCurrency(row.revenue)}, afgewerkte opdrachten ${formatCurrency(row.completedProjectRevenue)}`).join(", ")}`}
       >
         <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
         <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
         {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--invoice" points={invoicePoints} /> : null}
-        {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--billable" points={billablePoints} /> : null}
+        {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--billable" points={completedProjectPoints} /> : null}
         {rows.map((row, index) => {
           const x = xFor(index);
           const invoiceY = yFor(row.revenue);
-          const billableY = yFor(row.billableRevenue);
+          const completedProjectY = yFor(row.completedProjectRevenue);
           const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
           const valueY = invoiceY < padding.top + 24 ? invoiceY + 22 : invoiceY - 12;
 
           return (
             <g key={row.key}>
-              <title>{`${row.label}: verkoopfacturen ${formatCurrency(row.revenue)}, factureerbaar ${formatCurrency(row.billableRevenue)}`}</title>
+              <title>{`${row.label}: verkoopfacturen ${formatCurrency(row.revenue)}, afgewerkte opdrachten ${formatCurrency(row.completedProjectRevenue)}`}</title>
               <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="5" />
-              <circle className="revenue-line-point revenue-line-point--billable" cx={x} cy={billableY} r="5" />
+              <circle className="revenue-line-point revenue-line-point--billable" cx={x} cy={completedProjectY} r="5" />
               <text className="revenue-line-value" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
               <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
             </g>
@@ -389,12 +381,12 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
     );
     const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
     const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
-    const billableRevenueSources = await optionalDataWithTimeout(
+    const completedProjectRevenueSources = await optionalDataWithTimeout(
       issues,
-      "factureerbare omzet",
-      emptyBillableRevenueSources(),
+      "omzet afgewerkte opdrachten",
+      emptyCompletedProjectRevenueSources(),
       8_000,
-      () => fetchBillableRevenueSources(client, period)
+      () => fetchCompletedProjectRevenueSources(client, period)
     );
     const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
       fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
@@ -418,7 +410,7 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       },
       employeeScope.excludedEmployeeCount,
       scopedCalendarItems,
-      billableRevenueSources
+      completedProjectRevenueSources
     );
   } catch (error) {
     return buildDemoPmDashboardData(period, {
@@ -446,7 +438,7 @@ function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
     source,
     employeeScope.excludedEmployeeCount,
     scopedCalendarItems,
-    createDemoBillableRevenueSources(period)
+    createDemoCompletedProjectRevenueSources(period)
   );
 }
 
@@ -525,12 +517,10 @@ function emptyBillabilitySources(): BillabilitySources {
   };
 }
 
-function emptyBillableRevenueSources(): BillableRevenueSources {
+function emptyCompletedProjectRevenueSources(): CompletedProjectRevenueSources {
   return {
     completedProjects: [],
-    projectTagNames: new Map<number, string>(),
-    contracts: [],
-    contractLines: []
+    projectTagNames: new Map<number, string>()
   };
 }
 
@@ -951,21 +941,13 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
   return { offerProjectLines, taskOfferProjectLineIds };
 }
 
-async function fetchBillableRevenueSources(client: GrippClient, period: Period): Promise<BillableRevenueSources> {
-  const [completedProjects, contracts] = await Promise.all([
-    fetchCompletedProjectsForPeriod(client, period),
-    fetchContractsUntilPeriodEnd(client, period)
-  ]);
-  const [projectTagNames, contractLines] = await Promise.all([
-    fetchRelationNames(client, "tag", uniqueRelationIds(completedProjects, "tags")),
-    fetchContractLinesForContracts(client, recordIds(contracts))
-  ]);
+async function fetchCompletedProjectRevenueSources(client: GrippClient, period: Period): Promise<CompletedProjectRevenueSources> {
+  const completedProjects = await fetchCompletedProjectsForPeriod(client, period);
+  const projectTagNames = await fetchRelationNames(client, "tag", uniqueRelationIds(completedProjects, "tags"));
 
   return {
     completedProjects,
-    projectTagNames,
-    contracts,
-    contractLines
+    projectTagNames
   };
 }
 
@@ -974,43 +956,6 @@ async function fetchCompletedProjectsForPeriod(client: GrippClient, period: Peri
     { field: "project.enddate", operator: "greaterequals", value: period.start },
     { field: "project.enddate", operator: "lessequals", value: period.end }
   ], [{ field: "project.enddate", direction: "asc" }], MAX_PROJECT_PAGES);
-}
-
-async function fetchContractsUntilPeriodEnd(client: GrippClient, period: Period) {
-  const [activeContracts, endingContracts, endedContracts] = await Promise.all([
-    fetchPagedRecords(client, "contract", [
-      { field: "contract.date", operator: "lessequals", value: period.end },
-      { field: "contract.status", operator: "equals", value: "ACTIVE" }
-    ], [{ field: "contract.date", direction: "asc" }], MAX_CONTRACT_PAGES),
-    fetchPagedRecords(client, "contract", [
-      { field: "contract.date", operator: "lessequals", value: period.end },
-      { field: "contract.status", operator: "equals", value: "ENDING" }
-    ], [{ field: "contract.date", direction: "asc" }], MAX_CONTRACT_PAGES),
-    fetchPagedRecords(client, "contract", [
-      { field: "contract.date", operator: "lessequals", value: period.end },
-      { field: "contract.expirydate", operator: "greaterequals", value: period.start },
-      { field: "contract.status", operator: "equals", value: "ENDED" }
-    ], [{ field: "contract.date", direction: "asc" }], MAX_CONTRACT_PAGES)
-  ]);
-
-  return uniqueRecordsById([...activeContracts, ...endingContracts, ...endedContracts]);
-}
-
-async function fetchContractLinesForContracts(client: GrippClient, contractIds: number[]) {
-  const records: JsonRecord[] = [];
-
-  for (let index = 0; index < contractIds.length; index += 100) {
-    const idChunk = contractIds.slice(index, index + 100);
-    if (idChunk.length === 0) {
-      continue;
-    }
-
-    records.push(...await fetchPagedRecords(client, "contractline", [
-      { field: "contractline.contract", operator: "in", value: idChunk }
-    ], [{ field: "contractline.id", direction: "asc" }], MAX_CONTRACT_LINE_PAGES));
-  }
-
-  return records;
 }
 
 async function fetchRelationNames(client: GrippClient, entity: string, ids: number[]) {
@@ -1066,22 +1011,6 @@ async function fetchPagedRecords(
   return records;
 }
 
-function uniqueRecordsById(records: JsonRecord[]) {
-  const recordsById = new Map<number, JsonRecord>();
-  const recordsWithoutId: JsonRecord[] = [];
-
-  for (const record of records) {
-    const id = idFrom(readField(record, "id"));
-    if (id === null) {
-      recordsWithoutId.push(record);
-    } else {
-      recordsById.set(id, record);
-    }
-  }
-
-  return [...recordsById.values(), ...recordsWithoutId];
-}
-
 function buildPmDashboardData(
   invoices: JsonRecord[],
   hours: JsonRecord[],
@@ -1091,7 +1020,7 @@ function buildPmDashboardData(
   source: DashboardSource,
   excludedEmployeeCount = 0,
   calendarItems: JsonRecord[] = [],
-  billableRevenueSources: BillableRevenueSources = emptyBillableRevenueSources()
+  completedProjectRevenueSources: CompletedProjectRevenueSources = emptyCompletedProjectRevenueSources()
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
@@ -1099,8 +1028,8 @@ function buildPmDashboardData(
   let billableHours = 0;
   let hourCount = 0;
   const revenueByMonth = new Map<string, number>();
-  const billableRevenueByMonth = buildBillableRevenueByMonth(hours, billabilitySources, billableRevenueSources, period);
-  const billableRevenue = Array.from(billableRevenueByMonth.values()).reduce((total, amount) => total + amount, 0);
+  const completedProjectRevenueByMonth = buildCompletedProjectRevenueByMonth(completedProjectRevenueSources, period);
+  const completedProjectRevenue = Array.from(completedProjectRevenueByMonth.values()).reduce((total, amount) => total + amount, 0);
 
   for (const invoice of invoices) {
     const revenueEntry = invoiceRevenueEntry(invoice, period);
@@ -1137,7 +1066,7 @@ function buildPmDashboardData(
     period,
     source,
     revenue,
-    billableRevenue,
+    completedProjectRevenue,
     loggedHours,
     billableHours,
     unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
@@ -1158,7 +1087,7 @@ function buildPmDashboardData(
     revenueByMonth: makeMonthBuckets(period).map((bucket) => ({
       ...bucket,
       revenue: revenueByMonth.get(bucket.key) ?? 0,
-      billableRevenue: billableRevenueByMonth.get(bucket.key) ?? 0
+      completedProjectRevenue: completedProjectRevenueByMonth.get(bucket.key) ?? 0
     })),
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       day: "2-digit",
@@ -1170,17 +1099,18 @@ function buildPmDashboardData(
   };
 }
 
-function buildBillableRevenueByMonth(
-  hours: JsonRecord[],
-  billabilitySources: BillabilitySources,
-  billableRevenueSources: BillableRevenueSources,
+function buildCompletedProjectRevenueByMonth(
+  completedProjectRevenueSources: CompletedProjectRevenueSources,
   period: Period
 ) {
   const revenueByMonth = new Map<string, number>();
 
-  addCompletedProjectRevenue(revenueByMonth, billableRevenueSources.completedProjects, billableRevenueSources.projectTagNames, period);
-  addExecutedCostingHourRevenue(revenueByMonth, hours, billabilitySources, period);
-  addContractStartRevenue(revenueByMonth, billableRevenueSources.contracts, billableRevenueSources.contractLines, period);
+  addCompletedProjectRevenue(
+    revenueByMonth,
+    completedProjectRevenueSources.completedProjects,
+    completedProjectRevenueSources.projectTagNames,
+    period
+  );
 
   return revenueByMonth;
 }
@@ -1194,54 +1124,6 @@ function addCompletedProjectRevenue(revenueByMonth: Map<string, number>, project
     const completedDate = dateKeyFromValue(readField(project, "enddate"));
     addMonthlyRevenue(revenueByMonth, completedDate, projectRevenueExclVat(project), period);
   }
-}
-
-function addExecutedCostingHourRevenue(
-  revenueByMonth: Map<string, number>,
-  hours: JsonRecord[],
-  billabilitySources: BillabilitySources,
-  period: Period
-) {
-  for (const hour of hours) {
-    const line = offerProjectLineForRecord(hour, billabilitySources);
-    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
-
-    if (amount === 0 || !line || line.invoiceBasis !== "COSTING" || line.contractLineId !== null) {
-      continue;
-    }
-
-    addMonthlyRevenue(revenueByMonth, readField(hour, "date"), amount * line.sellingPrice * discountMultiplier(line.discount), period);
-  }
-}
-
-function addContractStartRevenue(revenueByMonth: Map<string, number>, contracts: JsonRecord[], contractLines: JsonRecord[], period: Period) {
-  const contractsById = new Map<number, JsonRecord>();
-  for (const contract of contracts) {
-    const id = idFrom(readField(contract, "id"));
-    if (id !== null) {
-      contractsById.set(id, contract);
-    }
-  }
-
-  for (const line of contractLines) {
-    const contractId = relationId(line, "contract");
-    const contract = contractId === null ? undefined : contractsById.get(contractId);
-    const invoiceBasis = stringFrom(readField(line, "invoicebasis"))?.toUpperCase();
-
-    if (!contract || invoiceBasis === "NONBILLABLE") {
-      continue;
-    }
-
-    addMonthlyRevenue(revenueByMonth, contractLineBillableFromDate(contract, line), lineRevenueExclVat(line), period);
-  }
-}
-
-function contractLineBillableFromDate(contract: JsonRecord, line: JsonRecord) {
-  return (
-    dateKeyFromValue(readField(line, "startdate")) ??
-    dateKeyFromValue(readField(contract, "date_original")) ??
-    dateKeyFromValue(readField(contract, "date"))
-  );
 }
 
 function addMonthlyRevenue(revenueByMonth: Map<string, number>, dateValue: unknown, amount: number, period: Period) {
@@ -1271,26 +1153,11 @@ function discountMultiplier(discount: number) {
   return 1 - Math.max(0, Math.min(100, discount)) / 100;
 }
 
-function offerProjectLineForRecord(record: JsonRecord, billabilitySources: BillabilitySources) {
-  const directOfferProjectLineId = relationId(record, "offerprojectline");
-  if (directOfferProjectLineId !== null) {
-    return billabilitySources.offerProjectLines.get(directOfferProjectLineId);
-  }
-
-  const taskId = relationId(record, "task");
-  const offerProjectLineId = taskId === null ? undefined : billabilitySources.taskOfferProjectLineIds.get(taskId);
-  return offerProjectLineId === undefined ? undefined : billabilitySources.offerProjectLines.get(offerProjectLineId);
-}
-
 function lineBillabilityFromRecord(line: JsonRecord): LineBillability {
   const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
 
   return {
-    hasPositiveUnitPrice: sellingPrice > 0,
-    invoiceBasis: stringFrom(readField(line, "invoicebasis"))?.toUpperCase(),
-    sellingPrice,
-    discount: numberFrom(readField(line, "discount")) ?? 0,
-    contractLineId: relationId(line, "contractline")
+    hasPositiveUnitPrice: sellingPrice > 0
   };
 }
 
@@ -1837,7 +1704,7 @@ function makeMonthBuckets(period: Period): MonthRevenue[] {
       key: monthKey(cursor),
       label: new Intl.DateTimeFormat("nl-NL", { month: "short", year: "numeric" }).format(cursor),
       revenue: 0,
-      billableRevenue: 0
+      completedProjectRevenue: 0
     });
     cursor.setMonth(cursor.getMonth() + 1);
   }
@@ -1875,10 +1742,6 @@ function relationIds(record: JsonRecord, field: string) {
 
   const id = relationId(record, field);
   return id === null ? [] : [id];
-}
-
-function recordIds(records: JsonRecord[]) {
-  return records.map((record) => idFrom(readField(record, "id"))).filter((id): id is number => id !== null);
 }
 
 function relationLabelFromValue(value: unknown) {
@@ -2277,11 +2140,7 @@ function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
   uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
     const sellingPrice = index % 5 === 4 ? 0 : 95 + (index % 4) * 10;
     offerProjectLines.set(id, {
-      hasPositiveUnitPrice: sellingPrice > 0,
-      invoiceBasis: sellingPrice === 0 ? "NONBILLABLE" : index % 3 === 0 ? "FIXED" : "COSTING",
-      sellingPrice,
-      discount: 0,
-      contractLineId: null
+      hasPositiveUnitPrice: sellingPrice > 0
     });
   });
 
@@ -2296,7 +2155,7 @@ function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
   return { offerProjectLines, taskOfferProjectLineIds };
 }
 
-function createDemoBillableRevenueSources(period: Period): BillableRevenueSources {
+function createDemoCompletedProjectRevenueSources(period: Period): CompletedProjectRevenueSources {
   const projectTagId = 5001;
   const completedProjects = makeMonthBuckets(period)
     .filter((_, index) => index % 3 === 1)
@@ -2306,32 +2165,9 @@ function createDemoBillableRevenueSources(period: Period): BillableRevenueSource
       totalexclvat: 9_500 + index * 1_400,
       tags: [projectTagId]
     }));
-  const contracts = [
-    {
-      id: 11_000,
-      date: `${period.year}-01-01`,
-      date_original: `${period.year}-01-01`,
-      frequency: "EVERYMONTH",
-      status: "ACTIVE"
-    }
-  ];
-  const contractLines = [
-    {
-      id: 11_001,
-      contract: 11_000,
-      amount: 1,
-      sellingprice: 1_850,
-      discount: 0,
-      invoicebasis: "FIXED",
-      startdate: `${period.year}-01-01`
-    }
-  ];
-
   return {
     completedProjects,
-    projectTagNames: new Map([[projectTagId, "Project"]]),
-    contracts,
-    contractLines
+    projectTagNames: new Map([[projectTagId, "Project"]])
   };
 }
 
