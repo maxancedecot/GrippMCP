@@ -128,6 +128,7 @@ const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const MAX_PROJECT_PAGES = 80;
+const PROJECT_COMPLETED_DATE_FIELD = "project.enddate";
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
@@ -953,9 +954,9 @@ async function fetchCompletedProjectRevenueSources(client: GrippClient, period: 
 
 async function fetchCompletedProjectsForPeriod(client: GrippClient, period: Period) {
   return fetchPagedRecords(client, "project", [
-    { field: "project.enddate", operator: "greaterequals", value: period.start },
-    { field: "project.enddate", operator: "lessequals", value: period.end }
-  ], [{ field: "project.enddate", direction: "asc" }], MAX_PROJECT_PAGES);
+    { field: PROJECT_COMPLETED_DATE_FIELD, operator: "greaterequals", value: period.start },
+    { field: PROJECT_COMPLETED_DATE_FIELD, operator: "lessequals", value: period.end }
+  ], [{ field: PROJECT_COMPLETED_DATE_FIELD, direction: "asc" }], MAX_PROJECT_PAGES);
 }
 
 async function fetchRelationNames(client: GrippClient, entity: string, ids: number[]) {
@@ -1121,9 +1122,14 @@ function addCompletedProjectRevenue(revenueByMonth: Map<string, number>, project
       continue;
     }
 
-    const completedDate = dateKeyFromValue(readField(project, "enddate"));
+    const completedDate = projectCompletedDate(project);
     addMonthlyRevenue(revenueByMonth, completedDate, projectRevenueExclVat(project), period);
   }
+}
+
+function projectCompletedDate(project: JsonRecord) {
+  // Gripp toont dit projectveld als "Afgerond op".
+  return dateKeyFromValue(readField(project, "enddate"));
 }
 
 function addMonthlyRevenue(revenueByMonth: Map<string, number>, dateValue: unknown, amount: number, period: Period) {
