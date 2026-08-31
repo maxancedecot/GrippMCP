@@ -83,20 +83,16 @@ type EmployeeBillabilityRow = EmployeeCapacityRow & {
   billability: number;
 };
 
-type MonthBucket = {
+type MonthRevenue = {
   key: string;
-};
-
-type CompletedProjectRevenueSources = {
-  completedProjects: JsonRecord[];
-  projectTagNames: Map<number, string>;
+  label: string;
+  revenue: number;
 };
 
 type PmDashboardData = {
   period: Period;
   source: DashboardSource;
   revenue: number;
-  completedProjectRevenue: number;
   loggedHours: number;
   billableHours: number;
   unbillableLoggedHours: number;
@@ -114,6 +110,7 @@ type PmDashboardData = {
   excludedEmployeeCount: number;
   fallbackWorkingHoursEmployeeCount: number;
   employeeBillability: EmployeeBillabilityRow[];
+  revenueByMonth: MonthRevenue[];
   lastUpdated: string;
 };
 
@@ -123,10 +120,7 @@ const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
-const MAX_PROJECT_PAGES = 80;
-const PROJECT_COMPLETED_DATE_FIELD = "project.enddate";
 const INVOICE_REVENUE_SERIES_LABEL = "Verkoopfacturen";
-const COMPLETED_PROJECT_REVENUE_SERIES_LABEL = "Opdrachten afgerond op datum";
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
@@ -246,13 +240,14 @@ export default async function PmDashboardPage() {
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Omzet</p>
-            <h2>Omzetoverzicht</h2>
+            <h2>Per maand</h2>
           </div>
           <div className="panel-actions">
             <span className="panel-total panel-total--invoice">{INVOICE_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.revenue)}</span>
-            <span className="panel-total panel-total--billable">{COMPLETED_PROJECT_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.completedProjectRevenue)}</span>
           </div>
         </div>
+
+        <RevenueLineChart rows={dashboard.revenueByMonth} />
       </section>
     </main>
   );
@@ -295,6 +290,54 @@ function MetricCard({
   );
 }
 
+function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
+  const width = Math.max(640, rows.length * 120);
+  const height = 320;
+  const padding = { top: 42, right: 56, bottom: 62, left: 56 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const values = rows.map((row) => row.revenue);
+  const maximum = Math.max(0, ...values);
+  const minimum = Math.min(0, ...values);
+  const range = Math.max(1, maximum - minimum);
+  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
+  const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
+  const invoicePoints = rows.map((row, index) => `${xFor(index)},${yFor(row.revenue)}`).join(" ");
+  const zeroY = yFor(0);
+
+  return (
+    <div className="revenue-line-chart">
+      <div className="revenue-line-legend" aria-hidden="true">
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />{INVOICE_REVENUE_SERIES_LABEL}</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}`).join(", ")}`}
+      >
+        <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
+        <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
+        {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--invoice" points={invoicePoints} /> : null}
+        {rows.map((row, index) => {
+          const x = xFor(index);
+          const invoiceY = yFor(row.revenue);
+          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+          const valueY = invoiceY < padding.top + 24 ? invoiceY + 22 : invoiceY - 12;
+
+          return (
+            <g key={row.key}>
+              <title>{`${row.label}: ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}`}</title>
+              <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="5" />
+              <text className="revenue-line-value revenue-line-value--invoice" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
+              <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 async function getPmDashboardData(): Promise<PmDashboardData> {
   const period = getYearToDatePeriod();
 
@@ -325,13 +368,6 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
     );
     const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
     const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
-    const completedProjectRevenueSources = await optionalDataWithTimeout(
-      issues,
-      "omzet afgewerkte opdrachten",
-      emptyCompletedProjectRevenueSources(),
-      8_000,
-      () => fetchCompletedProjectRevenueSources(client, period)
-    );
     const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
       fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
     );
@@ -353,8 +389,7 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
         message: liveSourceMessage(issues)
       },
       employeeScope.excludedEmployeeCount,
-      scopedCalendarItems,
-      completedProjectRevenueSources
+      scopedCalendarItems
     );
   } catch (error) {
     return buildDemoPmDashboardData(period, {
@@ -381,8 +416,7 @@ function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
     period,
     source,
     employeeScope.excludedEmployeeCount,
-    scopedCalendarItems,
-    createDemoCompletedProjectRevenueSources(period)
+    scopedCalendarItems
   );
 }
 
@@ -398,42 +432,6 @@ async function optionalData<T>(issues: string[], label: string, fallback: T, loa
   try {
     return await loader();
   } catch (error) {
-    issues.push(`${label} niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
-    return fallback;
-  }
-}
-
-async function optionalDataWithTimeout<T>(issues: string[], label: string, fallback: T, timeoutMs: number, loader: () => Promise<T>) {
-  let settled = false;
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const loading = loader().catch((error) => {
-    if (settled) {
-      return fallback;
-    }
-
-    throw error;
-  });
-  const timeout = new Promise<T>((resolve) => {
-    timeoutId = setTimeout(() => {
-      if (!settled) {
-        issues.push(`${label} niet geladen (timeout na ${Math.round(timeoutMs / 1000)}s)`);
-        resolve(fallback);
-      }
-    }, timeoutMs);
-  });
-
-  try {
-    const result = await Promise.race([loading, timeout]);
-    settled = true;
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-    return result;
-  } catch (error) {
-    settled = true;
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
     issues.push(`${label} niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
     return fallback;
   }
@@ -458,13 +456,6 @@ function emptyBillabilitySources(): BillabilitySources {
   return {
     offerProjectLines: new Map<number, LineBillability>(),
     taskOfferProjectLineIds: new Map<number, number>()
-  };
-}
-
-function emptyCompletedProjectRevenueSources(): CompletedProjectRevenueSources {
-  return {
-    completedProjects: [],
-    projectTagNames: new Map<number, string>()
   };
 }
 
@@ -885,48 +876,6 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
   return { offerProjectLines, taskOfferProjectLineIds };
 }
 
-async function fetchCompletedProjectRevenueSources(client: GrippClient, period: Period): Promise<CompletedProjectRevenueSources> {
-  const completedProjects = await fetchCompletedProjectsForPeriod(client, period);
-  const projectTagNames = await fetchRelationNames(client, "tag", uniqueRelationIds(completedProjects, "tags"));
-
-  return {
-    completedProjects,
-    projectTagNames
-  };
-}
-
-async function fetchCompletedProjectsForPeriod(client: GrippClient, period: Period) {
-  return fetchPagedRecords(client, "project", [
-    { field: PROJECT_COMPLETED_DATE_FIELD, operator: "greaterequals", value: period.start },
-    { field: PROJECT_COMPLETED_DATE_FIELD, operator: "lessequals", value: period.end }
-  ], [{ field: PROJECT_COMPLETED_DATE_FIELD, direction: "asc" }], MAX_PROJECT_PAGES);
-}
-
-async function fetchRelationNames(client: GrippClient, entity: string, ids: number[]) {
-  const names = new Map<number, string>();
-
-  for (let index = 0; index < ids.length; index += 100) {
-    const idChunk = ids.slice(index, index + 100);
-    if (idChunk.length === 0) {
-      continue;
-    }
-
-    const records = await fetchPagedRecords(client, entity, [
-      { field: `${entity}.id`, operator: "in", value: idChunk }
-    ], [{ field: `${entity}.id`, direction: "asc" }], 1);
-
-    for (const record of records) {
-      const id = idFrom(readField(record, "id"));
-      const name = relationLabelFromValue(record);
-      if (id !== null && name) {
-        names.set(id, name);
-      }
-    }
-  }
-
-  return names;
-}
-
 async function fetchPagedRecords(
   client: GrippClient,
   entity: string,
@@ -963,24 +912,24 @@ function buildPmDashboardData(
   period: Period,
   source: DashboardSource,
   excludedEmployeeCount = 0,
-  calendarItems: JsonRecord[] = [],
-  completedProjectRevenueSources: CompletedProjectRevenueSources = emptyCompletedProjectRevenueSources()
+  calendarItems: JsonRecord[] = []
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
   let loggedHours = 0;
   let billableHours = 0;
   let hourCount = 0;
-  const completedProjectRevenue = calculateCompletedProjectRevenue(completedProjectRevenueSources, period);
+  const revenueByMonth = new Map<string, number>();
 
   for (const invoice of invoices) {
-    const revenueAmount = invoiceRevenueAmount(invoice, period);
-    if (revenueAmount === null) {
+    const revenueEntry = invoiceRevenueEntry(invoice, period);
+    if (!revenueEntry) {
       continue;
     }
 
-    revenue += revenueAmount;
+    revenue += revenueEntry.amount;
     invoiceCount += 1;
+    revenueByMonth.set(revenueEntry.monthKey, (revenueByMonth.get(revenueEntry.monthKey) ?? 0) + revenueEntry.amount);
   }
 
   for (const hour of hours) {
@@ -1007,7 +956,6 @@ function buildPmDashboardData(
     period,
     source,
     revenue,
-    completedProjectRevenue,
     loggedHours,
     billableHours,
     unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
@@ -1025,6 +973,10 @@ function buildPmDashboardData(
     excludedEmployeeCount,
     fallbackWorkingHoursEmployeeCount: capacity.fallbackWorkingHoursEmployeeCount,
     employeeBillability,
+    revenueByMonth: makeMonthBuckets(period).map((bucket) => ({
+      ...bucket,
+      revenue: revenueByMonth.get(bucket.key) ?? 0
+    })),
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       day: "2-digit",
       month: "2-digit",
@@ -1035,63 +987,12 @@ function buildPmDashboardData(
   };
 }
 
-function calculateCompletedProjectRevenue(
-  completedProjectRevenueSources: CompletedProjectRevenueSources,
-  period: Period
-) {
-  let revenue = 0;
-
-  for (const project of completedProjectRevenueSources.completedProjects) {
-    if (!hasProjectTag(project, completedProjectRevenueSources.projectTagNames) || !dateIsInPeriod(projectCompletedDate(project), period)) {
-      continue;
-    }
-
-    revenue += projectRevenueExclVat(project);
-  }
-
-  return revenue;
-}
-
-function projectCompletedDate(project: JsonRecord) {
-  // Gripp toont dit projectveld als "Afgerond op".
-  return dateKeyFromValue(readField(project, "enddate"));
-}
-
-function projectRevenueExclVat(project: JsonRecord) {
-  return Math.max(0, numberFrom(readField(project, "totalexclvat")) ?? totalFromEmbeddedLines(readField(project, "projectlines")));
-}
-
-function totalFromEmbeddedLines(value: unknown) {
-  return asRecords(value as JsonValue).reduce((total, line) => total + lineRevenueExclVat(line), 0);
-}
-
-function lineRevenueExclVat(line: JsonRecord) {
-  const amount = Math.max(0, numberFrom(readField(line, "amount")) ?? 0);
-  const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
-  return amount * sellingPrice * discountMultiplier(numberFrom(readField(line, "discount")) ?? 0);
-}
-
-function discountMultiplier(discount: number) {
-  return 1 - Math.max(0, Math.min(100, discount)) / 100;
-}
-
 function lineBillabilityFromRecord(line: JsonRecord): LineBillability {
   const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
 
   return {
     hasPositiveUnitPrice: sellingPrice > 0
   };
-}
-
-function hasProjectTag(project: JsonRecord, tagNames: Map<number, string>) {
-  const tags = readField(project, "tags");
-  const tagValues = Array.isArray(tags) ? tags : [tags];
-
-  return tagValues.some((tag) => {
-    const tagId = idFrom(tag);
-    const tagName = relationLabelFromValue(tag) ?? (tagId === null ? undefined : tagNames.get(tagId));
-    return normalizeComparisonValue(tagName ?? "") === "project";
-  });
 }
 
 function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources) {
@@ -1111,17 +1012,19 @@ function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources
   return offerProjectLine?.hasPositiveUnitPrice === true;
 }
 
-function invoiceRevenueAmount(invoice: JsonRecord, period: Period) {
+function invoiceRevenueEntry(invoice: JsonRecord, period: Period) {
   if (stringFrom(readField(invoice, "status"))?.toUpperCase() === "CONCEPT") {
     return null;
   }
 
   const reportDate = dateKeyFromValue(readField(invoice, "reportdate"));
-  if (!dateIsInPeriod(reportDate, period)) {
+  const monthKey = monthKeyForDateInPeriod(reportDate, period);
+  if (!monthKey) {
     return null;
   }
 
-  return numberFrom(readField(invoice, "totalincldiscountexclvat"));
+  const amount = numberFrom(readField(invoice, "totalincldiscountexclvat"));
+  return amount === null ? null : { amount, monthKey };
 }
 
 function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: JsonRecord[], period: Period): EmployeeCapacityRow[] {
@@ -1608,20 +1511,22 @@ function currentDateKey() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-function makeMonthBuckets(period: Period): MonthBucket[] {
+function makeMonthBuckets(period: Period): MonthRevenue[] {
   const start = parseDateKey(period.start);
   const end = parseDateKey(period.end);
   if (!start || !end) {
     return [];
   }
 
-  const buckets: MonthBucket[] = [];
+  const buckets: MonthRevenue[] = [];
   const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
   const stop = new Date(end.getFullYear(), end.getMonth(), 1);
 
   while (cursor <= stop) {
     buckets.push({
-      key: monthKey(cursor)
+      key: monthKey(cursor),
+      label: new Intl.DateTimeFormat("nl-NL", { month: "short", year: "numeric" }).format(cursor),
+      revenue: 0
     });
     cursor.setMonth(cursor.getMonth() + 1);
   }
@@ -1629,16 +1534,16 @@ function makeMonthBuckets(period: Period): MonthBucket[] {
   return buckets;
 }
 
-function dateIsInPeriod(value: unknown, period: Period) {
+function monthKeyForDateInPeriod(value: unknown, period: Period) {
   const normalizedValue = dateKeyFromValue(value);
   const date = normalizedValue ? parseDateKey(normalizedValue) : null;
   const periodStart = parseDateKey(period.start);
   const periodEnd = parseDateKey(period.end);
   if (!date || !periodStart || !periodEnd || date < periodStart || date > periodEnd) {
-    return false;
+    return null;
   }
 
-  return true;
+  return monthKey(date);
 }
 
 function uniqueRelationIds(records: JsonRecord[], field: string) {
@@ -1659,22 +1564,6 @@ function relationIds(record: JsonRecord, field: string) {
 
   const id = relationId(record, field);
   return id === null ? [] : [id];
-}
-
-function relationLabelFromValue(value: unknown) {
-  const record = asRecord(value);
-  if (record) {
-    return (
-      stringFrom(record.name) ??
-      stringFrom(record.displayvalue) ??
-      stringFrom(record.displayValue) ??
-      stringFrom(record.label) ??
-      stringFrom(record.searchname) ??
-      stringFrom(record.screenname)
-    );
-  }
-
-  return idFrom(value) === null ? stringFrom(value) : undefined;
 }
 
 function asRecords(value: JsonValue): JsonRecord[] {
@@ -2070,22 +1959,6 @@ function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
   }
 
   return { offerProjectLines, taskOfferProjectLineIds };
-}
-
-function createDemoCompletedProjectRevenueSources(period: Period): CompletedProjectRevenueSources {
-  const projectTagId = 5001;
-  const completedProjects = makeMonthBuckets(period)
-    .filter((_, index) => index % 3 === 1)
-    .map((bucket, index) => ({
-      id: 10_000 + index,
-      enddate: `${bucket.key}-22`,
-      totalexclvat: 9_500 + index * 1_400,
-      tags: [projectTagId]
-    }));
-  return {
-    completedProjects,
-    projectTagNames: new Map([[projectTagId, "Project"]])
-  };
 }
 
 function createDemoInvoices(period: Period): JsonRecord[] {

@@ -663,6 +663,77 @@ select {
   background: var(--blue);
 }
 
+.revenue-line-chart {
+  overflow-x: auto;
+  padding: 10px 0 2px;
+}
+
+.revenue-line-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.revenue-line-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.revenue-line-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--blue);
+}
+
+.revenue-line-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 640px;
+  height: auto;
+}
+
+.revenue-line-grid,
+.revenue-line-axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.revenue-line-axis {
+  stroke: var(--muted);
+}
+
+.revenue-line-path {
+  fill: none;
+  stroke: var(--blue);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.revenue-line-point {
+  fill: var(--surface);
+  stroke: var(--blue);
+  stroke-width: 3;
+}
+
+.revenue-line-value {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.revenue-line-label {
+  fill: var(--muted);
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
