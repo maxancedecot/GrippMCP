@@ -9,6 +9,8 @@
   --good-soft: #dff3ec;
   --blue: #2858c7;
   --blue-soft: #e5ecff;
+  --billable: #c23b5b;
+  --billable-soft: #fde8ee;
   --warning: #b26a00;
   --warning-soft: #fff1d7;
   --overtime: #8a3ffc;
@@ -451,6 +453,26 @@ select {
   font-weight: 700;
 }
 
+.panel-total--invoice,
+.panel-total--billable {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.panel-total--invoice::before,
+.panel-total--billable::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--blue);
+}
+
+.panel-total--billable::before {
+  background: var(--billable);
+}
+
 .panel-heading--revenue {
   align-items: center;
 }
@@ -646,6 +668,33 @@ select {
   padding: 10px 0 2px;
 }
 
+.revenue-line-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.revenue-line-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.revenue-line-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--blue);
+}
+
+.revenue-line-legend-dot--billable {
+  background: var(--billable);
+}
+
 .revenue-line-chart svg {
   display: block;
   width: 100%;
@@ -671,10 +720,26 @@ select {
   stroke-width: 3;
 }
 
+.revenue-line-path--invoice {
+  stroke: var(--blue);
+}
+
+.revenue-line-path--billable {
+  stroke: var(--billable);
+}
+
 .revenue-line-point {
   fill: var(--surface);
   stroke: var(--blue);
   stroke-width: 3;
+}
+
+.revenue-line-point--invoice {
+  stroke: var(--blue);
+}
+
+.revenue-line-point--billable {
+  stroke: var(--billable);
 }
 
 .revenue-line-value {

@@ -26,6 +26,10 @@ type DashboardSource = {
 
 type LineBillability = {
   hasPositiveUnitPrice: boolean;
+  invoiceBasis?: string;
+  sellingPrice: number;
+  discount: number;
+  contractLineId: number | null;
 };
 
 type BillabilitySources = {
@@ -87,12 +91,21 @@ type MonthRevenue = {
   key: string;
   label: string;
   revenue: number;
+  billableRevenue: number;
+};
+
+type BillableRevenueSources = {
+  completedProjects: JsonRecord[];
+  projectTagNames: Map<number, string>;
+  contracts: JsonRecord[];
+  contractLines: JsonRecord[];
 };
 
 type PmDashboardData = {
   period: Period;
   source: DashboardSource;
   revenue: number;
+  billableRevenue: number;
   loggedHours: number;
   billableHours: number;
   unbillableLoggedHours: number;
@@ -120,6 +133,9 @@ const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
+const MAX_PROJECT_PAGES = 80;
+const MAX_CONTRACT_PAGES = 80;
+const MAX_CONTRACT_LINE_PAGES = 80;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
@@ -241,7 +257,10 @@ export default async function PmDashboardPage() {
             <p className="eyebrow">Omzet</p>
             <h2>Per maand</h2>
           </div>
-          <span className="panel-total">{formatCurrency(dashboard.revenue)}</span>
+          <div className="panel-actions">
+            <span className="panel-total panel-total--invoice">Verkoopfacturen {formatCurrency(dashboard.revenue)}</span>
+            <span className="panel-total panel-total--billable">Factureerbaar {formatCurrency(dashboard.billableRevenue)}</span>
+          </div>
         </div>
 
         <RevenueLineChart rows={dashboard.revenueByMonth} />
@@ -293,34 +312,43 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
   const padding = { top: 42, right: 56, bottom: 62, left: 56 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const maximum = Math.max(0, ...rows.map((row) => row.revenue));
-  const minimum = Math.min(0, ...rows.map((row) => row.revenue));
+  const values = rows.flatMap((row) => [row.revenue, row.billableRevenue]);
+  const maximum = Math.max(0, ...values);
+  const minimum = Math.min(0, ...values);
   const range = Math.max(1, maximum - minimum);
   const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
   const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
-  const points = rows.map((row, index) => `${xFor(index)},${yFor(row.revenue)}`).join(" ");
+  const invoicePoints = rows.map((row, index) => `${xFor(index)},${yFor(row.revenue)}`).join(" ");
+  const billablePoints = rows.map((row, index) => `${xFor(index)},${yFor(row.billableRevenue)}`).join(" ");
   const zeroY = yFor(0);
 
   return (
     <div className="revenue-line-chart">
+      <div className="revenue-line-legend" aria-hidden="true">
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />Verkoopfacturen</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--billable" />Factureerbaar</span>
+      </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} ${formatCurrency(row.revenue)}`).join(", ")}`}
+        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} verkoopfacturen ${formatCurrency(row.revenue)}, factureerbaar ${formatCurrency(row.billableRevenue)}`).join(", ")}`}
       >
         <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
         <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
-        {rows.length > 1 ? <polyline className="revenue-line-path" points={points} /> : null}
+        {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--invoice" points={invoicePoints} /> : null}
+        {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--billable" points={billablePoints} /> : null}
         {rows.map((row, index) => {
           const x = xFor(index);
-          const y = yFor(row.revenue);
+          const invoiceY = yFor(row.revenue);
+          const billableY = yFor(row.billableRevenue);
           const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
-          const valueY = y < padding.top + 24 ? y + 22 : y - 12;
+          const valueY = invoiceY < padding.top + 24 ? invoiceY + 22 : invoiceY - 12;
 
           return (
             <g key={row.key}>
-              <title>{`${row.label}: ${formatCurrency(row.revenue)}`}</title>
-              <circle className="revenue-line-point" cx={x} cy={y} r="5" />
+              <title>{`${row.label}: verkoopfacturen ${formatCurrency(row.revenue)}, factureerbaar ${formatCurrency(row.billableRevenue)}`}</title>
+              <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="5" />
+              <circle className="revenue-line-point revenue-line-point--billable" cx={x} cy={billableY} r="5" />
               <text className="revenue-line-value" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
               <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
             </g>
@@ -361,6 +389,10 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
     );
     const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
     const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
+    const [assignedRegieBillabilitySources, billableRevenueSources] = await Promise.all([
+      optionalDataWithTimeout(issues, "regieplanning", emptyBillabilitySources(), 8_000, () => fetchBillabilitySources(client, scopedCalendarItems)),
+      optionalDataWithTimeout(issues, "factureerbare omzet", emptyBillableRevenueSources(), 8_000, () => fetchBillableRevenueSources(client, period))
+    ]);
     const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
       fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
     );
@@ -382,7 +414,9 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
         message: liveSourceMessage(issues)
       },
       employeeScope.excludedEmployeeCount,
-      scopedCalendarItems
+      scopedCalendarItems,
+      billableRevenueSources,
+      assignedRegieBillabilitySources
     );
   } catch (error) {
     return buildDemoPmDashboardData(period, {
@@ -399,16 +433,20 @@ function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
   const scopedHours = hoursForEmployeeScope(demoHours, employeeScope);
   const scopedCalendarItems = calendarItemsForEmployeeScope(createDemoCalendarItems(period), employeeScope);
   const scopedCapacitySources = capacitySourcesForEmployeeScope(capacitySources, employeeScope);
+  const billabilitySources = createDemoBillabilitySources(scopedHours);
+  const assignedRegieBillabilitySources = createDemoBillabilitySources(scopedCalendarItems);
 
   return buildPmDashboardData(
     createDemoInvoices(period),
     scopedHours,
-    createDemoBillabilitySources(scopedHours),
+    billabilitySources,
     scopedCapacitySources,
     period,
     source,
     employeeScope.excludedEmployeeCount,
-    scopedCalendarItems
+    scopedCalendarItems,
+    createDemoBillableRevenueSources(period),
+    assignedRegieBillabilitySources
   );
 }
 
@@ -429,6 +467,42 @@ async function optionalData<T>(issues: string[], label: string, fallback: T, loa
   }
 }
 
+async function optionalDataWithTimeout<T>(issues: string[], label: string, fallback: T, timeoutMs: number, loader: () => Promise<T>) {
+  let settled = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const loading = loader().catch((error) => {
+    if (settled) {
+      return fallback;
+    }
+
+    throw error;
+  });
+  const timeout = new Promise<T>((resolve) => {
+    timeoutId = setTimeout(() => {
+      if (!settled) {
+        issues.push(`${label} niet geladen (timeout na ${Math.round(timeoutMs / 1000)}s)`);
+        resolve(fallback);
+      }
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([loading, timeout]);
+    settled = true;
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    return result;
+  } catch (error) {
+    settled = true;
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    issues.push(`${label} niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
+    return fallback;
+  }
+}
+
 function liveSourceMessage(issues: string[]) {
   if (issues.length === 0) {
     return "";
@@ -441,6 +515,22 @@ function emptyWorkingHoursCapacity(): WorkingHoursCapacity {
   return {
     workingHoursByEmployeeId: new Map<number, number>(),
     leaveHoursByEmployeeId: new Map<number, number>()
+  };
+}
+
+function emptyBillabilitySources(): BillabilitySources {
+  return {
+    offerProjectLines: new Map<number, LineBillability>(),
+    taskOfferProjectLineIds: new Map<number, number>()
+  };
+}
+
+function emptyBillableRevenueSources(): BillableRevenueSources {
+  return {
+    completedProjects: [],
+    projectTagNames: new Map<number, string>(),
+    contracts: [],
+    contractLines: []
   };
 }
 
@@ -850,9 +940,7 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
       for (const offerProjectLine of asRecords(result)) {
         const id = idFrom(readField(offerProjectLine, "id"));
         if (id !== null) {
-          offerProjectLines.set(id, {
-            hasPositiveUnitPrice: lineHasPositiveUnitPrice(offerProjectLine)
-          });
+          offerProjectLines.set(id, lineBillabilityFromRecord(offerProjectLine));
         }
       }
     }
@@ -863,6 +951,137 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
   return { offerProjectLines, taskOfferProjectLineIds };
 }
 
+async function fetchBillableRevenueSources(client: GrippClient, period: Period): Promise<BillableRevenueSources> {
+  const [completedProjects, contracts] = await Promise.all([
+    fetchCompletedProjectsForPeriod(client, period),
+    fetchContractsUntilPeriodEnd(client, period)
+  ]);
+  const [projectTagNames, contractLines] = await Promise.all([
+    fetchRelationNames(client, "tag", uniqueRelationIds(completedProjects, "tags")),
+    fetchContractLinesForContracts(client, recordIds(contracts))
+  ]);
+
+  return {
+    completedProjects,
+    projectTagNames,
+    contracts,
+    contractLines
+  };
+}
+
+async function fetchCompletedProjectsForPeriod(client: GrippClient, period: Period) {
+  return fetchPagedRecords(client, "project", [
+    { field: "project.enddate", operator: "greaterequals", value: period.start },
+    { field: "project.enddate", operator: "lessequals", value: period.end }
+  ], [{ field: "project.enddate", direction: "asc" }], MAX_PROJECT_PAGES);
+}
+
+async function fetchContractsUntilPeriodEnd(client: GrippClient, period: Period) {
+  const [activeContracts, endingContracts, endedContracts] = await Promise.all([
+    fetchPagedRecords(client, "contract", [
+      { field: "contract.date", operator: "lessequals", value: period.end },
+      { field: "contract.status", operator: "equals", value: "ACTIVE" }
+    ], [{ field: "contract.date", direction: "asc" }], MAX_CONTRACT_PAGES),
+    fetchPagedRecords(client, "contract", [
+      { field: "contract.date", operator: "lessequals", value: period.end },
+      { field: "contract.status", operator: "equals", value: "ENDING" }
+    ], [{ field: "contract.date", direction: "asc" }], MAX_CONTRACT_PAGES),
+    fetchPagedRecords(client, "contract", [
+      { field: "contract.date", operator: "lessequals", value: period.end },
+      { field: "contract.expirydate", operator: "greaterequals", value: period.start },
+      { field: "contract.status", operator: "equals", value: "ENDED" }
+    ], [{ field: "contract.date", direction: "asc" }], MAX_CONTRACT_PAGES)
+  ]);
+
+  return uniqueRecordsById([...activeContracts, ...endingContracts, ...endedContracts]);
+}
+
+async function fetchContractLinesForContracts(client: GrippClient, contractIds: number[]) {
+  const records: JsonRecord[] = [];
+
+  for (let index = 0; index < contractIds.length; index += 100) {
+    const idChunk = contractIds.slice(index, index + 100);
+    if (idChunk.length === 0) {
+      continue;
+    }
+
+    records.push(...await fetchPagedRecords(client, "contractline", [
+      { field: "contractline.contract", operator: "in", value: idChunk }
+    ], [{ field: "contractline.id", direction: "asc" }], MAX_CONTRACT_LINE_PAGES));
+  }
+
+  return records;
+}
+
+async function fetchRelationNames(client: GrippClient, entity: string, ids: number[]) {
+  const names = new Map<number, string>();
+
+  for (let index = 0; index < ids.length; index += 100) {
+    const idChunk = ids.slice(index, index + 100);
+    if (idChunk.length === 0) {
+      continue;
+    }
+
+    const records = await fetchPagedRecords(client, entity, [
+      { field: `${entity}.id`, operator: "in", value: idChunk }
+    ], [{ field: `${entity}.id`, direction: "asc" }], 1);
+
+    for (const record of records) {
+      const id = idFrom(readField(record, "id"));
+      const name = relationLabelFromValue(record);
+      if (id !== null && name) {
+        names.set(id, name);
+      }
+    }
+  }
+
+  return names;
+}
+
+async function fetchPagedRecords(
+  client: GrippClient,
+  entity: string,
+  filters: JsonValue[],
+  orderings: JsonValue[],
+  maxPages: number
+) {
+  const records: JsonRecord[] = [];
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await client.call(`${entity}.get`, [
+      filters,
+      {
+        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
+        orderings
+      }
+    ] as JsonValue[]);
+    const pageRecords = asRecords(result);
+    records.push(...pageRecords);
+
+    if (pageRecords.length < PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return records;
+}
+
+function uniqueRecordsById(records: JsonRecord[]) {
+  const recordsById = new Map<number, JsonRecord>();
+  const recordsWithoutId: JsonRecord[] = [];
+
+  for (const record of records) {
+    const id = idFrom(readField(record, "id"));
+    if (id === null) {
+      recordsWithoutId.push(record);
+    } else {
+      recordsById.set(id, record);
+    }
+  }
+
+  return [...recordsById.values(), ...recordsWithoutId];
+}
+
 function buildPmDashboardData(
   invoices: JsonRecord[],
   hours: JsonRecord[],
@@ -871,7 +1090,9 @@ function buildPmDashboardData(
   period: Period,
   source: DashboardSource,
   excludedEmployeeCount = 0,
-  calendarItems: JsonRecord[] = []
+  calendarItems: JsonRecord[] = [],
+  billableRevenueSources: BillableRevenueSources = emptyBillableRevenueSources(),
+  assignedRegieBillabilitySources: BillabilitySources = billabilitySources
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
@@ -879,6 +1100,8 @@ function buildPmDashboardData(
   let billableHours = 0;
   let hourCount = 0;
   const revenueByMonth = new Map<string, number>();
+  const billableRevenueByMonth = buildBillableRevenueByMonth(calendarItems, assignedRegieBillabilitySources, billableRevenueSources, period);
+  const billableRevenue = Array.from(billableRevenueByMonth.values()).reduce((total, amount) => total + amount, 0);
 
   for (const invoice of invoices) {
     const revenueEntry = invoiceRevenueEntry(invoice, period);
@@ -915,6 +1138,7 @@ function buildPmDashboardData(
     period,
     source,
     revenue,
+    billableRevenue,
     loggedHours,
     billableHours,
     unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
@@ -934,7 +1158,8 @@ function buildPmDashboardData(
     employeeBillability,
     revenueByMonth: makeMonthBuckets(period).map((bucket) => ({
       ...bucket,
-      revenue: revenueByMonth.get(bucket.key) ?? 0
+      revenue: revenueByMonth.get(bucket.key) ?? 0,
+      billableRevenue: billableRevenueByMonth.get(bucket.key) ?? 0
     })),
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       day: "2-digit",
@@ -944,6 +1169,228 @@ function buildPmDashboardData(
       minute: "2-digit"
     }).format(new Date())
   };
+}
+
+function buildBillableRevenueByMonth(
+  calendarItems: JsonRecord[],
+  billabilitySources: BillabilitySources,
+  billableRevenueSources: BillableRevenueSources,
+  period: Period
+) {
+  const revenueByMonth = new Map<string, number>();
+
+  addCompletedProjectRevenue(revenueByMonth, billableRevenueSources.completedProjects, billableRevenueSources.projectTagNames, period);
+  addAssignedCostingRevenue(revenueByMonth, calendarItems, billabilitySources, period);
+  addContractRevenue(revenueByMonth, billableRevenueSources.contracts, billableRevenueSources.contractLines, period);
+
+  return revenueByMonth;
+}
+
+function addCompletedProjectRevenue(revenueByMonth: Map<string, number>, projects: JsonRecord[], tagNames: Map<number, string>, period: Period) {
+  for (const project of projects) {
+    if (!hasProjectTag(project, tagNames)) {
+      continue;
+    }
+
+    const completedDate = dateKeyFromValue(readField(project, "enddate"));
+    addMonthlyRevenue(revenueByMonth, completedDate, projectRevenueExclVat(project), period);
+  }
+}
+
+function addAssignedCostingRevenue(
+  revenueByMonth: Map<string, number>,
+  calendarItems: JsonRecord[],
+  billabilitySources: BillabilitySources,
+  period: Period
+) {
+  for (const calendarItem of calendarItems) {
+    const line = offerProjectLineForRecord(calendarItem, billabilitySources);
+    const hours = Math.max(0, numberFrom(readField(calendarItem, "hours")) ?? 0);
+
+    if (hours === 0 || !line || line.invoiceBasis !== "COSTING" || line.contractLineId !== null) {
+      continue;
+    }
+
+    addMonthlyRevenue(revenueByMonth, readField(calendarItem, "date"), hours * line.sellingPrice * discountMultiplier(line.discount), period);
+  }
+}
+
+function addContractRevenue(revenueByMonth: Map<string, number>, contracts: JsonRecord[], contractLines: JsonRecord[], period: Period) {
+  const contractsById = new Map<number, JsonRecord>();
+  for (const contract of contracts) {
+    const id = idFrom(readField(contract, "id"));
+    if (id !== null) {
+      contractsById.set(id, contract);
+    }
+  }
+
+  for (const line of contractLines) {
+    const contractId = relationId(line, "contract");
+    const contract = contractId === null ? undefined : contractsById.get(contractId);
+    const invoiceBasis = stringFrom(readField(line, "invoicebasis"))?.toUpperCase();
+
+    if (!contract || invoiceBasis === "NONBILLABLE") {
+      continue;
+    }
+
+    for (const occurrenceDate of contractOccurrenceDates(contract, line, period)) {
+      addMonthlyRevenue(revenueByMonth, occurrenceDate, lineRevenueExclVat(line), period);
+    }
+  }
+}
+
+function addMonthlyRevenue(revenueByMonth: Map<string, number>, dateValue: unknown, amount: number, period: Period) {
+  const monthKey = monthKeyForDateInPeriod(dateValue, period);
+  if (!monthKey || amount === 0) {
+    return;
+  }
+
+  revenueByMonth.set(monthKey, (revenueByMonth.get(monthKey) ?? 0) + amount);
+}
+
+function projectRevenueExclVat(project: JsonRecord) {
+  return Math.max(0, numberFrom(readField(project, "totalexclvat")) ?? totalFromEmbeddedLines(readField(project, "projectlines")));
+}
+
+function totalFromEmbeddedLines(value: unknown) {
+  return asRecords(value as JsonValue).reduce((total, line) => total + lineRevenueExclVat(line), 0);
+}
+
+function lineRevenueExclVat(line: JsonRecord) {
+  const amount = Math.max(0, numberFrom(readField(line, "amount")) ?? 0);
+  const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
+  return amount * sellingPrice * discountMultiplier(numberFrom(readField(line, "discount")) ?? 0);
+}
+
+function discountMultiplier(discount: number) {
+  return 1 - Math.max(0, Math.min(100, discount)) / 100;
+}
+
+function offerProjectLineForRecord(record: JsonRecord, billabilitySources: BillabilitySources) {
+  const directOfferProjectLineId = relationId(record, "offerprojectline");
+  if (directOfferProjectLineId !== null) {
+    return billabilitySources.offerProjectLines.get(directOfferProjectLineId);
+  }
+
+  const taskId = relationId(record, "task");
+  const offerProjectLineId = taskId === null ? undefined : billabilitySources.taskOfferProjectLineIds.get(taskId);
+  return offerProjectLineId === undefined ? undefined : billabilitySources.offerProjectLines.get(offerProjectLineId);
+}
+
+function lineBillabilityFromRecord(line: JsonRecord): LineBillability {
+  const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
+
+  return {
+    hasPositiveUnitPrice: sellingPrice > 0,
+    invoiceBasis: stringFrom(readField(line, "invoicebasis"))?.toUpperCase(),
+    sellingPrice,
+    discount: numberFrom(readField(line, "discount")) ?? 0,
+    contractLineId: relationId(line, "contractline")
+  };
+}
+
+function hasProjectTag(project: JsonRecord, tagNames: Map<number, string>) {
+  const tags = readField(project, "tags");
+  const tagValues = Array.isArray(tags) ? tags : [tags];
+
+  return tagValues.some((tag) => {
+    const tagId = idFrom(tag);
+    const tagName = relationLabelFromValue(tag) ?? (tagId === null ? undefined : tagNames.get(tagId));
+    return normalizeComparisonValue(tagName ?? "") === "project";
+  });
+}
+
+function contractOccurrenceDates(contract: JsonRecord, line: JsonRecord, period: Period) {
+  const contractStart = dateKeyFromValue(readField(contract, "date_original")) ?? dateKeyFromValue(readField(contract, "date"));
+  const lineStart = dateKeyFromValue(readField(line, "startdate"));
+  const start = maxOptionalDateKey(contractStart, lineStart);
+  const contractEnd = dateKeyFromValue(readField(contract, "expirydate"));
+  const lineEnd = dateKeyFromValue(readField(line, "enddate"));
+  const stop = minOptionalDateKey(period.end, contractEnd, lineEnd) ?? period.end;
+  const interval = contractFrequencyInterval(stringFrom(readField(contract, "frequency")));
+  const status = stringFrom(readField(contract, "status"))?.toUpperCase();
+  const sendMaxTimes = booleanFrom(readField(contract, "sendmaxtimescheckbox")) === true
+    ? Math.max(0, Math.floor(numberFrom(readField(contract, "sendmaxtimes")) ?? 0))
+    : null;
+
+  if (!start || start > stop || !interval || (status === "ENDED" && !contractEnd)) {
+    return [];
+  }
+
+  const startDate = parseDateKey(start);
+  if (!startDate) {
+    return [];
+  }
+
+  const dates: string[] = [];
+  for (let occurrenceIndex = 0; occurrenceIndex < 1_000; occurrenceIndex += 1) {
+    if (sendMaxTimes !== null && occurrenceIndex >= sendMaxTimes) {
+      break;
+    }
+
+    const occurrenceDate = contractOccurrenceDate(startDate, interval, occurrenceIndex);
+    const occurrenceKey = dateKey(occurrenceDate);
+    if (occurrenceKey > stop) {
+      break;
+    }
+
+    if (occurrenceKey >= period.start) {
+      dates.push(occurrenceKey);
+    }
+  }
+
+  return dates;
+}
+
+function contractFrequencyInterval(frequency: string | undefined): { unit: "month" | "day"; amount: number } | null {
+  switch (frequency?.toUpperCase()) {
+    case "EVERYWEEK":
+      return { unit: "day", amount: 7 };
+    case "EVERYTWOWEEKS":
+      return { unit: "day", amount: 14 };
+    case "EVERYTHREEWEEKS":
+      return { unit: "day", amount: 21 };
+    case "EVERYFOURWEEKS":
+      return { unit: "day", amount: 28 };
+    case "EVERY2MONTHS":
+      return { unit: "month", amount: 2 };
+    case "EVERYQUARTER":
+      return { unit: "month", amount: 3 };
+    case "EVERY4MONTHS":
+      return { unit: "month", amount: 4 };
+    case "EVERY6MONTHS":
+      return { unit: "month", amount: 6 };
+    case "EVERYYEAR":
+      return { unit: "month", amount: 12 };
+    case "EVERY18MONTHS":
+      return { unit: "month", amount: 18 };
+    case "EVERYTWOYEARS":
+      return { unit: "month", amount: 24 };
+    case "EVERYTHREEYEARS":
+      return { unit: "month", amount: 36 };
+    case "EVERYFOURYEARS":
+      return { unit: "month", amount: 48 };
+    case "EVERYFIVEYEARS":
+      return { unit: "month", amount: 60 };
+    case "EVERYMONTH":
+      return { unit: "month", amount: 1 };
+    default:
+      return frequency ? null : { unit: "month", amount: 1 };
+  }
+}
+
+function contractOccurrenceDate(start: Date, interval: { unit: "month" | "day"; amount: number }, occurrenceIndex: number) {
+  if (interval.unit === "day") {
+    const date = new Date(start);
+    date.setDate(date.getDate() + interval.amount * occurrenceIndex);
+    return date;
+  }
+
+  const monthOffset = interval.amount * occurrenceIndex;
+  const date = new Date(start.getFullYear(), start.getMonth() + monthOffset, 1);
+  const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  date.setDate(Math.min(start.getDate(), monthEnd));
+  return date;
 }
 
 function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources) {
@@ -961,11 +1408,6 @@ function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources
   const offerProjectLineId = taskId === null ? undefined : billabilitySources.taskOfferProjectLineIds.get(taskId);
   const offerProjectLine = offerProjectLineId === undefined ? undefined : billabilitySources.offerProjectLines.get(offerProjectLineId);
   return offerProjectLine?.hasPositiveUnitPrice === true;
-}
-
-function lineHasPositiveUnitPrice(line: JsonRecord) {
-  const sellingPrice = numberFrom(readField(line, "sellingprice"));
-  return sellingPrice !== null && sellingPrice > 0;
 }
 
 function invoiceRevenueEntry(invoice: JsonRecord, period: Period) {
@@ -1482,7 +1924,8 @@ function makeMonthBuckets(period: Period): MonthRevenue[] {
     buckets.push({
       key: monthKey(cursor),
       label: new Intl.DateTimeFormat("nl-NL", { month: "short", year: "numeric" }).format(cursor),
-      revenue: 0
+      revenue: 0,
+      billableRevenue: 0
     });
     cursor.setMonth(cursor.getMonth() + 1);
   }
@@ -1506,10 +1949,40 @@ function uniqueRelationIds(records: JsonRecord[], field: string) {
   return Array.from(
     new Set(
       records
-        .map((record) => relationId(record, field))
+        .flatMap((record) => relationIds(record, field))
         .filter((id): id is number => id !== null)
     )
   );
+}
+
+function relationIds(record: JsonRecord, field: string) {
+  const relation = readField(record, field);
+  if (Array.isArray(relation)) {
+    return relation.map(idFrom).filter((id): id is number => id !== null);
+  }
+
+  const id = relationId(record, field);
+  return id === null ? [] : [id];
+}
+
+function recordIds(records: JsonRecord[]) {
+  return records.map((record) => idFrom(readField(record, "id"))).filter((id): id is number => id !== null);
+}
+
+function relationLabelFromValue(value: unknown) {
+  const record = asRecord(value);
+  if (record) {
+    return (
+      stringFrom(record.name) ??
+      stringFrom(record.displayvalue) ??
+      stringFrom(record.displayValue) ??
+      stringFrom(record.label) ??
+      stringFrom(record.searchname) ??
+      stringFrom(record.screenname)
+    );
+  }
+
+  return idFrom(value) === null ? stringFrom(value) : undefined;
 }
 
 function asRecords(value: JsonValue): JsonRecord[] {
@@ -1545,8 +2018,13 @@ function readField(record: JsonRecord | undefined, field: string) {
     record[field] ??
     record[`hour.${field}`] ??
     record[`invoice.${field}`] ??
+    record[`project.${field}`] ??
     record[`offerprojectline.${field}`] ??
+    record[`contract.${field}`] ??
+    record[`contractline.${field}`] ??
     record[`invoiceline.${field}`] ??
+    record[`task.${field}`] ??
+    record[`tag.${field}`] ??
     record[`employee.${field}`] ??
     record[`employmentcontract.${field}`] ??
     record[`absencerequestline.${field}`] ??
@@ -1567,6 +2045,12 @@ function relationId(record: JsonRecord, field: string) {
     idFrom(record[`${field}.id`]) ??
     idFrom(record[`hour.${field}.id`]) ??
     idFrom(record[`invoice.${field}.id`]) ??
+    idFrom(record[`project.${field}.id`]) ??
+    idFrom(record[`offerprojectline.${field}.id`]) ??
+    idFrom(record[`contract.${field}.id`]) ??
+    idFrom(record[`contractline.${field}.id`]) ??
+    idFrom(record[`task.${field}.id`]) ??
+    idFrom(record[`tag.${field}.id`]) ??
     idFrom(record[`employee.${field}.id`]) ??
     idFrom(record[`employmentcontract.${field}.id`]) ??
     idFrom(record[`absencerequestline.${field}.id`]) ??
@@ -1661,9 +2145,24 @@ function scalarFrom(value: unknown): unknown {
 }
 
 function looksLikeEntity(record: JsonRecord) {
-  return ["id", "amount", "hours", "date", "reportdate", "searchname", "offerprojectline", "calendaritememployee", "totalincldiscountexclvat", "employee", "startdate"].some(
-    (field) => readField(record, field) !== undefined
-  );
+  return [
+    "id",
+    "amount",
+    "hours",
+    "date",
+    "reportdate",
+    "enddate",
+    "searchname",
+    "offerprojectline",
+    "calendaritememployee",
+    "totalincldiscountexclvat",
+    "totalexclvat",
+    "employee",
+    "startdate",
+    "contract",
+    "frequency",
+    "invoicebasis"
+  ].some((field) => readField(record, field) !== undefined);
 }
 
 function dateKeyFromValue(value: unknown): string | undefined {
@@ -1757,6 +2256,16 @@ function datesInRange(start: string, end: string) {
 
 function maxDateKey(left: string, right: string) {
   return left > right ? left : right;
+}
+
+function minOptionalDateKey(...values: Array<string | undefined>) {
+  const dates = values.filter((value): value is string => isDateKey(value)).sort();
+  return dates[0];
+}
+
+function maxOptionalDateKey(...values: Array<string | undefined>) {
+  const dates = values.filter((value): value is string => isDateKey(value)).sort();
+  return dates[dates.length - 1];
 }
 
 function normalizeNumberString(value: string) {
@@ -1853,7 +2362,7 @@ function createDemoCalendarItems(period: Period): JsonRecord[] {
     const month = bucket.key;
     return [
       { id: index * 3 + 7000, date: `${month}-06`, hours: 6 + (index % 3), calendaritememployee: 1, task: null },
-      { id: index * 3 + 7001, date: `${month}-13`, hours: 4, calendaritememployee: 2, task: 8000 + index },
+      { id: index * 3 + 7001, date: `${month}-13`, hours: 4, calendaritememployee: 2, task: 8000 + index, offerprojectline: 3000 + index },
       { id: index * 3 + 7002, date: `${month}-20`, hours: 3, calendaritememployee: 4, task: null }
     ];
   });
@@ -1864,8 +2373,14 @@ function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
   const taskOfferProjectLineIds = new Map<number, number>();
 
   uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
+    const isAssignedRegieLine = id >= 3000;
+    const sellingPrice = isAssignedRegieLine ? 95 + (index % 4) * 10 : index % 5 === 4 ? 0 : 110;
     offerProjectLines.set(id, {
-      hasPositiveUnitPrice: index % 5 !== 4
+      hasPositiveUnitPrice: sellingPrice > 0,
+      invoiceBasis: isAssignedRegieLine ? "COSTING" : index % 5 === 4 ? "NONBILLABLE" : "FIXED",
+      sellingPrice,
+      discount: 0,
+      contractLineId: null
     });
   });
 
@@ -1878,6 +2393,45 @@ function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
   }
 
   return { offerProjectLines, taskOfferProjectLineIds };
+}
+
+function createDemoBillableRevenueSources(period: Period): BillableRevenueSources {
+  const projectTagId = 5001;
+  const completedProjects = makeMonthBuckets(period)
+    .filter((_, index) => index % 3 === 1)
+    .map((bucket, index) => ({
+      id: 10_000 + index,
+      enddate: `${bucket.key}-22`,
+      totalexclvat: 9_500 + index * 1_400,
+      tags: [projectTagId]
+    }));
+  const contracts = [
+    {
+      id: 11_000,
+      date: `${period.year}-01-01`,
+      date_original: `${period.year}-01-01`,
+      frequency: "EVERYMONTH",
+      status: "ACTIVE"
+    }
+  ];
+  const contractLines = [
+    {
+      id: 11_001,
+      contract: 11_000,
+      amount: 1,
+      sellingprice: 1_850,
+      discount: 0,
+      invoicebasis: "FIXED",
+      startdate: `${period.year}-01-01`
+    }
+  ];
+
+  return {
+    completedProjects,
+    projectTagNames: new Map([[projectTagId, "Project"]]),
+    contracts,
+    contractLines
+  };
 }
 
 function createDemoInvoices(period: Period): JsonRecord[] {
