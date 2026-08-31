@@ -129,6 +129,8 @@ const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const MAX_PROJECT_PAGES = 80;
 const PROJECT_COMPLETED_DATE_FIELD = "project.enddate";
+const INVOICE_REVENUE_SERIES_LABEL = "Verkoopfacturen";
+const COMPLETED_PROJECT_REVENUE_SERIES_LABEL = "Opdrachten afgerond op datum";
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
@@ -251,8 +253,8 @@ export default async function PmDashboardPage() {
             <h2>Per maand</h2>
           </div>
           <div className="panel-actions">
-            <span className="panel-total panel-total--invoice">Verkoopfacturen {formatCurrency(dashboard.revenue)}</span>
-            <span className="panel-total panel-total--billable">Afgewerkte opdrachten {formatCurrency(dashboard.completedProjectRevenue)}</span>
+            <span className="panel-total panel-total--invoice">{INVOICE_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.revenue)}</span>
+            <span className="panel-total panel-total--billable">{COMPLETED_PROJECT_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.completedProjectRevenue)}</span>
           </div>
         </div>
 
@@ -318,13 +320,13 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
   return (
     <div className="revenue-line-chart">
       <div className="revenue-line-legend" aria-hidden="true">
-        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />Verkoopfacturen</span>
-        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--billable" />Afgewerkte opdrachten</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />{INVOICE_REVENUE_SERIES_LABEL}</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--billable" />{COMPLETED_PROJECT_REVENUE_SERIES_LABEL}</span>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} verkoopfacturen ${formatCurrency(row.revenue)}, afgewerkte opdrachten ${formatCurrency(row.completedProjectRevenue)}`).join(", ")}`}
+        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}, ${COMPLETED_PROJECT_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.completedProjectRevenue)}`).join(", ")}`}
       >
         <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
         <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
@@ -335,14 +337,20 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
           const invoiceY = yFor(row.revenue);
           const completedProjectY = yFor(row.completedProjectRevenue);
           const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
-          const valueY = invoiceY < padding.top + 24 ? invoiceY + 22 : invoiceY - 12;
+          const invoiceValueY = invoiceY < padding.top + 24 ? invoiceY + 22 : invoiceY - 12;
+          const completedProjectValueY = completedProjectY > height - padding.bottom - 28 ? completedProjectY - 12 : completedProjectY + 22;
 
           return (
             <g key={row.key}>
-              <title>{`${row.label}: verkoopfacturen ${formatCurrency(row.revenue)}, afgewerkte opdrachten ${formatCurrency(row.completedProjectRevenue)}`}</title>
+              <title>{`${row.label}: ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}, ${COMPLETED_PROJECT_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.completedProjectRevenue)}`}</title>
               <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="5" />
               <circle className="revenue-line-point revenue-line-point--billable" cx={x} cy={completedProjectY} r="5" />
-              <text className="revenue-line-value" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
+              <text className="revenue-line-value revenue-line-value--invoice" x={x} y={invoiceValueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
+              {row.completedProjectRevenue > 0 ? (
+                <text className="revenue-line-value revenue-line-value--billable" x={x} y={completedProjectValueY} textAnchor={anchor}>
+                  {formatCurrency(row.completedProjectRevenue)}
+                </text>
+              ) : null}
               <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
             </g>
           );

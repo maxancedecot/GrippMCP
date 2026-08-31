@@ -726,6 +726,8 @@ select {
 
 .revenue-line-path--billable {
   stroke: var(--billable);
+  stroke-dasharray: 9 7;
+  stroke-width: 4;
 }
 
 .revenue-line-point {
@@ -746,6 +748,11 @@ select {
   fill: var(--ink);
   font-size: 13px;
   font-weight: 760;
+}
+
+.revenue-line-value--billable {
+  fill: var(--billable);
+  font-size: 12px;
 }
 
 .revenue-line-label {
