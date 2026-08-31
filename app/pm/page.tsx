@@ -91,6 +91,11 @@ type MonthRevenue = {
   revenue: number;
 };
 
+type MonthRevenuePerBillableHour = MonthRevenue & {
+  billableHours: number;
+  revenuePerBillableHour: number;
+};
+
 type PmDashboardData = {
   period: Period;
   source: DashboardSource;
@@ -113,6 +118,7 @@ type PmDashboardData = {
   fallbackWorkingHoursEmployeeCount: number;
   employeeBillability: EmployeeBillabilityRow[];
   revenueByMonth: MonthRevenue[];
+  revenuePerBillableHourByMonth: MonthRevenuePerBillableHour[];
   lastUpdated: string;
 };
 
@@ -123,6 +129,7 @@ const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const INVOICE_REVENUE_SERIES_LABEL = "Verkoopfacturen";
+const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
@@ -179,7 +186,7 @@ export default async function PmDashboardPage() {
         <MetricCard href="#pm-revenue-detail" label="Omzet dit jaar" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
         <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
-        <MetricCard label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Omzet gedeeld door billable uren" tone="warning" />
+        <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Omzet gedeeld door billable uren" tone="warning" />
       </section>
 
       <section className="panel pm-detail-panel" id="pm-billability-detail" tabIndex={-1}>
@@ -251,6 +258,20 @@ export default async function PmDashboardPage() {
         </div>
 
         <RevenueLineChart rows={dashboard.revenueByMonth} />
+      </section>
+
+      <section className="panel pm-detail-panel" id="pm-revenue-per-billable-hour-detail" tabIndex={-1}>
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Rendement</p>
+            <h2>Omzet / billable uur per maand</h2>
+          </div>
+          <div className="panel-actions">
+            <span className="panel-total panel-total--goal">Doel {formatCurrencyPerHour(REVENUE_PER_BILLABLE_HOUR_GOAL)}</span>
+          </div>
+        </div>
+
+        <RevenuePerBillableHourLineChart rows={dashboard.revenuePerBillableHourByMonth} goal={REVENUE_PER_BILLABLE_HOUR_GOAL} />
       </section>
       </main>
     </DashboardFrame>
@@ -355,6 +376,84 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
               <title>{`${row.label}: ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}`}</title>
               <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="4" />
               <text className="revenue-line-value revenue-line-value--invoice" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
+              <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function RevenuePerBillableHourLineChart({ rows, goal }: { rows: MonthRevenuePerBillableHour[]; goal: number }) {
+  const width = Math.max(720, rows.length * 112);
+  const height = 300;
+  const padding = { top: 26, right: 30, bottom: 48, left: 78 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const values = rows.map((row) => row.revenuePerBillableHour);
+  const rawMaximum = Math.max(goal, 0, ...values);
+  const minimum = Math.min(0, ...values);
+  const maximum = rawMaximum === minimum ? rawMaximum + 1 : rawMaximum * 1.12;
+  const range = Math.max(1, maximum - minimum);
+  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
+  const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
+  const chartPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.revenuePerBillableHour) }));
+  const linePath = smoothLinePath(chartPoints);
+  const areaPath = smoothAreaPath(chartPoints, yFor(0));
+  const goalY = yFor(goal);
+  const gridTicks = Array.from({ length: 5 }, (_, index) => {
+    const value = maximum - (range * index) / 4;
+    return { key: index, value, y: yFor(value) };
+  });
+  const zeroY = yFor(0);
+  const gradientId = "pm-revenue-per-billable-hour-gradient";
+
+  return (
+    <div className="revenue-line-chart">
+      <div className="revenue-line-legend" aria-hidden="true">
+        <span><i className="revenue-line-legend-dot" />Omzet / billable uur</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--goal" />Doel {formatCurrencyPerHour(goal)}</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Omzet per billable uur per maand met doel ${formatCurrencyPerHour(goal)}: ${rows
+          .map((row) => `${row.label} ${formatCurrencyPerHour(row.revenuePerBillableHour)} bij ${formatHours(row.billableHours)} billable uren`)
+          .join(", ")}`}
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1={padding.top} y2={height - padding.bottom} gradientUnits="userSpaceOnUse">
+            <stop className="revenue-line-gradient-start" offset="0%" />
+            <stop className="revenue-line-gradient-end" offset="100%" />
+          </linearGradient>
+        </defs>
+        <rect className="revenue-line-plot-bg" x={padding.left} y={padding.top} width={chartWidth} height={chartHeight} rx="6" />
+        {gridTicks.map((tick) => (
+          <g key={tick.key}>
+            <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={tick.y} y2={tick.y} />
+            <text className="revenue-line-y-label" x={padding.left - 12} y={tick.y + 4} textAnchor="end">
+              {formatCurrencyPerHour(tick.value)}
+            </text>
+          </g>
+        ))}
+        <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
+        <line className="revenue-line-goal" x1={padding.left} x2={width - padding.right} y1={goalY} y2={goalY} />
+        <text className="revenue-line-goal-label" x={width - padding.right} y={goalY - 8} textAnchor="end">
+          Doel {formatCurrencyPerHour(goal)}
+        </text>
+        {rows.length > 1 ? <path className="revenue-line-area" d={areaPath} fill={`url(#${gradientId})`} /> : null}
+        {rows.length > 1 ? <path className="revenue-line-path" d={linePath} /> : null}
+        {rows.map((row, index) => {
+          const { x, y } = chartPoints[index];
+          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+          const valueY = y < padding.top + 24 ? y + 22 : y - 12;
+
+          return (
+            <g key={row.key}>
+              <title>{`${row.label}: ${formatCurrencyPerHour(row.revenuePerBillableHour)} uit ${formatCurrency(row.revenue)} en ${formatHours(row.billableHours)} billable uren`}</title>
+              <circle className="revenue-line-point" cx={x} cy={y} r="4" />
+              <text className="revenue-line-value" x={x} y={valueY} textAnchor={anchor}>{formatCurrencyPerHour(row.revenuePerBillableHour)}</text>
               <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
             </g>
           );
@@ -946,6 +1045,7 @@ function buildPmDashboardData(
   let billableHours = 0;
   let hourCount = 0;
   const revenueByMonth = new Map<string, number>();
+  const billableHoursByMonth = new Map<string, number>();
 
   for (const invoice of invoices) {
     const revenueEntry = invoiceRevenueEntry(invoice, period);
@@ -960,7 +1060,8 @@ function buildPmDashboardData(
 
   for (const hour of hours) {
     const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
-    if (amount === 0 || !dateKeyFromValue(readField(hour, "date"))) {
+    const hourDate = dateKeyFromValue(readField(hour, "date"));
+    if (amount === 0 || !hourDate) {
       continue;
     }
 
@@ -969,6 +1070,10 @@ function buildPmDashboardData(
 
     if (isBillableHour(hour, billabilitySources)) {
       billableHours += amount;
+      const monthKey = monthKeyForDateInPeriod(hourDate, period);
+      if (monthKey) {
+        billableHoursByMonth.set(monthKey, (billableHoursByMonth.get(monthKey) ?? 0) + amount);
+      }
     }
   }
 
@@ -977,6 +1082,22 @@ function buildPmDashboardData(
   const employeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources, calendarItems, period);
   const capacityRemainingHours = employeeBillability.reduce((total, row) => total + row.capacityRemainingHours, 0);
   const calendarItemHours = employeeBillability.reduce((total, row) => total + row.calendarItemHours, 0);
+  const monthBuckets = makeMonthBuckets(period);
+  const revenueByMonthRows = monthBuckets.map((bucket) => ({
+    ...bucket,
+    revenue: revenueByMonth.get(bucket.key) ?? 0
+  }));
+  const revenuePerBillableHourByMonth = monthBuckets.map((bucket) => {
+    const monthlyRevenue = revenueByMonth.get(bucket.key) ?? 0;
+    const monthlyBillableHours = billableHoursByMonth.get(bucket.key) ?? 0;
+
+    return {
+      ...bucket,
+      revenue: monthlyRevenue,
+      billableHours: monthlyBillableHours,
+      revenuePerBillableHour: divideCurrency(monthlyRevenue, monthlyBillableHours)
+    };
+  });
 
   return {
     period,
@@ -999,10 +1120,8 @@ function buildPmDashboardData(
     excludedEmployeeCount,
     fallbackWorkingHoursEmployeeCount: capacity.fallbackWorkingHoursEmployeeCount,
     employeeBillability,
-    revenueByMonth: makeMonthBuckets(period).map((bucket) => ({
-      ...bucket,
-      revenue: revenueByMonth.get(bucket.key) ?? 0
-    })),
+    revenueByMonth: revenueByMonthRows,
+    revenuePerBillableHourByMonth,
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       day: "2-digit",
       month: "2-digit",

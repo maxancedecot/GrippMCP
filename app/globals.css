@@ -557,14 +557,16 @@ select {
 }
 
 .panel-total--invoice,
-.panel-total--billable {
+.panel-total--billable,
+.panel-total--goal {
   display: inline-flex;
   align-items: center;
   gap: 7px;
 }
 
 .panel-total--invoice::before,
-.panel-total--billable::before {
+.panel-total--billable::before,
+.panel-total--goal::before {
   content: "";
   width: 9px;
   height: 9px;
@@ -574,6 +576,10 @@ select {
 
 .panel-total--billable::before {
   background: var(--billable);
+}
+
+.panel-total--goal::before {
+  background: var(--warning);
 }
 
 .panel-heading--revenue {
@@ -802,6 +808,11 @@ select {
   background: transparent;
 }
 
+.revenue-line-legend-dot--goal {
+  border-color: var(--warning);
+  border-radius: 3px;
+}
+
 .revenue-line-chart svg {
   display: block;
   width: 100%;
@@ -845,6 +856,23 @@ select {
 
 .revenue-line-area {
   pointer-events: none;
+}
+
+.revenue-line-goal {
+  stroke: var(--warning);
+  stroke-dasharray: 7 7;
+  stroke-linecap: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.revenue-line-goal-label {
+  fill: var(--warning);
+  stroke: var(--surface);
+  stroke-width: 4;
+  paint-order: stroke;
+  font-size: 11px;
+  font-weight: 760;
 }
 
 .revenue-line-point {
