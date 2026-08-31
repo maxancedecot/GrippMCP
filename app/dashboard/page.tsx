@@ -120,7 +120,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   const gaugeProgress = Math.max(0, Math.min(dashboard.declarability, 100));
 
   return (
-    <DashboardFrame active="dashboard">
+    <DashboardFrame>
       <main className="dashboard-shell">
         <header className="dashboard-header">
           <div>

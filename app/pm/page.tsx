@@ -156,7 +156,7 @@ export default async function PmDashboardPage() {
   const dashboard = await getPmDashboardData();
 
   return (
-    <DashboardFrame active="pm">
+    <DashboardFrame>
       <main className="dashboard-shell pm-shell">
         <header className="dashboard-header">
           <div>

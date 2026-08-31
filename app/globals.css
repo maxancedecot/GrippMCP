@@ -19,9 +19,6 @@
   --neutral: #94a3b8;
   --neutral-soft: #f1f5f9;
   --danger: #ef4444;
-  --sidebar: #ffffff;
-  --sidebar-ink: #1f2937;
-  --sidebar-muted: #94a3b8;
   --ring: rgba(59, 130, 246, 0.2);
   --shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-raised: 0 12px 30px rgba(15, 23, 42, 0.08);
@@ -54,125 +51,9 @@ select {
 
 .dashboard-app {
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 100dvh;
   background: var(--background);
-}
-
-.dashboard-sidebar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: flex;
-  height: 100dvh;
-  flex-direction: column;
-  gap: 26px;
-  padding: 22px 16px;
-  border-right: 1px solid var(--border);
-  background: var(--sidebar);
-  box-shadow: var(--shadow);
-}
-
-.dashboard-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 8px 18px;
-  border-bottom: 1px solid var(--border);
-  color: var(--sidebar-ink);
-  text-decoration: none;
-}
-
-.dashboard-brand-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--overtime);
-  color: #ffffff;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.dashboard-brand-copy {
-  display: grid;
-  gap: 1px;
-}
-
-.dashboard-brand-copy strong {
-  font-size: 15px;
-  line-height: 1.1;
-}
-
-.dashboard-brand-copy small {
-  color: var(--sidebar-muted);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.dashboard-sidebar-nav {
-  display: grid;
-  gap: 4px;
-}
-
-.dashboard-nav-link {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 11px;
-  align-items: center;
-  min-height: 48px;
-  padding: 9px 10px;
-  border-radius: 8px;
-  color: var(--muted);
-  text-decoration: none;
-  transition:
-    background-color 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease;
-}
-
-.dashboard-nav-link:hover {
-  background: var(--surface-strong);
-  color: var(--sidebar-ink);
-}
-
-.dashboard-nav-link--active {
-  background: var(--overtime-soft);
-  color: var(--overtime);
-  box-shadow: inset 3px 0 0 var(--overtime);
-}
-
-.dashboard-nav-link--active small {
-  color: color-mix(in srgb, var(--overtime) 60%, var(--muted));
-}
-
-.dashboard-nav-icon {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: currentColor;
-  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 12%, transparent);
-}
-
-.dashboard-nav-link strong,
-.dashboard-nav-link small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dashboard-nav-link strong {
-  font-size: 14px;
-  font-weight: 760;
-}
-
-.dashboard-nav-link small {
-  margin-top: 2px;
-  color: var(--sidebar-muted);
-  font-size: 12px;
-  font-weight: 620;
 }
 
 .dashboard-main {
@@ -1575,39 +1456,6 @@ td .inline-bar {
 }
 
 @media (max-width: 1180px) {
-  .dashboard-app {
-    grid-template-columns: 1fr;
-  }
-
-  .dashboard-sidebar {
-    height: auto;
-    flex-direction: row;
-    align-items: center;
-    gap: 14px;
-    padding: 12px 18px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-  }
-
-  .dashboard-brand {
-    flex: 0 0 auto;
-    padding: 0 14px 0 0;
-    border-right: 1px solid var(--border);
-    border-bottom: 0;
-  }
-
-  .dashboard-sidebar-nav {
-    display: flex;
-    flex: 1 0 auto;
-    gap: 8px;
-    min-width: max-content;
-  }
-
-  .dashboard-nav-link {
-    min-width: 184px;
-  }
-
   .dashboard-shell {
     padding-right: 22px;
     padding-left: 22px;
@@ -1639,31 +1487,6 @@ td .inline-bar {
 }
 
 @media (max-width: 660px) {
-  .dashboard-sidebar {
-    gap: 10px;
-    padding: 10px 12px;
-  }
-
-  .dashboard-brand {
-    padding-right: 10px;
-  }
-
-  .dashboard-brand-copy small {
-    display: none;
-  }
-
-  .dashboard-nav-link {
-    grid-template-columns: 8px minmax(0, 1fr);
-    min-width: 136px;
-    min-height: 42px;
-    gap: 8px;
-    padding: 8px;
-  }
-
-  .dashboard-nav-link small {
-    display: none;
-  }
-
   .dashboard-shell {
     padding: 18px 14px 32px;
   }
