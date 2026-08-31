@@ -1,5 +1,6 @@
 import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
+import { DashboardFrame } from "../dashboard-frame.js";
 
 export const dynamic = "force-dynamic";
 
@@ -119,20 +120,21 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   const gaugeProgress = Math.max(0, Math.min(dashboard.declarability, 100));
 
   return (
-    <main className="dashboard-shell">
-      <header className="dashboard-header">
-        <div>
-          <p className="eyebrow">Gripp uren</p>
-          <h1>{activeTab === "revenue" ? "Omzet" : "Declarabiliteit"}</h1>
-        </div>
-        <div className="header-meta">
-          <span className={`source-badge source-badge--${dashboard.source.mode}`}>
-            {dashboard.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
-          </span>
-          <span>{dashboard.period.label}</span>
-          <span>Bijgewerkt {dashboard.lastUpdated}</span>
-        </div>
-      </header>
+    <DashboardFrame active="dashboard">
+      <main className="dashboard-shell">
+        <header className="dashboard-header">
+          <div>
+            <p className="eyebrow">Gripp uren</p>
+            <h1>{activeTab === "revenue" ? "Omzet" : "Declarabiliteit"}</h1>
+          </div>
+          <div className="header-meta">
+            <span className={`source-badge source-badge--${dashboard.source.mode}`}>
+              {dashboard.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
+            </span>
+            <span>{dashboard.period.label}</span>
+            <span>Bijgewerkt {dashboard.lastUpdated}</span>
+          </div>
+        </header>
 
       {dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 
@@ -142,9 +144,6 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         </a>
         <a className={`dashboard-tab ${activeTab === "revenue" ? "dashboard-tab--active" : ""}`} href={dashboardTabHref(params, "revenue")} aria-current={activeTab === "revenue" ? "page" : undefined}>
           Omzet
-        </a>
-        <a className="dashboard-tab" href="/projectmanagement">
-          Projectmanagement
         </a>
       </nav>
 
@@ -346,7 +345,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           </article>
         </section>
       )}
-    </main>
+      </main>
+    </DashboardFrame>
   );
 }
 

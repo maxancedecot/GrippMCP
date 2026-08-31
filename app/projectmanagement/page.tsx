@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
+import { DashboardFrame } from "../dashboard-frame.js";
 import { ProjectManagementAutoRefresh } from "./auto-refresh.js";
 import { CompleteProjectForm } from "./complete-project-form.js";
 import { ProjectTasksModal } from "./project-tasks-modal.js";
@@ -91,21 +92,22 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
   const timeline = createProjectTimeline(data.projects);
 
   return (
-    <main className="dashboard-shell project-shell">
-      <ProjectManagementAutoRefresh />
-      <header className="dashboard-header">
-        <div>
-          <p className="eyebrow">Gripp opdrachten</p>
-          <h1>Projectmanagement</h1>
-        </div>
-        <div className="header-meta">
-          <span className={`source-badge source-badge--${data.source.mode}`}>
-            {data.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
-          </span>
-          <span>{data.totalProjects} lopende projecten</span>
-          <span>Bijgewerkt {data.lastUpdated}</span>
-        </div>
-      </header>
+    <DashboardFrame active="projectmanagement">
+      <main className="dashboard-shell project-shell">
+        <ProjectManagementAutoRefresh />
+        <header className="dashboard-header">
+          <div>
+            <p className="eyebrow">Gripp opdrachten</p>
+            <h1>Projectmanagement</h1>
+          </div>
+          <div className="header-meta">
+            <span className={`source-badge source-badge--${data.source.mode}`}>
+              {data.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
+            </span>
+            <span>{data.totalProjects} lopende projecten</span>
+            <span>Bijgewerkt {data.lastUpdated}</span>
+          </div>
+        </header>
 
       {data.source.message ? <p className="data-notice">{data.source.message}</p> : null}
       {completionNotice ? <p className={`data-notice data-notice--${completionNotice.tone}`}>{completionNotice.message}</p> : null}
@@ -132,7 +134,8 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
           <p className="empty-state">Geen lopende projecten met tag Project en alle datums gevonden.</p>
         )}
       </section>
-    </main>
+      </main>
+    </DashboardFrame>
   );
 }
 

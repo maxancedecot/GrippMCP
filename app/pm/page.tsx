@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { CSSProperties } from "react";
 import { GrippClient } from "../../src/grippClient.js";
 import type { JsonValue } from "../../src/types.js";
+import { DashboardFrame } from "../dashboard-frame.js";
 
 export const dynamic = "force-dynamic";
 
@@ -155,20 +156,21 @@ export default async function PmDashboardPage() {
   const dashboard = await getPmDashboardData();
 
   return (
-    <main className="dashboard-shell pm-shell">
-      <header className="dashboard-header">
-        <div>
-          <p className="eyebrow">Gripp management</p>
-          <h1>PM dashboard</h1>
-        </div>
-        <div className="header-meta">
-          <span className={`source-badge source-badge--${dashboard.source.mode}`}>
-            {dashboard.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
-          </span>
-          <span>{dashboard.period.label}</span>
-          <span>Bijgewerkt {dashboard.lastUpdated}</span>
-        </div>
-      </header>
+    <DashboardFrame active="pm">
+      <main className="dashboard-shell pm-shell">
+        <header className="dashboard-header">
+          <div>
+            <p className="eyebrow">Gripp management</p>
+            <h1>PM dashboard</h1>
+          </div>
+          <div className="header-meta">
+            <span className={`source-badge source-badge--${dashboard.source.mode}`}>
+              {dashboard.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
+            </span>
+            <span>{dashboard.period.label}</span>
+            <span>Bijgewerkt {dashboard.lastUpdated}</span>
+          </div>
+        </header>
 
       {dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 
@@ -249,7 +251,8 @@ export default async function PmDashboardPage() {
 
         <RevenueLineChart rows={dashboard.revenueByMonth} />
       </section>
-    </main>
+      </main>
+    </DashboardFrame>
   );
 }
 
