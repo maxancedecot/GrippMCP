@@ -83,11 +83,8 @@ type EmployeeBillabilityRow = EmployeeCapacityRow & {
   billability: number;
 };
 
-type MonthRevenue = {
+type MonthBucket = {
   key: string;
-  label: string;
-  revenue: number;
-  completedProjectRevenue: number;
 };
 
 type CompletedProjectRevenueSources = {
@@ -117,7 +114,6 @@ type PmDashboardData = {
   excludedEmployeeCount: number;
   fallbackWorkingHoursEmployeeCount: number;
   employeeBillability: EmployeeBillabilityRow[];
-  revenueByMonth: MonthRevenue[];
   lastUpdated: string;
 };
 
@@ -250,15 +246,13 @@ export default async function PmDashboardPage() {
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Omzet</p>
-            <h2>Per maand</h2>
+            <h2>Omzetoverzicht</h2>
           </div>
           <div className="panel-actions">
             <span className="panel-total panel-total--invoice">{INVOICE_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.revenue)}</span>
             <span className="panel-total panel-total--billable">{COMPLETED_PROJECT_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.completedProjectRevenue)}</span>
           </div>
         </div>
-
-        <RevenueLineChart rows={dashboard.revenueByMonth} />
       </section>
     </main>
   );
@@ -298,65 +292,6 @@ function MetricCard({
     <article className={className}>
       {content}
     </article>
-  );
-}
-
-function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
-  const width = Math.max(640, rows.length * 120);
-  const height = 320;
-  const padding = { top: 42, right: 56, bottom: 62, left: 56 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-  const values = rows.flatMap((row) => [row.revenue, row.completedProjectRevenue]);
-  const maximum = Math.max(0, ...values);
-  const minimum = Math.min(0, ...values);
-  const range = Math.max(1, maximum - minimum);
-  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
-  const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
-  const invoicePoints = rows.map((row, index) => `${xFor(index)},${yFor(row.revenue)}`).join(" ");
-  const completedProjectPoints = rows.map((row, index) => `${xFor(index)},${yFor(row.completedProjectRevenue)}`).join(" ");
-  const zeroY = yFor(0);
-
-  return (
-    <div className="revenue-line-chart">
-      <div className="revenue-line-legend" aria-hidden="true">
-        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />{INVOICE_REVENUE_SERIES_LABEL}</span>
-        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--billable" />{COMPLETED_PROJECT_REVENUE_SERIES_LABEL}</span>
-      </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}, ${COMPLETED_PROJECT_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.completedProjectRevenue)}`).join(", ")}`}
-      >
-        <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
-        <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
-        {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--invoice" points={invoicePoints} /> : null}
-        {rows.length > 1 ? <polyline className="revenue-line-path revenue-line-path--billable" points={completedProjectPoints} /> : null}
-        {rows.map((row, index) => {
-          const x = xFor(index);
-          const invoiceY = yFor(row.revenue);
-          const completedProjectY = yFor(row.completedProjectRevenue);
-          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
-          const invoiceValueY = invoiceY < padding.top + 24 ? invoiceY + 22 : invoiceY - 12;
-          const completedProjectValueY = completedProjectY > height - padding.bottom - 28 ? completedProjectY - 12 : completedProjectY + 22;
-
-          return (
-            <g key={row.key}>
-              <title>{`${row.label}: ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}, ${COMPLETED_PROJECT_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.completedProjectRevenue)}`}</title>
-              <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="5" />
-              <circle className="revenue-line-point revenue-line-point--billable" cx={x} cy={completedProjectY} r="5" />
-              <text className="revenue-line-value revenue-line-value--invoice" x={x} y={invoiceValueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
-              {row.completedProjectRevenue > 0 ? (
-                <text className="revenue-line-value revenue-line-value--billable" x={x} y={completedProjectValueY} textAnchor={anchor}>
-                  {formatCurrency(row.completedProjectRevenue)}
-                </text>
-              ) : null}
-              <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
   );
 }
 
@@ -1036,19 +971,16 @@ function buildPmDashboardData(
   let loggedHours = 0;
   let billableHours = 0;
   let hourCount = 0;
-  const revenueByMonth = new Map<string, number>();
-  const completedProjectRevenueByMonth = buildCompletedProjectRevenueByMonth(completedProjectRevenueSources, period);
-  const completedProjectRevenue = Array.from(completedProjectRevenueByMonth.values()).reduce((total, amount) => total + amount, 0);
+  const completedProjectRevenue = calculateCompletedProjectRevenue(completedProjectRevenueSources, period);
 
   for (const invoice of invoices) {
-    const revenueEntry = invoiceRevenueEntry(invoice, period);
-    if (!revenueEntry) {
+    const revenueAmount = invoiceRevenueAmount(invoice, period);
+    if (revenueAmount === null) {
       continue;
     }
 
-    revenue += revenueEntry.amount;
+    revenue += revenueAmount;
     invoiceCount += 1;
-    revenueByMonth.set(revenueEntry.monthKey, (revenueByMonth.get(revenueEntry.monthKey) ?? 0) + revenueEntry.amount);
   }
 
   for (const hour of hours) {
@@ -1093,11 +1025,6 @@ function buildPmDashboardData(
     excludedEmployeeCount,
     fallbackWorkingHoursEmployeeCount: capacity.fallbackWorkingHoursEmployeeCount,
     employeeBillability,
-    revenueByMonth: makeMonthBuckets(period).map((bucket) => ({
-      ...bucket,
-      revenue: revenueByMonth.get(bucket.key) ?? 0,
-      completedProjectRevenue: completedProjectRevenueByMonth.get(bucket.key) ?? 0
-    })),
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       day: "2-digit",
       month: "2-digit",
@@ -1108,45 +1035,26 @@ function buildPmDashboardData(
   };
 }
 
-function buildCompletedProjectRevenueByMonth(
+function calculateCompletedProjectRevenue(
   completedProjectRevenueSources: CompletedProjectRevenueSources,
   period: Period
 ) {
-  const revenueByMonth = new Map<string, number>();
+  let revenue = 0;
 
-  addCompletedProjectRevenue(
-    revenueByMonth,
-    completedProjectRevenueSources.completedProjects,
-    completedProjectRevenueSources.projectTagNames,
-    period
-  );
-
-  return revenueByMonth;
-}
-
-function addCompletedProjectRevenue(revenueByMonth: Map<string, number>, projects: JsonRecord[], tagNames: Map<number, string>, period: Period) {
-  for (const project of projects) {
-    if (!hasProjectTag(project, tagNames)) {
+  for (const project of completedProjectRevenueSources.completedProjects) {
+    if (!hasProjectTag(project, completedProjectRevenueSources.projectTagNames) || !dateIsInPeriod(projectCompletedDate(project), period)) {
       continue;
     }
 
-    const completedDate = projectCompletedDate(project);
-    addMonthlyRevenue(revenueByMonth, completedDate, projectRevenueExclVat(project), period);
+    revenue += projectRevenueExclVat(project);
   }
+
+  return revenue;
 }
 
 function projectCompletedDate(project: JsonRecord) {
   // Gripp toont dit projectveld als "Afgerond op".
   return dateKeyFromValue(readField(project, "enddate"));
-}
-
-function addMonthlyRevenue(revenueByMonth: Map<string, number>, dateValue: unknown, amount: number, period: Period) {
-  const monthKey = monthKeyForDateInPeriod(dateValue, period);
-  if (!monthKey || amount === 0) {
-    return;
-  }
-
-  revenueByMonth.set(monthKey, (revenueByMonth.get(monthKey) ?? 0) + amount);
 }
 
 function projectRevenueExclVat(project: JsonRecord) {
@@ -1203,19 +1111,17 @@ function isBillableHour(hour: JsonRecord, billabilitySources: BillabilitySources
   return offerProjectLine?.hasPositiveUnitPrice === true;
 }
 
-function invoiceRevenueEntry(invoice: JsonRecord, period: Period) {
+function invoiceRevenueAmount(invoice: JsonRecord, period: Period) {
   if (stringFrom(readField(invoice, "status"))?.toUpperCase() === "CONCEPT") {
     return null;
   }
 
   const reportDate = dateKeyFromValue(readField(invoice, "reportdate"));
-  const monthKey = monthKeyForDateInPeriod(reportDate, period);
-  if (!monthKey) {
+  if (!dateIsInPeriod(reportDate, period)) {
     return null;
   }
 
-  const amount = numberFrom(readField(invoice, "totalincldiscountexclvat"));
-  return amount === null ? null : { amount, monthKey };
+  return numberFrom(readField(invoice, "totalincldiscountexclvat"));
 }
 
 function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: JsonRecord[], period: Period): EmployeeCapacityRow[] {
@@ -1702,23 +1608,20 @@ function currentDateKey() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-function makeMonthBuckets(period: Period): MonthRevenue[] {
+function makeMonthBuckets(period: Period): MonthBucket[] {
   const start = parseDateKey(period.start);
   const end = parseDateKey(period.end);
   if (!start || !end) {
     return [];
   }
 
-  const buckets: MonthRevenue[] = [];
+  const buckets: MonthBucket[] = [];
   const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
   const stop = new Date(end.getFullYear(), end.getMonth(), 1);
 
   while (cursor <= stop) {
     buckets.push({
-      key: monthKey(cursor),
-      label: new Intl.DateTimeFormat("nl-NL", { month: "short", year: "numeric" }).format(cursor),
-      revenue: 0,
-      completedProjectRevenue: 0
+      key: monthKey(cursor)
     });
     cursor.setMonth(cursor.getMonth() + 1);
   }
@@ -1726,16 +1629,16 @@ function makeMonthBuckets(period: Period): MonthRevenue[] {
   return buckets;
 }
 
-function monthKeyForDateInPeriod(value: unknown, period: Period) {
+function dateIsInPeriod(value: unknown, period: Period) {
   const normalizedValue = dateKeyFromValue(value);
   const date = normalizedValue ? parseDateKey(normalizedValue) : null;
   const periodStart = parseDateKey(period.start);
   const periodEnd = parseDateKey(period.end);
   if (!date || !periodStart || !periodEnd || date < periodStart || date > periodEnd) {
-    return null;
+    return false;
   }
 
-  return monthKey(date);
+  return true;
 }
 
 function uniqueRelationIds(records: JsonRecord[], field: string) {
