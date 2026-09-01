@@ -136,6 +136,7 @@ const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
+const COUNTED_PAID_OVERTIME_ABSENCE_STATUSES = new Set(["APPROVED", "PENDING", "goedgekeurd", "inaanvraag"]);
 const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overuren", "Opbouw overuren"];
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
@@ -1435,8 +1436,7 @@ function buildPaidOvertimeHoursByEmployeeId(absenceRequestLines: JsonRecord[], a
   const paidOvertimeHoursByEmployeeId = new Map<number, number>();
 
   for (const line of absenceRequestLines) {
-    const status = stringFrom(readField(line, "absencerequeststatus"))?.toUpperCase();
-    if (status && status !== "APPROVED") {
+    if (!isCountedPaidOvertimeAbsenceStatus(readField(line, "absencerequeststatus"))) {
       continue;
     }
 
@@ -1465,6 +1465,16 @@ function buildPaidOvertimeHoursByEmployeeId(absenceRequestLines: JsonRecord[], a
   }
 
   return paidOvertimeHoursByEmployeeId;
+}
+
+function isCountedPaidOvertimeAbsenceStatus(value: unknown) {
+  const status = stringFrom(value);
+  if (!status) {
+    return true;
+  }
+
+  const normalizedStatus = normalizeComparisonValue(status);
+  return COUNTED_PAID_OVERTIME_ABSENCE_STATUSES.has(status.toUpperCase()) || COUNTED_PAID_OVERTIME_ABSENCE_STATUSES.has(normalizedStatus);
 }
 
 function isPaidOvertimeAbsenceLine(line: JsonRecord, absenceRequest?: JsonRecord) {
