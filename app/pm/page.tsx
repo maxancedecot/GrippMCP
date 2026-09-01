@@ -128,6 +128,7 @@ const PAGE_SIZE = 250;
 const MAX_INVOICE_PAGES = 80;
 const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
+const MAX_ABSENCE_REQUEST_PAGES = 80;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const INVOICE_REVENUE_SERIES_LABEL = "Verkoopfacturen";
@@ -136,7 +137,7 @@ const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
-const COUNTED_PAID_OVERTIME_ABSENCE_STATUSES = new Set(["APPROVED", "PENDING", "goedgekeurd", "inaanvraag"]);
+const REJECTED_ABSENCE_STATUSES = new Set(["REJECTED", "rejected", "afgewezen", "geweigerd"]);
 const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overuren", "Opbouw overuren"];
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
@@ -488,16 +489,22 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
       requiredData("uren", () => fetchHoursForPeriod(client, period))
     ]);
-    const [employees, absenceRequestLines, calendarItems] = await Promise.all([
+    const [employees, fetchedAbsenceRequestLines, fetchedAbsenceRequests, calendarItems] = await Promise.all([
       optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
       optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period)),
+      optionalData(issues, "verlofaanvragen", [], () => fetchAbsenceRequests(client)),
       optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, period))
     ]);
     const employeeScope = buildPmEmployeeScope(employees);
     const scopedHours = hoursForEmployeeScope(hours, employeeScope);
     const scopedCalendarItems = calendarItemsForEmployeeScope(calendarItems, employeeScope);
-    const absenceRequestsById = await optionalData(issues, "verlofaanvragen", new Map<number, JsonRecord>(), () =>
-      fetchAbsenceRequestsById(client, absenceRequestLines)
+    const absenceRequestLines = mergeAbsenceRequestLines(
+      fetchedAbsenceRequestLines,
+      absenceRequestLinesFromRequests(fetchedAbsenceRequests, period)
+    );
+    const indexedAbsenceRequestsById = indexAbsenceRequestsById(fetchedAbsenceRequests);
+    const absenceRequestsById = await optionalData(issues, "verlofaanvraagdetails", indexedAbsenceRequestsById, () =>
+      fetchAbsenceRequestsById(client, absenceRequestLines, indexedAbsenceRequestsById)
     );
     const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
     const paidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(scopedAbsenceRequestLines, absenceRequestsById, period);
@@ -914,9 +921,19 @@ async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Pe
   return records;
 }
 
-async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines: JsonRecord[]) {
-  const absenceRequestsById = new Map<number, JsonRecord>();
-  const absenceRequestIds = uniqueRelationIds(absenceRequestLines, "absencerequest");
+async function fetchAbsenceRequests(client: GrippClient) {
+  return fetchPagedRecords(
+    client,
+    "absencerequest",
+    [],
+    [{ field: "absencerequest.updatedon", direction: "desc" }],
+    MAX_ABSENCE_REQUEST_PAGES
+  );
+}
+
+async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines: JsonRecord[], seed = new Map<number, JsonRecord>()) {
+  const absenceRequestsById = new Map(seed);
+  const absenceRequestIds = uniqueRelationIds(absenceRequestLines, "absencerequest").filter((id) => !absenceRequestsById.has(id));
 
   for (let index = 0; index < absenceRequestIds.length; index += 100) {
     const idChunk = absenceRequestIds.slice(index, index + 100);
@@ -937,6 +954,114 @@ async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines
   }
 
   return absenceRequestsById;
+}
+
+function indexAbsenceRequestsById(absenceRequests: JsonRecord[]) {
+  const absenceRequestsById = new Map<number, JsonRecord>();
+
+  for (const absenceRequest of absenceRequests) {
+    const id = idFrom(readField(absenceRequest, "id"));
+    if (id !== null) {
+      absenceRequestsById.set(id, absenceRequest);
+    }
+  }
+
+  return absenceRequestsById;
+}
+
+function absenceRequestLinesFromRequests(absenceRequests: JsonRecord[], period: Period) {
+  const lines: JsonRecord[] = [];
+
+  for (const absenceRequest of absenceRequests) {
+    const absenceRequestId = idFrom(readField(absenceRequest, "id"));
+    for (const line of nestedAbsenceRequestLines(absenceRequest)) {
+      const enrichedLine = enrichAbsenceRequestLine(line, absenceRequest, absenceRequestId);
+      const date = dateKeyFromValue(readField(enrichedLine, "date"));
+      if (!date || date < period.start || date > period.end) {
+        continue;
+      }
+
+      lines.push(enrichedLine);
+    }
+  }
+
+  return lines;
+}
+
+function nestedAbsenceRequestLines(absenceRequest: JsonRecord) {
+  return [
+    ...recordsFromField(absenceRequest, "absencerequestline"),
+    ...recordsFromField(absenceRequest, "absencerequestlines"),
+    ...recordsFromField(absenceRequest, "verlofmutatie"),
+    ...recordsFromField(absenceRequest, "verlofmutaties"),
+    ...recordsFromField(absenceRequest, "lines")
+  ];
+}
+
+function recordsFromField(record: JsonRecord, field: string) {
+  const value = readField(record, field);
+  return value === undefined ? [] : asRecords(value as JsonValue);
+}
+
+function enrichAbsenceRequestLine(line: JsonRecord, absenceRequest: JsonRecord, absenceRequestId: number | null) {
+  const enrichedLine = { ...line };
+
+  if (absenceRequestId !== null && relationId(enrichedLine, "absencerequest") === null) {
+    enrichedLine.absencerequest = absenceRequestId;
+  }
+
+  for (const field of ["employee", "absencetype"]) {
+    if (readField(enrichedLine, field) === undefined) {
+      const value = readField(absenceRequest, field);
+      if (value !== undefined) {
+        enrichedLine[field] = value;
+      }
+    }
+  }
+
+  if (readField(enrichedLine, "absencerequeststatus") === undefined) {
+    for (const field of ["absencerequeststatus", "status", "state"]) {
+      const value = readField(absenceRequest, field);
+      if (value !== undefined) {
+        enrichedLine.absencerequeststatus = value;
+        break;
+      }
+    }
+  }
+
+  return enrichedLine;
+}
+
+function mergeAbsenceRequestLines(primary: JsonRecord[], secondary: JsonRecord[]) {
+  const lines: JsonRecord[] = [];
+  const seen = new Set<string>();
+
+  for (const line of [...primary, ...secondary]) {
+    const key = absenceRequestLineKey(line);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    lines.push(line);
+  }
+
+  return lines;
+}
+
+function absenceRequestLineKey(line: JsonRecord) {
+  const id = idFrom(readField(line, "id"));
+  if (id !== null) {
+    return `id:${id}`;
+  }
+
+  const absenceRequestId = relationId(line, "absencerequest") ?? "none";
+  const date = dateKeyFromValue(readField(line, "date")) ?? "";
+  const amount = numberFrom(readField(line, "amount")) ?? "";
+  const startingTime = stringFrom(readField(line, "startingtime")) ?? "";
+  const description = normalizeComparisonValue(stringFrom(readField(line, "description")) ?? "");
+
+  return `synthetic:${absenceRequestId}:${date}:${amount}:${startingTime}:${description}`;
 }
 
 async function fetchWorkingHoursForEmployees(
@@ -1468,13 +1593,29 @@ function buildPaidOvertimeHoursByEmployeeId(absenceRequestLines: JsonRecord[], a
 }
 
 function isCountedPaidOvertimeAbsenceStatus(value: unknown) {
-  const status = stringFrom(value);
-  if (!status) {
+  const statusValues = absenceStatusComparisonValues(value);
+  if (statusValues.length === 0) {
     return true;
   }
 
-  const normalizedStatus = normalizeComparisonValue(status);
-  return COUNTED_PAID_OVERTIME_ABSENCE_STATUSES.has(status.toUpperCase()) || COUNTED_PAID_OVERTIME_ABSENCE_STATUSES.has(normalizedStatus);
+  return !statusValues.some((status) => REJECTED_ABSENCE_STATUSES.has(status.toUpperCase()) || REJECTED_ABSENCE_STATUSES.has(status));
+}
+
+function absenceStatusComparisonValues(value: unknown) {
+  const values = new Set<string>();
+  const scalar = stringFrom(value);
+  if (scalar) {
+    values.add(scalar);
+  }
+
+  const record = asRecord(value);
+  if (record) {
+    recordTextValues(record).forEach((entry) => values.add(entry));
+  } else if (Array.isArray(value)) {
+    value.forEach((entry) => absenceStatusComparisonValues(entry).forEach((status) => values.add(status)));
+  }
+
+  return Array.from(values).map(normalizeComparisonValue).filter(Boolean);
 }
 
 function isPaidOvertimeAbsenceLine(line: JsonRecord, absenceRequest?: JsonRecord) {
