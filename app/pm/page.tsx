@@ -136,6 +136,9 @@ const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
+const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overuren", "Opbouw overuren"];
+const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
+const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
@@ -690,14 +693,46 @@ function employeeHasExcludedPmRole(employee: JsonRecord, excludedRoleIds: Set<nu
 }
 
 function excludedPmRoleIds() {
+  return numberSetFromEnv(process.env.PM_EXCLUDED_ROLE_IDS ?? process.env.GRIPP_PM_EXCLUDED_ROLE_IDS ?? "");
+}
+
+function paidOvertimeAbsenceTypeIds() {
+  return numberSetFromEnv(firstConfiguredEnvValue(PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES));
+}
+
+function paidOvertimeAbsenceTypeNames() {
+  return [...DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES, ...listFromEnv(firstConfiguredEnvValue(PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES))].map(
+    normalizeComparisonValue
+  );
+}
+
+function firstConfiguredEnvValue(envNames: string[]) {
+  for (const envName of envNames) {
+    const value = process.env[envName];
+    if (value?.trim()) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function numberSetFromEnv(value: string) {
   return new Set(
-    (process.env.PM_EXCLUDED_ROLE_IDS ?? process.env.GRIPP_PM_EXCLUDED_ROLE_IDS ?? "")
+    value
       .split(/[,\s;]+/)
-      .map((value) => value.trim())
+      .map((entry) => entry.trim())
       .filter(Boolean)
       .map(Number)
-      .filter((value) => Number.isFinite(value))
+      .filter((entry) => Number.isFinite(entry))
   );
+}
+
+function listFromEnv(value: string) {
+  return value
+    .split(/[,\n;]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function employeeRoleTextValues(employee: JsonRecord) {
@@ -1421,7 +1456,7 @@ function buildPaidOvertimeHoursByEmployeeId(absenceRequestLines: JsonRecord[], a
       continue;
     }
 
-    const amount = Math.max(0, numberFrom(readField(line, "amount")) ?? 0);
+    const amount = Math.abs(numberFrom(readField(line, "amount")) ?? 0);
     if (amount === 0) {
       continue;
     }
@@ -1433,9 +1468,19 @@ function buildPaidOvertimeHoursByEmployeeId(absenceRequestLines: JsonRecord[], a
 }
 
 function isPaidOvertimeAbsenceLine(line: JsonRecord, absenceRequest?: JsonRecord) {
+  const absenceTypeId = relationId(line, "absencetype") ?? (absenceRequest ? relationId(absenceRequest, "absencetype") : null);
+  if (absenceTypeId !== null && paidOvertimeAbsenceTypeIds().has(absenceTypeId)) {
+    return true;
+  }
+
   const text = [line, absenceRequest].flatMap((record) => (record ? recordTextValues(record) : [])).join(" ");
   const normalizedText = normalizeComparisonValue(text);
-  return normalizedText.includes("opbouwoveruren") || (normalizedText.includes("opbouw") && normalizedText.includes("overuren"));
+  return (
+    paidOvertimeAbsenceTypeNames().some((absenceTypeName) => absenceTypeName && normalizedText.includes(absenceTypeName)) ||
+    normalizedText.includes("opbouwoveruren") ||
+    normalizedText.includes("opbouwoveruur") ||
+    (normalizedText.includes("opbouw") && (normalizedText.includes("overuren") || normalizedText.includes("overuur")))
+  );
 }
 
 function recordTextValues(record: JsonRecord) {
