@@ -883,15 +883,12 @@ async function fetchPaidOvertimeHoursForPeriod(client: GrippClient, period: Peri
   const records = await fetchPagedRecords(
     client,
     "employeeYearlyLeaveBudget",
-    [
-      { field: "employeeYearlyLeaveBudget.year", operator: "equals", value: Number(period.year) },
-      { field: "employeeYearlyLeaveBudget.leavetype", operator: "equals", value: "OVERTIME" }
-    ],
-    [{ field: "employeeYearlyLeaveBudget.employee", direction: "asc" }],
+    [{ field: "employeeYearlyLeaveBudget.id", operator: "greaterequals", value: 1 }],
+    [{ field: "employeeYearlyLeaveBudget.id", direction: "asc" }],
     MAX_EMPLOYEE_YEARLY_LEAVE_BUDGET_PAGES
   );
 
-  return buildPaidOvertimeHoursByEmployeeId(records);
+  return buildPaidOvertimeHoursByEmployeeId(records, period.year);
 }
 
 async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines: JsonRecord[]) {
@@ -1408,7 +1405,7 @@ function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceReques
   return leaveByEmployeeId;
 }
 
-function buildPaidOvertimeHoursByEmployeeId(records: JsonRecord[]) {
+function buildPaidOvertimeHoursByEmployeeId(records: JsonRecord[], year: string) {
   const paidOvertimeHoursByEmployeeId = new Map<number, number>();
 
   for (const record of records) {
@@ -1419,6 +1416,11 @@ function buildPaidOvertimeHoursByEmployeeId(records: JsonRecord[]) {
 
     const leaveType = stringFrom(readField(record, "leavetype"))?.toUpperCase();
     if (leaveType && leaveType !== "OVERTIME") {
+      continue;
+    }
+
+    const recordYear = numberFrom(readField(record, "year")) ?? stringFrom(readField(record, "year"));
+    if (String(recordYear) !== year) {
       continue;
     }
 
