@@ -1507,7 +1507,7 @@ function buildEmployeeBillabilityRows(
         loggedHours,
         billableHours,
         unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
-        capacityRemainingHours: row.availableHours - calendarItemHours.hours - row.paidOvertimeHours,
+        capacityRemainingHours: row.availableHours - calendarItemHours.hours + row.paidOvertimeHours,
         calendarItemHours: calendarItemHours.hours,
         planningWithoutTaskHours: planningWithoutTask.hours,
         billability: percent(billableHours, row.availableHours)
