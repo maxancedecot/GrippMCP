@@ -39,6 +39,7 @@ type CapacitySources = {
   employees: JsonRecord[];
   workingHoursByEmployeeId: Map<number, number>;
   leaveHoursFromWorkingHoursByEmployeeId: Map<number, number>;
+  paidOvertimeHoursByEmployeeId: Map<number, number>;
   absenceRequestLines: JsonRecord[];
   absenceRequestsById: Map<number, JsonRecord>;
 };
@@ -72,6 +73,7 @@ type EmployeeCapacityRow = {
   contractHours: number;
   leaveHours: number;
   availableHours: number;
+  paidOvertimeHours: number;
   usedWorkingHoursFallback: boolean;
 };
 
@@ -128,6 +130,7 @@ const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
+const MAX_EMPLOYEE_YEARLY_LEAVE_BUDGET_PAGES = 20;
 const INVOICE_REVENUE_SERIES_LABEL = "Verkoopfacturen";
 const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
 const WORKING_HOURS_BATCH_SIZE = 25;
@@ -208,6 +211,7 @@ export default async function PmDashboardPage() {
                   <th scope="col">Billable</th>
                   <th scope="col">Beschikbaar</th>
                   <th scope="col">Agenda-uren</th>
+                  <th scope="col">Betaalde overuren</th>
                   <th scope="col">Agenda niet geassigned</th>
                   <th scope="col">Verlof</th>
                   <th scope="col">Rest</th>
@@ -231,6 +235,7 @@ export default async function PmDashboardPage() {
                     <td>{formatHours(employee.billableHours)}</td>
                     <td>{formatHours(employee.availableHours)}</td>
                     <td>{formatHours(employee.calendarItemHours)}</td>
+                    <td>{formatHours(employee.paidOvertimeHours)}</td>
                     <td>{formatHours(employee.planningWithoutTaskHours)}</td>
                     <td>{formatHours(employee.leaveHours)}</td>
                     <td className={restCellClassName(employee.capacityRemainingHours)} style={restCellStyle(employee.capacityRemainingHours)}>
@@ -480,10 +485,11 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
       requiredData("uren", () => fetchHoursForPeriod(client, period))
     ]);
-    const [employees, absenceRequestLines, calendarItems] = await Promise.all([
+    const [employees, absenceRequestLines, calendarItems, paidOvertimeHoursByEmployeeId] = await Promise.all([
       optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
       optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period)),
-      optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, period))
+      optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, period)),
+      optionalData(issues, "opbouw overuren", new Map<number, number>(), () => fetchPaidOvertimeHoursForPeriod(client, period))
     ]);
     const employeeScope = buildPmEmployeeScope(employees);
     const scopedHours = hoursForEmployeeScope(hours, employeeScope);
@@ -505,6 +511,7 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
         employees: employeeScope.employees,
         workingHoursByEmployeeId: workingHoursCapacity.workingHoursByEmployeeId,
         leaveHoursFromWorkingHoursByEmployeeId: workingHoursCapacity.leaveHoursByEmployeeId,
+        paidOvertimeHoursByEmployeeId: numberMapForEmployeeScope(paidOvertimeHoursByEmployeeId, employeeScope),
         absenceRequestLines: scopedAbsenceRequestLines,
         absenceRequestsById
       },
@@ -660,6 +667,7 @@ function capacitySourcesForEmployeeScope(capacitySources: CapacitySources, emplo
     employees: employeeScope.employees,
     workingHoursByEmployeeId: numberMapForEmployeeScope(capacitySources.workingHoursByEmployeeId, employeeScope),
     leaveHoursFromWorkingHoursByEmployeeId: numberMapForEmployeeScope(capacitySources.leaveHoursFromWorkingHoursByEmployeeId, employeeScope),
+    paidOvertimeHoursByEmployeeId: numberMapForEmployeeScope(capacitySources.paidOvertimeHoursByEmployeeId, employeeScope),
     absenceRequestLines: scopedAbsenceRequestLines,
     absenceRequestsById: capacitySources.absenceRequestsById
   };
@@ -869,6 +877,21 @@ async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Pe
   }
 
   return records;
+}
+
+async function fetchPaidOvertimeHoursForPeriod(client: GrippClient, period: Period) {
+  const records = await fetchPagedRecords(
+    client,
+    "employeeYearlyLeaveBudget",
+    [
+      { field: "employeeYearlyLeaveBudget.year", operator: "equals", value: Number(period.year) },
+      { field: "employeeYearlyLeaveBudget.leavetype", operator: "equals", value: "OVERTIME" }
+    ],
+    [{ field: "employeeYearlyLeaveBudget.employee", direction: "asc" }],
+    MAX_EMPLOYEE_YEARLY_LEAVE_BUDGET_PAGES
+  );
+
+  return buildPaidOvertimeHoursByEmployeeId(records);
 }
 
 async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines: JsonRecord[]) {
@@ -1184,6 +1207,7 @@ function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: Json
   const leaveByEmployeeId = buildLeaveByEmployeeId(capacitySources.absenceRequestLines, capacitySources.absenceRequestsById, period);
   const referencedEmployeeIds = new Set<number>([
     ...Array.from(capacitySources.workingHoursByEmployeeId.keys()),
+    ...Array.from(capacitySources.paidOvertimeHoursByEmployeeId.keys()),
     ...Array.from(leaveByEmployeeId.keys()),
     ...hours.map((hour) => relationId(hour, "employee")).filter((employeeId): employeeId is number => employeeId !== null)
   ]);
@@ -1219,6 +1243,7 @@ function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: Json
     const leaveFromRequestLines = leaveHoursForEmployee(leaveByEmployeeId.get(employeeId) ?? [], capacityStart, period.end);
     const leaveFromWorkingHours = capacitySources.leaveHoursFromWorkingHoursByEmployeeId.get(employeeId) ?? 0;
     const leaveHours = Math.max(leaveFromRequestLines, leaveFromWorkingHours);
+    const paidOvertimeHours = Math.max(0, capacitySources.paidOvertimeHoursByEmployeeId.get(employeeId) ?? 0);
 
     rows.push({
       employeeId,
@@ -1226,6 +1251,7 @@ function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: Json
       contractHours,
       leaveHours,
       availableHours: Math.max(0, contractHours - leaveHours),
+      paidOvertimeHours,
       usedWorkingHoursFallback
     });
   }
@@ -1336,7 +1362,7 @@ function buildEmployeeBillabilityRows(
         loggedHours,
         billableHours,
         unbillableLoggedHours: Math.max(0, loggedHours - billableHours),
-        capacityRemainingHours: row.availableHours - calendarItemHours.hours,
+        capacityRemainingHours: row.availableHours - calendarItemHours.hours - row.paidOvertimeHours,
         calendarItemHours: calendarItemHours.hours,
         planningWithoutTaskHours: planningWithoutTask.hours,
         billability: percent(billableHours, row.availableHours)
@@ -1380,6 +1406,31 @@ function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceReques
   }
 
   return leaveByEmployeeId;
+}
+
+function buildPaidOvertimeHoursByEmployeeId(records: JsonRecord[]) {
+  const paidOvertimeHoursByEmployeeId = new Map<number, number>();
+
+  for (const record of records) {
+    const employeeId = relationId(record, "employee");
+    if (employeeId === null) {
+      continue;
+    }
+
+    const leaveType = stringFrom(readField(record, "leavetype"))?.toUpperCase();
+    if (leaveType && leaveType !== "OVERTIME") {
+      continue;
+    }
+
+    const amount = Math.max(0, numberFrom(readField(record, "newsaldothisyear")) ?? 0);
+    if (amount === 0) {
+      continue;
+    }
+
+    paidOvertimeHoursByEmployeeId.set(employeeId, (paidOvertimeHoursByEmployeeId.get(employeeId) ?? 0) + amount);
+  }
+
+  return paidOvertimeHoursByEmployeeId;
 }
 
 function workingHourEmployeeEntries(
@@ -1752,6 +1803,7 @@ function readField(record: JsonRecord | undefined, field: string) {
     record[`task.${field}`] ??
     record[`tag.${field}`] ??
     record[`employee.${field}`] ??
+    record[`employeeYearlyLeaveBudget.${field}`] ??
     record[`employmentcontract.${field}`] ??
     record[`absencerequestline.${field}`] ??
     record[`absencerequest.${field}`] ??
@@ -1778,6 +1830,7 @@ function relationId(record: JsonRecord, field: string) {
     idFrom(record[`task.${field}.id`]) ??
     idFrom(record[`tag.${field}.id`]) ??
     idFrom(record[`employee.${field}.id`]) ??
+    idFrom(record[`employeeYearlyLeaveBudget.${field}.id`]) ??
     idFrom(record[`employmentcontract.${field}.id`]) ??
     idFrom(record[`absencerequestline.${field}.id`]) ??
     idFrom(record[`absencerequest.${field}.id`]) ??
@@ -1884,6 +1937,8 @@ function looksLikeEntity(record: JsonRecord) {
     "totalincldiscountexclvat",
     "totalexclvat",
     "employee",
+    "leavetype",
+    "newsaldothisyear",
     "startdate",
     "contract",
     "frequency",
@@ -2142,6 +2197,11 @@ function createDemoCapacitySources(period: Period): CapacitySources {
     employees,
     workingHoursByEmployeeId,
     leaveHoursFromWorkingHoursByEmployeeId: new Map<number, number>(),
+    paidOvertimeHoursByEmployeeId: new Map<number, number>([
+      [1, 12],
+      [2, 8],
+      [3, 4]
+    ]),
     absenceRequestLines,
     absenceRequestsById
   };
