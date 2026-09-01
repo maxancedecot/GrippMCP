@@ -1335,15 +1335,15 @@ td .inline-bar {
 }
 
 .project-timeline-block__segment--created {
-  background: var(--blue-soft);
+  background: color-mix(in srgb, var(--overtime) 18%, #ffffff);
 }
 
 .project-timeline-block__segment--internal {
-  background: var(--overtime-soft);
+  background: color-mix(in srgb, var(--danger) 16%, #ffffff);
 }
 
 .project-timeline-block__segment--external {
-  background: var(--warning-soft);
+  background: color-mix(in srgb, var(--good) 18%, #ffffff);
 }
 
 .project-timeline-milestone {
