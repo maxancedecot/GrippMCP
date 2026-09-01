@@ -216,8 +216,6 @@ function ProjectTimeline({
             const internalDeadlineDate = project.internalDeadline ?? createdDate;
             const externalDeliveryDate = project.externalDeliveryDate ?? project.campaignLiveDate ?? internalDeadlineDate;
             const campaignLiveDate = project.campaignLiveDate ?? externalDeliveryDate;
-            const internalDeadlineTone = deadlineToneFor(internalDeadlineDate);
-            const externalDeliveryTone = deadlineToneFor(externalDeliveryDate);
             const internalDeadlinePosition = timelineMilestonePosition(internalDeadlineDate, createdDate, campaignLiveDate, timeline);
             const externalDeliveryPosition = timelineMilestonePosition(externalDeliveryDate, createdDate, campaignLiveDate, timeline);
             const internalDeadlineProgress = timelineMilestoneProgress(internalDeadlineDate, createdDate, campaignLiveDate);
@@ -263,14 +261,14 @@ function ProjectTimeline({
                     <span className="sr-only">Projectperiode</span>
                   </span>
                   <span
-                    className={`project-timeline-milestone project-timeline-milestone--internal project-timeline-milestone--${internalDeadlineTone}`}
+                    className="project-timeline-milestone project-timeline-milestone--internal"
                     style={{ left: `${internalDeadlinePosition}%` }}
                     title={`Interne deadline ${formatDate(internalDeadlineDate)} (aanvang datum in Gripp)`}
                   >
                     <span className="sr-only">Interne deadline {formatDate(internalDeadlineDate)}</span>
                   </span>
                   <span
-                    className={`project-timeline-milestone project-timeline-milestone--external project-timeline-milestone--${externalDeliveryTone}`}
+                    className="project-timeline-milestone project-timeline-milestone--external"
                     style={{ left: `${externalDeliveryPosition}%` }}
                     title={`Externe oplevering ${formatDate(externalDeliveryDate)} (deadline in Gripp)`}
                   >
@@ -771,11 +769,6 @@ function timelineMilestoneProgress(deadline: string, start: string, end: string)
 
 function timelineMinimumWidth(timeline: ProjectTimelineData) {
   return TIMELINE_FIXED_WIDTH + Math.max(3 * 30 * TIMELINE_DAY_WIDTH, timelineDayCount(timeline) * TIMELINE_DAY_WIDTH);
-}
-
-function deadlineToneFor(deadline: string) {
-  const days = daysUntil(deadline);
-  return days < 0 ? "danger" : days <= 14 ? "warning" : "good";
 }
 
 function daysBetween(start: string, end: string) {

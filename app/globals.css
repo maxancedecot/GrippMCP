@@ -1356,25 +1356,15 @@ td .inline-bar {
 }
 
 .project-timeline-milestone--internal {
+  background: var(--overtime);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.78);
 }
 
 .project-timeline-milestone--external {
   width: 4px;
   transform: translateX(-2px);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.78);
-}
-
-.project-timeline-milestone--good {
-  background: var(--ink);
-}
-
-.project-timeline-milestone--warning {
-  background: var(--warning);
-}
-
-.project-timeline-milestone--danger {
   background: var(--danger);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.78);
 }
 
 .project-timeline-summary {
