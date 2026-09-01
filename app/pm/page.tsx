@@ -130,7 +130,6 @@ const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
-const MAX_EMPLOYEE_YEARLY_LEAVE_BUDGET_PAGES = 20;
 const INVOICE_REVENUE_SERIES_LABEL = "Verkoopfacturen";
 const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
 const WORKING_HOURS_BATCH_SIZE = 25;
@@ -485,11 +484,10 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
       requiredData("uren", () => fetchHoursForPeriod(client, period))
     ]);
-    const [employees, absenceRequestLines, calendarItems, paidOvertimeHoursByEmployeeId] = await Promise.all([
+    const [employees, absenceRequestLines, calendarItems] = await Promise.all([
       optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
       optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period)),
-      optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, period)),
-      optionalData(issues, "opbouw overuren", new Map<number, number>(), () => fetchPaidOvertimeHoursForPeriod(client, period))
+      optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, period))
     ]);
     const employeeScope = buildPmEmployeeScope(employees);
     const scopedHours = hoursForEmployeeScope(hours, employeeScope);
@@ -498,6 +496,7 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
       fetchAbsenceRequestsById(client, absenceRequestLines)
     );
     const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
+    const paidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(scopedAbsenceRequestLines, absenceRequestsById, period);
     const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
     const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
       fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
@@ -877,18 +876,6 @@ async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Pe
   }
 
   return records;
-}
-
-async function fetchPaidOvertimeHoursForPeriod(client: GrippClient, period: Period) {
-  const records = await fetchPagedRecords(
-    client,
-    "employeeYearlyLeaveBudget",
-    [{ field: "employeeYearlyLeaveBudget.id", operator: "greaterequals", value: 1 }],
-    [{ field: "employeeYearlyLeaveBudget.id", direction: "asc" }],
-    MAX_EMPLOYEE_YEARLY_LEAVE_BUDGET_PAGES
-  );
-
-  return buildPaidOvertimeHoursByEmployeeId(records, period.year);
 }
 
 async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines: JsonRecord[]) {
@@ -1392,6 +1379,10 @@ function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceReques
 
     const absenceRequestId = relationId(line, "absencerequest");
     const absenceRequest = absenceRequestId === null ? undefined : absenceRequestsById.get(absenceRequestId);
+    if (isPaidOvertimeAbsenceLine(line, absenceRequest)) {
+      continue;
+    }
+
     const employeeId = relationId(absenceRequest ?? line, "employee");
     if (employeeId === null) {
       continue;
@@ -1405,26 +1396,32 @@ function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceReques
   return leaveByEmployeeId;
 }
 
-function buildPaidOvertimeHoursByEmployeeId(records: JsonRecord[], year: string) {
+function buildPaidOvertimeHoursByEmployeeId(absenceRequestLines: JsonRecord[], absenceRequestsById: Map<number, JsonRecord>, period: Period) {
   const paidOvertimeHoursByEmployeeId = new Map<number, number>();
 
-  for (const record of records) {
-    const employeeId = relationId(record, "employee");
+  for (const line of absenceRequestLines) {
+    const status = stringFrom(readField(line, "absencerequeststatus"))?.toUpperCase();
+    if (status && status !== "APPROVED") {
+      continue;
+    }
+
+    const date = dateKeyFromValue(readField(line, "date"));
+    if (!date || date < period.start || date > period.end) {
+      continue;
+    }
+
+    const absenceRequestId = relationId(line, "absencerequest");
+    const absenceRequest = absenceRequestId === null ? undefined : absenceRequestsById.get(absenceRequestId);
+    if (!isPaidOvertimeAbsenceLine(line, absenceRequest)) {
+      continue;
+    }
+
+    const employeeId = relationId(absenceRequest ?? line, "employee");
     if (employeeId === null) {
       continue;
     }
 
-    const leaveType = stringFrom(readField(record, "leavetype"))?.toUpperCase();
-    if (leaveType && leaveType !== "OVERTIME") {
-      continue;
-    }
-
-    const recordYear = numberFrom(readField(record, "year")) ?? stringFrom(readField(record, "year"));
-    if (String(recordYear) !== year) {
-      continue;
-    }
-
-    const amount = Math.max(0, numberFrom(readField(record, "newsaldothisyear")) ?? 0);
+    const amount = Math.max(0, numberFrom(readField(line, "amount")) ?? 0);
     if (amount === 0) {
       continue;
     }
@@ -1433,6 +1430,47 @@ function buildPaidOvertimeHoursByEmployeeId(records: JsonRecord[], year: string)
   }
 
   return paidOvertimeHoursByEmployeeId;
+}
+
+function isPaidOvertimeAbsenceLine(line: JsonRecord, absenceRequest?: JsonRecord) {
+  const text = [line, absenceRequest].flatMap((record) => (record ? recordTextValues(record) : [])).join(" ");
+  const normalizedText = normalizeComparisonValue(text);
+  return normalizedText.includes("opbouwoveruren") || (normalizedText.includes("opbouw") && normalizedText.includes("overuren"));
+}
+
+function recordTextValues(record: JsonRecord) {
+  const values: string[] = [];
+  collectTextValues(record, values, new Set<unknown>());
+  return values;
+}
+
+function collectTextValues(value: unknown, values: string[], seen: Set<unknown>) {
+  if (typeof value === "string") {
+    values.push(value);
+    return;
+  }
+
+  if (value === null || typeof value !== "object" || seen.has(value)) {
+    return;
+  }
+
+  seen.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectTextValues(item, values, seen));
+    return;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value as JsonRecord)) {
+    if (isIgnoredAbsenceTextKey(key)) {
+      continue;
+    }
+
+    collectTextValues(nestedValue, values, seen);
+  }
+}
+
+function isIgnoredAbsenceTextKey(key: string) {
+  return ["id", "amount", "date", "startingtime", "createdon", "updatedon", "employee"].includes(key.toLowerCase().replace(/[._-]/g, ""));
 }
 
 function workingHourEmployeeEntries(
@@ -1805,7 +1843,6 @@ function readField(record: JsonRecord | undefined, field: string) {
     record[`task.${field}`] ??
     record[`tag.${field}`] ??
     record[`employee.${field}`] ??
-    record[`employeeYearlyLeaveBudget.${field}`] ??
     record[`employmentcontract.${field}`] ??
     record[`absencerequestline.${field}`] ??
     record[`absencerequest.${field}`] ??
@@ -1832,7 +1869,6 @@ function relationId(record: JsonRecord, field: string) {
     idFrom(record[`task.${field}.id`]) ??
     idFrom(record[`tag.${field}.id`]) ??
     idFrom(record[`employee.${field}.id`]) ??
-    idFrom(record[`employeeYearlyLeaveBudget.${field}.id`]) ??
     idFrom(record[`employmentcontract.${field}.id`]) ??
     idFrom(record[`absencerequestline.${field}.id`]) ??
     idFrom(record[`absencerequest.${field}.id`]) ??
@@ -1939,8 +1975,6 @@ function looksLikeEntity(record: JsonRecord) {
     "totalincldiscountexclvat",
     "totalexclvat",
     "employee",
-    "leavetype",
-    "newsaldothisyear",
     "startdate",
     "contract",
     "frequency",
