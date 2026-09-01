@@ -331,7 +331,10 @@ async function fetchProjectPages(client: GrippClient) {
       [],
       {
         paging: { firstresult: page * PROJECT_PAGE_SIZE, maxresults: PROJECT_PAGE_SIZE },
-        orderings: [{ field: "project.deadline", direction: "asc" }]
+        orderings: [
+          { field: "project.startdate", direction: "asc" },
+          { field: "project.deadline", direction: "asc" }
+        ]
       }
     ] as JsonValue[]);
     const pageRecords = asRecords(result);
@@ -404,13 +407,13 @@ function buildProjectManagementData(projects: ProjectRow[], source: ProjectSourc
   const filteredProjects = projects
     .filter(isOngoingProject)
     .sort((left, right) => {
-      const leftExternalDelivery = left.externalDeliveryDate ?? "9999-12-31";
-      const rightExternalDelivery = right.externalDeliveryDate ?? "9999-12-31";
       const leftInternalDeadline = left.internalDeadline ?? "9999-12-31";
       const rightInternalDeadline = right.internalDeadline ?? "9999-12-31";
+      const leftExternalDelivery = left.externalDeliveryDate ?? "9999-12-31";
+      const rightExternalDelivery = right.externalDeliveryDate ?? "9999-12-31";
       return (
-        leftExternalDelivery.localeCompare(rightExternalDelivery) ||
         leftInternalDeadline.localeCompare(rightInternalDeadline) ||
+        leftExternalDelivery.localeCompare(rightExternalDelivery) ||
         left.name.localeCompare(right.name, "nl")
       );
     });
