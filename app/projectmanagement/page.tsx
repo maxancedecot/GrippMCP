@@ -33,9 +33,10 @@ type ProjectRow = {
   company: string;
   accountManager?: string;
   phase: string;
-  deadline?: string;
-  startDate?: string;
-  deliveryDate?: string;
+  createdDate?: string;
+  internalDeadline?: string;
+  externalDeliveryDate?: string;
+  campaignLiveDate?: string;
   completedDate?: string;
   tags: string[];
   value: number;
@@ -113,9 +114,9 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
       {completionNotice ? <p className={`data-notice data-notice--${completionNotice.tone}`}>{completionNotice.message}</p> : null}
 
       <section className="metric-grid project-metric-grid" aria-label="Kerncijfers projecten">
-        <ProjectMetric label="Lopend" value={String(data.totalProjects)} detail="Tag Project met alle projectdatums" tone="good" />
-        <ProjectMetric label="Achter deadline" value={String(data.overdueProjects)} detail="Lopende projecten met verstreken deadline" tone="warning" />
-        <ProjectMetric label="Binnen 14 dagen" value={String(data.upcomingProjects)} detail="Lopende projecten met aankomende deadline" tone="blue" />
+        <ProjectMetric label="Lopend" value={String(data.totalProjects)} detail="Tag Project met interne deadline, externe oplevering en campagne live" tone="good" />
+        <ProjectMetric label="Extern voorbij" value={String(data.overdueProjects)} detail="Deadline in Gripp = externe oplevering" tone="warning" />
+        <ProjectMetric label="Extern binnen 14d" value={String(data.upcomingProjects)} detail="Externe oplevering binnen 14 dagen" tone="blue" />
         <ProjectMetric label="Totale waarde" value={formatCurrency(data.totalValue)} detail="Exclusief btw, van zichtbare projecten" tone="neutral" />
       </section>
 
@@ -211,12 +212,19 @@ function ProjectTimeline({
           ) : null}
 
           {projects.map((project) => {
-            const startDate = project.startDate ?? timeline.start;
-            const deliveryDate = project.deliveryDate ?? timeline.end;
-            const deadlineDate = project.deadline ?? deliveryDate;
-            const deadlineTone = deadlineToneFor(deadlineDate);
-            const deadlinePosition = timelineDeadlinePosition(deadlineDate, startDate, deliveryDate, timeline);
-            const deadlineProgress = timelineDeadlineProgress(deadlineDate, startDate, deliveryDate);
+            const createdDate = project.createdDate ?? project.internalDeadline ?? timeline.start;
+            const internalDeadlineDate = project.internalDeadline ?? createdDate;
+            const externalDeliveryDate = project.externalDeliveryDate ?? project.campaignLiveDate ?? internalDeadlineDate;
+            const campaignLiveDate = project.campaignLiveDate ?? externalDeliveryDate;
+            const internalDeadlineTone = deadlineToneFor(internalDeadlineDate);
+            const externalDeliveryTone = deadlineToneFor(externalDeliveryDate);
+            const internalDeadlinePosition = timelineMilestonePosition(internalDeadlineDate, createdDate, campaignLiveDate, timeline);
+            const externalDeliveryPosition = timelineMilestonePosition(externalDeliveryDate, createdDate, campaignLiveDate, timeline);
+            const internalDeadlineProgress = timelineMilestoneProgress(internalDeadlineDate, createdDate, campaignLiveDate);
+            const externalDeliveryProgress = Math.max(
+              internalDeadlineProgress,
+              timelineMilestoneProgress(externalDeliveryDate, createdDate, campaignLiveDate)
+            );
 
             return (
               <article className="project-timeline-row" key={project.id} role="listitem">
@@ -226,30 +234,47 @@ function ProjectTimeline({
                   </div>
                   <span className="cell-muted">{project.company}</span>
                   {project.accountManager ? <span className="cell-muted">{project.accountManager}</span> : null}
+                  <span className="cell-muted">Aangemaakt {formatDate(createdDate)}</span>
                 </div>
 
-                <div className="project-timeline-track" aria-label={`${project.name}: van ${formatDate(startDate)} tot ${formatDate(deliveryDate)}; interne oplevering ${formatDate(deadlineDate)}`}>
-                  <span className="project-timeline-block" style={timelineBarStyle(startDate, deliveryDate, timeline)}>
+                <div
+                  className="project-timeline-track"
+                  aria-label={`${project.name}: aangemaakt ${formatDate(createdDate)}; interne deadline ${formatDate(internalDeadlineDate)}; externe oplevering ${formatDate(externalDeliveryDate)}; campagne live ${formatDate(campaignLiveDate)}`}
+                >
+                  <span className="project-timeline-block" style={timelineBarStyle(createdDate, campaignLiveDate, timeline)}>
                     <span
-                      className="project-timeline-block__before"
-                      style={{ width: `${deadlineProgress}%` }}
-                      title={`Interne oplevering ${formatDate(deadlineDate)}`}
+                      className="project-timeline-block__segment project-timeline-block__segment--created"
+                      style={{ left: "0%", width: `${internalDeadlineProgress}%` }}
+                      title={`Aangemaakt op Gripp ${formatDate(createdDate)} tot interne deadline ${formatDate(internalDeadlineDate)}`}
                       aria-hidden="true"
                     />
                     <span
-                      className="project-timeline-block__after"
-                      style={{ left: `${deadlineProgress}%` }}
-                      title={`Oplevering ${formatDate(deliveryDate)}`}
+                      className="project-timeline-block__segment project-timeline-block__segment--internal"
+                      style={{ left: `${internalDeadlineProgress}%`, width: `${Math.max(0, externalDeliveryProgress - internalDeadlineProgress)}%` }}
+                      title={`Interne deadline ${formatDate(internalDeadlineDate)} tot externe oplevering ${formatDate(externalDeliveryDate)}`}
+                      aria-hidden="true"
+                    />
+                    <span
+                      className="project-timeline-block__segment project-timeline-block__segment--external"
+                      style={{ left: `${externalDeliveryProgress}%`, width: `${Math.max(0, 100 - externalDeliveryProgress)}%` }}
+                      title={`Externe oplevering ${formatDate(externalDeliveryDate)} tot campagne live ${formatDate(campaignLiveDate)}`}
                       aria-hidden="true"
                     />
                     <span className="sr-only">Projectperiode</span>
                   </span>
                   <span
-                    className={`project-timeline-deadline project-timeline-deadline--${deadlineTone}`}
-                    style={{ left: `${deadlinePosition}%` }}
-                    title={`Interne oplevering ${formatDate(deadlineDate)}`}
+                    className={`project-timeline-milestone project-timeline-milestone--internal project-timeline-milestone--${internalDeadlineTone}`}
+                    style={{ left: `${internalDeadlinePosition}%` }}
+                    title={`Interne deadline ${formatDate(internalDeadlineDate)} (aanvang datum in Gripp)`}
                   >
-                    <span className="sr-only">Interne oplevering {formatDate(deadlineDate)}</span>
+                    <span className="sr-only">Interne deadline {formatDate(internalDeadlineDate)}</span>
+                  </span>
+                  <span
+                    className={`project-timeline-milestone project-timeline-milestone--external project-timeline-milestone--${externalDeliveryTone}`}
+                    style={{ left: `${externalDeliveryPosition}%` }}
+                    title={`Externe oplevering ${formatDate(externalDeliveryDate)} (deadline in Gripp)`}
+                  >
+                    <span className="sr-only">Externe oplevering {formatDate(externalDeliveryDate)}</span>
                   </span>
                 </div>
 
@@ -381,24 +406,28 @@ function buildProjectManagementData(projects: ProjectRow[], source: ProjectSourc
   const filteredProjects = projects
     .filter(isOngoingProject)
     .sort((left, right) => {
-      const leftDeadline = left.deadline ?? "9999-12-31";
-      const rightDeadline = right.deadline ?? "9999-12-31";
-      const leftStart = left.startDate ?? "9999-12-31";
-      const rightStart = right.startDate ?? "9999-12-31";
-      return leftDeadline.localeCompare(rightDeadline) || leftStart.localeCompare(rightStart) || left.name.localeCompare(right.name, "nl");
+      const leftExternalDelivery = left.externalDeliveryDate ?? "9999-12-31";
+      const rightExternalDelivery = right.externalDeliveryDate ?? "9999-12-31";
+      const leftInternalDeadline = left.internalDeadline ?? "9999-12-31";
+      const rightInternalDeadline = right.internalDeadline ?? "9999-12-31";
+      return (
+        leftExternalDelivery.localeCompare(rightExternalDelivery) ||
+        leftInternalDeadline.localeCompare(rightInternalDeadline) ||
+        left.name.localeCompare(right.name, "nl")
+      );
     });
 
   return {
     source,
     projects: filteredProjects,
     totalProjects: filteredProjects.length,
-    overdueProjects: filteredProjects.filter((project) => project.deadline && daysUntil(project.deadline) < 0).length,
+    overdueProjects: filteredProjects.filter((project) => project.externalDeliveryDate && daysUntil(project.externalDeliveryDate) < 0).length,
     upcomingProjects: filteredProjects.filter((project) => {
-      if (!project.deadline) {
+      if (!project.externalDeliveryDate) {
         return false;
       }
 
-      const days = daysUntil(project.deadline);
+      const days = daysUntil(project.externalDeliveryDate);
       return days >= 0 && days <= 14;
     }).length,
     totalValue: filteredProjects.reduce((total, project) => total + project.value, 0),
@@ -426,9 +455,10 @@ function projectRowFromRecord(
     company: relationDisplayName(project, "company", relations.companies.names, "Geen klant"),
     accountManager: accountManagerId === null ? undefined : relations.employees.get(accountManagerId),
     phase: relationDisplayName(project, "phase", relations.phases, "Geen fase"),
-    deadline: dateKeyFromValue(readField(project, "deadline")),
-    startDate: dateKeyFromValue(readField(project, "startdate")),
-    deliveryDate: dateKeyFromValue(readField(project, "deliverydate")),
+    createdDate: dateKeyFromValue(readField(project, "createdon")),
+    internalDeadline: dateKeyFromValue(readField(project, "startdate")),
+    externalDeliveryDate: dateKeyFromValue(readField(project, "deadline")),
+    campaignLiveDate: dateKeyFromValue(readField(project, "deliverydate")),
     completedDate: dateKeyFromValue(readField(project, "enddate")),
     tags: relationIds(project, "tags").map((id) => relations.tags.get(id)).filter((tag): tag is string => Boolean(tag)),
     value: Math.max(0, numberFrom(readField(project, "totalexclvat")) ?? 0),
@@ -660,15 +690,15 @@ function daysUntil(value: string) {
 }
 
 function createProjectTimeline(projects: ProjectRow[]): ProjectTimelineData | null {
-  const startDates = projects.map((project) => project.startDate).filter((date): date is string => Boolean(date));
-  const deliveryDates = projects.map((project) => project.deliveryDate).filter((date): date is string => Boolean(date));
-  if (startDates.length === 0 || deliveryDates.length === 0) {
+  const timelineStartDates = projects.map(projectTimelineStartDate).filter((date): date is string => Boolean(date));
+  const timelineEndDates = projects.map(projectTimelineEndDate).filter((date): date is string => Boolean(date));
+  if (timelineStartDates.length === 0 || timelineEndDates.length === 0) {
     return null;
   }
 
-  const earliestStart = [...startDates].sort()[0];
-  const latestDelivery = [...deliveryDates].sort().at(-1);
-  if (!earliestStart || !latestDelivery) {
+  const earliestStart = [...timelineStartDates].sort()[0];
+  const latestEnd = [...timelineEndDates].sort().at(-1);
+  if (!earliestStart || !latestEnd) {
     return null;
   }
 
@@ -676,9 +706,17 @@ function createProjectTimeline(projects: ProjectRow[]): ProjectTimelineData | nu
   calendarStart.setDate(1);
   const start = dateKey(calendarStart);
   const minimumEnd = new Date(calendarStart.getFullYear(), calendarStart.getMonth() + 3, 0);
-  const end = latestDelivery > dateKey(minimumEnd) ? latestDelivery : dateKey(minimumEnd);
+  const end = latestEnd > dateKey(minimumEnd) ? latestEnd : dateKey(minimumEnd);
 
   return { start, end, ticks: createTimelineTicks(start, end) };
+}
+
+function projectTimelineStartDate(project: ProjectRow) {
+  return project.createdDate ?? project.internalDeadline;
+}
+
+function projectTimelineEndDate(project: ProjectRow) {
+  return project.campaignLiveDate ?? project.externalDeliveryDate;
 }
 
 function createTimelineTicks(start: string, end: string): ProjectTimelineTick[] {
@@ -714,7 +752,7 @@ function timelineBarStyle(start: string, end: string, timeline: ProjectTimelineD
   };
 }
 
-function timelineDeadlinePosition(deadline: string, start: string, end: string, timeline: ProjectTimelineData) {
+function timelineMilestonePosition(deadline: string, start: string, end: string, timeline: ProjectTimelineData) {
   const startPosition = timelinePosition(start, timeline);
   const endPosition = Math.max(startPosition, timelinePosition(end, timeline));
   const deadlinePosition = timelinePosition(deadline, timeline);
@@ -722,7 +760,7 @@ function timelineDeadlinePosition(deadline: string, start: string, end: string, 
   return Math.max(startPosition, Math.min(endPosition, deadlinePosition));
 }
 
-function timelineDeadlineProgress(deadline: string, start: string, end: string) {
+function timelineMilestoneProgress(deadline: string, start: string, end: string) {
   const dayCount = daysBetween(start, end) + 1;
   if (dayCount <= 0) {
     return 100;
@@ -799,7 +837,7 @@ function isOngoingProject(project: ProjectRow) {
     !project.completedDate &&
     !isCompletedProjectPhase(project.phase) &&
     project.tags.some((tag) => normalize(tag) === "project") &&
-    Boolean(project.startDate && project.deadline && project.deliveryDate)
+    Boolean(project.internalDeadline && project.externalDeliveryDate && project.campaignLiveDate)
   );
 }
 
@@ -808,7 +846,7 @@ function isCompletedProjectPhase(phase: string) {
 }
 
 function looksLikeEntity(record: JsonRecord) {
-  return ["id", "name", "number", "deadline", "company"].some((field) => readField(record, field) !== undefined);
+  return ["id", "name", "number", "createdon", "deadline", "company"].some((field) => readField(record, field) !== undefined);
 }
 
 function createDemoProjects(): ProjectRow[] {
@@ -819,13 +857,118 @@ function createDemoProjects(): ProjectRow[] {
   };
 
   return [
-    { id: 601, name: "Rebranding voorjaar", company: "Atelier Nova", accountManager: "Janneke Jacobs", phase: "Concept", deadline: relativeDate(-3), startDate: relativeDate(-42), deliveryDate: relativeDate(8), tags: ["Project"], value: 12400, archived: false },
-    { id: 602, name: "E-commerce campagne", company: "Korf & Co", accountManager: "Jasmijn Bakker", phase: "Productie", deadline: relativeDate(2), startDate: relativeDate(-21), deliveryDate: relativeDate(2), tags: ["Project"], value: 18600, archived: false },
-    { id: 603, name: "Website onderhoud Q3", company: "Veldhuis Groep", accountManager: "Noor de Vries", phase: "Uitvoering", deadline: relativeDate(6), startDate: relativeDate(-12), deliveryDate: relativeDate(6), tags: ["Project"], value: 7200, archived: false },
-    { id: 604, name: "Employer branding", company: "Meridian", accountManager: "Milan Jansen", phase: "Review", deadline: relativeDate(11), startDate: relativeDate(-28), deliveryDate: relativeDate(11), tags: ["Campagne"], value: 9500, archived: false },
-    { id: 605, name: "Jaarverslag 2026", company: "Hartman Industries", accountManager: "Janneke Jacobs", phase: "Uitvoering", deadline: relativeDate(28), startDate: relativeDate(8), deliveryDate: relativeDate(28), completedDate: relativeDate(-1), tags: ["Project"], value: 15750, archived: false },
-    { id: 606, name: "Contentretainer juni", company: "Studio Linden", accountManager: "Jasmijn Bakker", phase: "Uitvoering", deadline: relativeDate(35), startDate: relativeDate(-18), deliveryDate: relativeDate(35), tags: ["Project"], value: 5400, archived: false },
-    { id: 607, name: "Productlancering", company: "Penta Labs", accountManager: "Noor de Vries", phase: "Oplevering", deadline: relativeDate(-16), startDate: relativeDate(-62), deliveryDate: relativeDate(-16), tags: ["Project"], value: 22400, archived: true },
-    { id: 608, name: "Merkstrategie", company: "Lumen Partners", accountManager: "Milan Jansen", phase: "Afgerond", deadline: relativeDate(-49), startDate: relativeDate(-90), deliveryDate: relativeDate(-49), tags: ["Project"], value: 13800, archived: true }
+    {
+      id: 601,
+      name: "Rebranding voorjaar",
+      company: "Atelier Nova",
+      accountManager: "Janneke Jacobs",
+      phase: "Concept",
+      createdDate: relativeDate(-62),
+      internalDeadline: relativeDate(-3),
+      externalDeliveryDate: relativeDate(8),
+      campaignLiveDate: relativeDate(15),
+      tags: ["Project"],
+      value: 12400,
+      archived: false
+    },
+    {
+      id: 602,
+      name: "E-commerce campagne",
+      company: "Korf & Co",
+      accountManager: "Jasmijn Bakker",
+      phase: "Productie",
+      createdDate: relativeDate(-44),
+      internalDeadline: relativeDate(2),
+      externalDeliveryDate: relativeDate(7),
+      campaignLiveDate: relativeDate(10),
+      tags: ["Project"],
+      value: 18600,
+      archived: false
+    },
+    {
+      id: 603,
+      name: "Website onderhoud Q3",
+      company: "Veldhuis Groep",
+      accountManager: "Noor de Vries",
+      phase: "Uitvoering",
+      createdDate: relativeDate(-31),
+      internalDeadline: relativeDate(6),
+      externalDeliveryDate: relativeDate(13),
+      campaignLiveDate: relativeDate(18),
+      tags: ["Project"],
+      value: 7200,
+      archived: false
+    },
+    {
+      id: 604,
+      name: "Employer branding",
+      company: "Meridian",
+      accountManager: "Milan Jansen",
+      phase: "Review",
+      createdDate: relativeDate(-38),
+      internalDeadline: relativeDate(11),
+      externalDeliveryDate: relativeDate(18),
+      campaignLiveDate: relativeDate(22),
+      tags: ["Campagne"],
+      value: 9500,
+      archived: false
+    },
+    {
+      id: 605,
+      name: "Jaarverslag 2026",
+      company: "Hartman Industries",
+      accountManager: "Janneke Jacobs",
+      phase: "Uitvoering",
+      createdDate: relativeDate(-18),
+      internalDeadline: relativeDate(28),
+      externalDeliveryDate: relativeDate(35),
+      campaignLiveDate: relativeDate(42),
+      completedDate: relativeDate(-1),
+      tags: ["Project"],
+      value: 15750,
+      archived: false
+    },
+    {
+      id: 606,
+      name: "Contentretainer juni",
+      company: "Studio Linden",
+      accountManager: "Jasmijn Bakker",
+      phase: "Uitvoering",
+      createdDate: relativeDate(-55),
+      internalDeadline: relativeDate(35),
+      externalDeliveryDate: relativeDate(42),
+      campaignLiveDate: relativeDate(49),
+      tags: ["Project"],
+      value: 5400,
+      archived: false
+    },
+    {
+      id: 607,
+      name: "Productlancering",
+      company: "Penta Labs",
+      accountManager: "Noor de Vries",
+      phase: "Oplevering",
+      createdDate: relativeDate(-82),
+      internalDeadline: relativeDate(-23),
+      externalDeliveryDate: relativeDate(-16),
+      campaignLiveDate: relativeDate(-10),
+      tags: ["Project"],
+      value: 22400,
+      archived: true
+    },
+    {
+      id: 608,
+      name: "Merkstrategie",
+      company: "Lumen Partners",
+      accountManager: "Milan Jansen",
+      phase: "Afgerond",
+      createdDate: relativeDate(-124),
+      internalDeadline: relativeDate(-56),
+      externalDeliveryDate: relativeDate(-49),
+      campaignLiveDate: relativeDate(-42),
+      tags: ["Project"],
+      value: 13800,
+      archived: true
+    }
   ];
 }

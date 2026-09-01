@@ -1323,29 +1323,30 @@ td .inline-bar {
   height: 36px;
   overflow: hidden;
   border-radius: 4px;
-  border: 1px solid rgba(139, 92, 246, 0.34);
-  background: #fee2e2;
+  border: 1px solid rgba(59, 130, 246, 0.24);
+  background: var(--surface-strong);
 }
 
-.project-timeline-block__before,
-.project-timeline-block__after {
+.project-timeline-block__segment {
   position: absolute;
   top: 0;
   bottom: 0;
   cursor: help;
 }
 
-.project-timeline-block__before {
-  left: 0;
+.project-timeline-block__segment--created {
+  background: var(--blue-soft);
+}
+
+.project-timeline-block__segment--internal {
   background: var(--overtime-soft);
 }
 
-.project-timeline-block__after {
-  right: 0;
-  background: #fee2e2;
+.project-timeline-block__segment--external {
+  background: var(--warning-soft);
 }
 
-.project-timeline-deadline {
+.project-timeline-milestone {
   position: absolute;
   z-index: 2;
   top: 16px;
@@ -1354,15 +1355,25 @@ td .inline-bar {
   transform: translateX(-1px);
 }
 
-.project-timeline-deadline--good {
+.project-timeline-milestone--internal {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.78);
+}
+
+.project-timeline-milestone--external {
+  width: 4px;
+  transform: translateX(-2px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.78);
+}
+
+.project-timeline-milestone--good {
   background: var(--ink);
 }
 
-.project-timeline-deadline--warning {
+.project-timeline-milestone--warning {
   background: var(--warning);
 }
 
-.project-timeline-deadline--danger {
+.project-timeline-milestone--danger {
   background: var(--danger);
 }
 
