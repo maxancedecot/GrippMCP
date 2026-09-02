@@ -13,6 +13,8 @@ export const metadata: Metadata = {
 };
 
 type JsonRecord = Record<string, unknown>;
+type PmSearchParams = Record<string, string | string[] | undefined>;
+type PmBillabilityView = "employees" | "monthly";
 
 type Period = {
   start: string;
@@ -98,6 +100,14 @@ type MonthRevenuePerBillableHour = MonthRevenue & {
   revenuePerBillableHour: number;
 };
 
+type MonthBillability = {
+  key: string;
+  label: string;
+  billableHours: number;
+  availableHours: number;
+  billability: number;
+};
+
 type PmDashboardData = {
   period: Period;
   source: DashboardSource;
@@ -119,6 +129,7 @@ type PmDashboardData = {
   excludedEmployeeCount: number;
   fallbackWorkingHoursEmployeeCount: number;
   employeeBillability: EmployeeBillabilityRow[];
+  billabilityByMonth: MonthBillability[];
   revenueByMonth: MonthRevenue[];
   revenuePerBillableHourByMonth: MonthRevenuePerBillableHour[];
   lastUpdated: string;
@@ -167,7 +178,9 @@ const currencyPerHourFormatter = new Intl.NumberFormat("nl-BE", {
   maximumFractionDigits: 0
 });
 
-export default async function PmDashboardPage() {
+export default async function PmDashboardPage({ searchParams }: { searchParams?: Promise<PmSearchParams> }) {
+  const params = (await searchParams) ?? {};
+  const billabilityView = getPmBillabilityView(params);
   const dashboard = await getPmDashboardData();
 
   return (
@@ -199,13 +212,34 @@ export default async function PmDashboardPage() {
       <section className="panel pm-detail-panel" id="pm-billability-detail" tabIndex={-1}>
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Medewerkers</p>
-            <h2>Billableheid per medewerker</h2>
+            <p className="eyebrow">Billableheid</p>
+            <h2>{billabilityView === "monthly" ? "Billableheid per maand" : "Billableheid per medewerker"}</h2>
           </div>
-          <span className="panel-total">{formatEmployeeCount(dashboard.employeeBillability.length)}</span>
+          <span className="panel-total">
+            {billabilityView === "monthly" ? `${formatPercent(dashboard.billability)}% dit jaar` : formatEmployeeCount(dashboard.employeeBillability.length)}
+          </span>
         </div>
 
-        {dashboard.employeeBillability.length > 0 ? (
+        <nav className="dashboard-tabs pm-panel-tabs" aria-label="Billableheid tabs">
+          <a
+            className={`dashboard-tab ${billabilityView === "employees" ? "dashboard-tab--active" : ""}`}
+            href={pmBillabilityTabHref(params, "employees")}
+            aria-current={billabilityView === "employees" ? "page" : undefined}
+          >
+            Per medewerker
+          </a>
+          <a
+            className={`dashboard-tab ${billabilityView === "monthly" ? "dashboard-tab--active" : ""}`}
+            href={pmBillabilityTabHref(params, "monthly")}
+            aria-current={billabilityView === "monthly" ? "page" : undefined}
+          >
+            Per maand
+          </a>
+        </nav>
+
+        {billabilityView === "monthly" ? (
+          <BillabilityLineChart rows={dashboard.billabilityByMonth} />
+        ) : dashboard.employeeBillability.length > 0 ? (
           <div className="pm-employee-table-wrap">
             <table className="pm-employee-table">
               <thead>
@@ -322,6 +356,31 @@ function MetricCard({
       {content}
     </article>
   );
+}
+
+function getPmBillabilityView(params: PmSearchParams): PmBillabilityView {
+  return firstParam(params.billabilityView) === "monthly" ? "monthly" : "employees";
+}
+
+function pmBillabilityTabHref(params: PmSearchParams, view: PmBillabilityView) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (key === "billabilityView") {
+      continue;
+    }
+
+    for (const item of paramValues(value)) {
+      search.append(key, item);
+    }
+  }
+
+  if (view === "monthly") {
+    search.set("billabilityView", "monthly");
+  }
+
+  const query = search.toString();
+  return query ? `/pm?${query}#pm-billability-detail` : "/pm#pm-billability-detail";
 }
 
 function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
@@ -463,6 +522,78 @@ function RevenuePerBillableHourLineChart({ rows, goal }: { rows: MonthRevenuePer
               <title>{`${row.label}: ${formatCurrencyPerHour(row.revenuePerBillableHour)} uit ${formatCurrency(row.revenue)} en ${formatHours(row.billableHours)} billable uren`}</title>
               <circle className="revenue-line-point" cx={x} cy={y} r="4" />
               <text className="revenue-line-value" x={x} y={valueY} textAnchor={anchor}>{formatCurrencyPerHour(row.revenuePerBillableHour)}</text>
+              <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function BillabilityLineChart({ rows }: { rows: MonthBillability[] }) {
+  const width = Math.max(720, rows.length * 112);
+  const height = 300;
+  const padding = { top: 26, right: 30, bottom: 48, left: 58 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const values = rows.map((row) => row.billability);
+  const rawMaximum = Math.max(100, 0, ...values);
+  const minimum = 0;
+  const maximum = rawMaximum > 100 ? rawMaximum * 1.08 : 100;
+  const range = Math.max(1, maximum - minimum);
+  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
+  const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
+  const chartPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.billability) }));
+  const linePath = smoothLinePath(chartPoints);
+  const areaPath = smoothAreaPath(chartPoints, yFor(0));
+  const gridTicks = Array.from({ length: 5 }, (_, index) => {
+    const value = maximum - (range * index) / 4;
+    return { key: index, value, y: yFor(value) };
+  });
+  const zeroY = yFor(0);
+  const gradientId = "pm-billability-line-gradient";
+
+  return (
+    <div className="revenue-line-chart">
+      <div className="revenue-line-legend" aria-hidden="true">
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--billability" />Billableheid</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Billableheid per maand: ${rows
+          .map((row) => `${row.label} ${formatPercent(row.billability)} procent bij ${formatHours(row.billableHours)} billable uren en ${formatHours(row.availableHours)} beschikbare uren`)
+          .join(", ")}`}
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1={padding.top} y2={height - padding.bottom} gradientUnits="userSpaceOnUse">
+            <stop className="revenue-line-gradient-start revenue-line-gradient-start--billability" offset="0%" />
+            <stop className="revenue-line-gradient-end revenue-line-gradient-end--billability" offset="100%" />
+          </linearGradient>
+        </defs>
+        <rect className="revenue-line-plot-bg" x={padding.left} y={padding.top} width={chartWidth} height={chartHeight} rx="6" />
+        {gridTicks.map((tick) => (
+          <g key={tick.key}>
+            <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={tick.y} y2={tick.y} />
+            <text className="revenue-line-y-label" x={padding.left - 12} y={tick.y + 4} textAnchor="end">
+              {formatPercent(tick.value)}%
+            </text>
+          </g>
+        ))}
+        <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
+        {rows.length > 1 ? <path className="revenue-line-area revenue-line-area--billability" d={areaPath} fill={`url(#${gradientId})`} /> : null}
+        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--billability" d={linePath} /> : null}
+        {rows.map((row, index) => {
+          const { x, y } = chartPoints[index];
+          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+          const valueY = y < padding.top + 24 ? y + 22 : y - 12;
+
+          return (
+            <g key={row.key}>
+              <title>{`${row.label}: ${formatPercent(row.billability)}% uit ${formatHours(row.billableHours)} billable uren en ${formatHours(row.availableHours)} beschikbare uren`}</title>
+              <circle className="revenue-line-point revenue-line-point--billability" cx={x} cy={y} r="4" />
+              <text className="revenue-line-value" x={x} y={valueY} textAnchor={anchor}>{formatPercent(row.billability)}%</text>
               <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
             </g>
           );
@@ -1251,10 +1382,23 @@ function buildPmDashboardData(
   const capacityRemainingHours = employeeBillability.reduce((total, row) => total + row.capacityRemainingHours, 0);
   const calendarItemHours = employeeBillability.reduce((total, row) => total + row.calendarItemHours, 0);
   const monthBuckets = makeMonthBuckets(period);
+  const availableHoursByMonth = buildAvailableHoursByMonth(capacitySources, hours, period, monthBuckets);
   const revenueByMonthRows = monthBuckets.map((bucket) => ({
     ...bucket,
     revenue: revenueByMonth.get(bucket.key) ?? 0
   }));
+  const billabilityByMonth = monthBuckets.map((bucket) => {
+    const monthlyBillableHours = billableHoursByMonth.get(bucket.key) ?? 0;
+    const monthlyAvailableHours = availableHoursByMonth.get(bucket.key) ?? 0;
+
+    return {
+      key: bucket.key,
+      label: bucket.label,
+      billableHours: monthlyBillableHours,
+      availableHours: monthlyAvailableHours,
+      billability: percent(monthlyBillableHours, monthlyAvailableHours)
+    };
+  });
   const revenuePerBillableHourByMonth = monthBuckets.map((bucket) => {
     const monthlyRevenue = revenueByMonth.get(bucket.key) ?? 0;
     const monthlyBillableHours = billableHoursByMonth.get(bucket.key) ?? 0;
@@ -1288,6 +1432,7 @@ function buildPmDashboardData(
     excludedEmployeeCount,
     fallbackWorkingHoursEmployeeCount: capacity.fallbackWorkingHoursEmployeeCount,
     employeeBillability,
+    billabilityByMonth,
     revenueByMonth: revenueByMonthRows,
     revenuePerBillableHourByMonth,
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
@@ -1415,6 +1560,71 @@ function buildCapacitySummary(employeeCapacityRows: EmployeeCapacityRow[]): Capa
     employeeCount: employeeCapacityRows.length,
     fallbackWorkingHoursEmployeeCount: employeeCapacityRows.filter((row) => row.usedWorkingHoursFallback).length
   };
+}
+
+function buildAvailableHoursByMonth(capacitySources: CapacitySources, hours: JsonRecord[], period: Period, monthBuckets: MonthRevenue[]) {
+  const availableHoursByMonth = new Map(monthBuckets.map((bucket) => [bucket.key, 0]));
+  const employeesById = new Map<number, JsonRecord>();
+
+  for (const employee of capacitySources.employees) {
+    const employeeId = idFrom(readField(employee, "id"));
+    if (employeeId !== null) {
+      employeesById.set(employeeId, employee);
+    }
+  }
+
+  const leaveByEmployeeId = buildLeaveByEmployeeId(capacitySources.absenceRequestLines, capacitySources.absenceRequestsById, period);
+  const referencedEmployeeIds = new Set<number>([
+    ...Array.from(capacitySources.workingHoursByEmployeeId.keys()),
+    ...Array.from(capacitySources.paidOvertimeHoursByEmployeeId.keys()),
+    ...Array.from(leaveByEmployeeId.keys()),
+    ...hours.map((hour) => relationId(hour, "employee")).filter((employeeId): employeeId is number => employeeId !== null)
+  ]);
+
+  for (const employeeId of referencedEmployeeIds) {
+    if (!employeesById.has(employeeId)) {
+      employeesById.set(employeeId, { id: employeeId, active: true });
+    }
+  }
+
+  for (const [employeeId, employee] of employeesById.entries()) {
+    if (booleanFrom(readField(employee, "active")) === false && !referencedEmployeeIds.has(employeeId)) {
+      continue;
+    }
+
+    const capacityStart = maxDateKey(period.start, employeeStartDate(employee));
+    if (capacityStart > period.end) {
+      continue;
+    }
+
+    const leaveLines = leaveByEmployeeId.get(employeeId) ?? [];
+    const lineLeaveHours = leaveHoursForEmployee(leaveLines, capacityStart, period.end);
+    const workingHoursLeave = capacitySources.leaveHoursFromWorkingHoursByEmployeeId.get(employeeId) ?? 0;
+    const extraLeaveHours = Math.max(0, workingHoursLeave - lineLeaveHours);
+    const totalDefaultContractHours = calculateDefaultContractHours(capacityStart, period.end);
+    const workingHours = capacitySources.workingHoursByEmployeeId.get(employeeId);
+    const contractScale =
+      workingHours === undefined || totalDefaultContractHours <= 0 ? 1 : Math.max(0, workingHours) / totalDefaultContractHours;
+
+    for (const bucket of monthBuckets) {
+      const monthStart = maxDateKey(capacityStart, `${bucket.key}-01`);
+      const monthEnd = minDateKey(period.end, monthEndDateKey(bucket.key));
+      if (monthStart > monthEnd) {
+        continue;
+      }
+
+      const defaultContractHours = calculateDefaultContractHours(monthStart, monthEnd);
+      const contractHours = workingHours === undefined ? defaultContractHours : defaultContractHours * contractScale;
+      const monthlyLineLeaveHours = leaveHoursForEmployee(leaveLines, monthStart, monthEnd);
+      const monthlyExtraLeaveHours =
+        totalDefaultContractHours > 0 ? extraLeaveHours * (defaultContractHours / totalDefaultContractHours) : 0;
+      const availableHours = Math.max(0, contractHours - monthlyLineLeaveHours - monthlyExtraLeaveHours);
+
+      availableHoursByMonth.set(bucket.key, (availableHoursByMonth.get(bucket.key) ?? 0) + availableHours);
+    }
+  }
+
+  return availableHoursByMonth;
 }
 
 function buildCalendarItemHoursByEmployeeId(calendarItems: JsonRecord[], period: Period, onlyWithoutTask = false) {
@@ -2271,6 +2481,15 @@ function maxDateKey(left: string, right: string) {
   return left > right ? left : right;
 }
 
+function minDateKey(left: string, right: string) {
+  return left < right ? left : right;
+}
+
+function monthEndDateKey(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return dateKey(new Date(year, month, 0));
+}
+
 function normalizeNumberString(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -2346,6 +2565,18 @@ function formatDate(value: string) {
         year: "numeric"
       }).format(date)
     : value;
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function paramValues(value: string | string[] | undefined) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  return value ? [value] : [];
 }
 
 function createDemoHours(period: Period): JsonRecord[] {

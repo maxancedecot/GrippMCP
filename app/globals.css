@@ -193,6 +193,11 @@ select {
   background: var(--ink);
 }
 
+.pm-panel-tabs {
+  margin-bottom: 16px;
+  box-shadow: none;
+}
+
 .period-form {
   display: flex;
   flex-wrap: wrap;
@@ -813,6 +818,10 @@ select {
   border-radius: 3px;
 }
 
+.revenue-line-legend-dot--billability {
+  border-color: var(--blue);
+}
+
 .revenue-line-chart svg {
   display: block;
   width: 100%;
@@ -835,6 +844,11 @@ select {
   stop-opacity: 0;
 }
 
+.revenue-line-gradient-start--billability,
+.revenue-line-gradient-end--billability {
+  stop-color: var(--blue);
+}
+
 .revenue-line-grid {
   stroke: var(--surface-strong);
   stroke-width: 1;
@@ -852,6 +866,10 @@ select {
   stroke-linejoin: round;
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
+}
+
+.revenue-line-path--billability {
+  stroke: var(--blue);
 }
 
 .revenue-line-area {
@@ -881,6 +899,10 @@ select {
   stroke-width: 2;
   opacity: 0;
   transition: opacity 160ms ease;
+}
+
+.revenue-line-point--billability {
+  stroke: var(--blue);
 }
 
 .revenue-line-value {
