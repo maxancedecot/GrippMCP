@@ -918,6 +918,14 @@ select {
   border-radius: 3px;
 }
 
+.revenue-line-legend-dot--billable-hour {
+  border-color: var(--warning);
+}
+
+.revenue-line-legend-dot--calendar-hour {
+  border-color: var(--neutral);
+}
+
 .revenue-line-legend-dot--billability {
   border-color: var(--blue);
 }
@@ -949,6 +957,11 @@ select {
   stop-color: var(--blue);
 }
 
+.revenue-line-gradient-start--billable-hour,
+.revenue-line-gradient-end--billable-hour {
+  stop-color: var(--warning);
+}
+
 .revenue-line-grid {
   stroke: var(--surface-strong);
   stroke-width: 1;
@@ -970,6 +983,14 @@ select {
 
 .revenue-line-path--billability {
   stroke: var(--blue);
+}
+
+.revenue-line-path--billable-hour {
+  stroke: var(--warning);
+}
+
+.revenue-line-path--calendar-hour {
+  stroke: var(--neutral);
 }
 
 .revenue-line-area {
@@ -1003,6 +1024,14 @@ select {
 
 .revenue-line-point--billability {
   stroke: var(--blue);
+}
+
+.revenue-line-point--billable-hour {
+  stroke: var(--warning);
+}
+
+.revenue-line-point--calendar-hour {
+  stroke: var(--neutral);
 }
 
 .revenue-line-value {
