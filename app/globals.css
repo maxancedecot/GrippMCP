@@ -198,6 +198,74 @@ select {
   box-shadow: none;
 }
 
+.pm-billability-period-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.pm-period-tabs {
+  margin: 0;
+  box-shadow: none;
+}
+
+.pm-period-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.pm-period-form label {
+  display: grid;
+  min-width: 148px;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 740;
+  text-transform: uppercase;
+}
+
+.pm-period-form input {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 7px 10px;
+  font-size: 14px;
+  outline: none;
+}
+
+.pm-period-form input:focus-visible {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.pm-period-form button {
+  min-height: 36px;
+  border: 1px solid color-mix(in srgb, var(--blue) 80%, #1d4ed8);
+  border-radius: 8px;
+  background: var(--blue);
+  color: #ffffff;
+  padding: 8px 13px;
+  font-size: 14px;
+  font-weight: 760;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.pm-period-form button:hover {
+  border-color: #1d4ed8;
+  background: #2563eb;
+}
+
 .period-form {
   display: flex;
   flex-wrap: wrap;
@@ -563,6 +631,7 @@ select {
 
 .panel-total--invoice,
 .panel-total--billable,
+.panel-total--billability,
 .panel-total--goal {
   display: inline-flex;
   align-items: center;
@@ -571,6 +640,7 @@ select {
 
 .panel-total--invoice::before,
 .panel-total--billable::before,
+.panel-total--billability::before,
 .panel-total--goal::before {
   content: "";
   width: 9px;
@@ -581,6 +651,10 @@ select {
 
 .panel-total--billable::before {
   background: var(--billable);
+}
+
+.panel-total--billability::before {
+  background: var(--blue);
 }
 
 .panel-total--goal::before {
@@ -1618,8 +1692,20 @@ td .inline-bar {
     align-items: stretch;
   }
 
+  .pm-billability-period-controls,
+  .pm-period-form,
+  .pm-period-tabs {
+    width: 100%;
+  }
+
+  .pm-period-form {
+    justify-content: stretch;
+  }
+
   .period-form label,
   .period-form button,
+  .pm-period-form label,
+  .pm-period-form button,
   .project-filter-form label,
   .project-filter-form .project-search-field,
   .project-filter-form button {

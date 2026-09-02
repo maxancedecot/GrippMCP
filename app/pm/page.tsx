@@ -15,12 +15,17 @@ export const metadata: Metadata = {
 type JsonRecord = Record<string, unknown>;
 type PmSearchParams = Record<string, string | string[] | undefined>;
 type PmBillabilityView = "employees" | "monthly";
+type PmEmployeeBillabilityPeriodPreset = "week" | "month" | "year" | "custom";
 
 type Period = {
   start: string;
   end: string;
   year: string;
   label: string;
+};
+
+type EmployeeBillabilityPeriod = Period & {
+  preset: PmEmployeeBillabilityPeriodPreset;
 };
 
 type DashboardSource = {
@@ -108,8 +113,16 @@ type MonthBillability = {
   billability: number;
 };
 
+type BillabilitySummary = {
+  billableHours: number;
+  availableHours: number;
+  billability: number;
+};
+
 type PmDashboardData = {
   period: Period;
+  employeeBillabilityPeriod: EmployeeBillabilityPeriod;
+  employeeBillabilitySummary: BillabilitySummary;
   source: DashboardSource;
   revenue: number;
   loggedHours: number;
@@ -181,7 +194,8 @@ const currencyPerHourFormatter = new Intl.NumberFormat("nl-BE", {
 export default async function PmDashboardPage({ searchParams }: { searchParams?: Promise<PmSearchParams> }) {
   const params = (await searchParams) ?? {};
   const billabilityView = getPmBillabilityView(params);
-  const dashboard = await getPmDashboardData();
+  const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
+  const dashboard = await getPmDashboardData(employeeBillabilityPeriod);
 
   return (
     <DashboardFrame>
@@ -215,9 +229,17 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
             <p className="eyebrow">Billableheid</p>
             <h2>{billabilityView === "monthly" ? "Billableheid per maand" : "Billableheid per medewerker"}</h2>
           </div>
-          <span className="panel-total">
-            {billabilityView === "monthly" ? `${formatPercent(dashboard.billability)}% dit jaar` : formatEmployeeCount(dashboard.employeeBillability.length)}
-          </span>
+          <div className="panel-actions">
+            {billabilityView === "monthly" ? (
+              <span className="panel-total">{formatPercent(dashboard.billability)}% dit jaar</span>
+            ) : (
+              <>
+                <span className="panel-total panel-total--billability">{formatPercent(dashboard.employeeBillabilitySummary.billability)}%</span>
+                <span className="panel-total">{dashboard.employeeBillabilityPeriod.label}</span>
+                <span className="panel-total">{formatEmployeeCount(dashboard.employeeBillability.length)}</span>
+              </>
+            )}
+          </div>
         </div>
 
         <nav className="dashboard-tabs pm-panel-tabs" aria-label="Billableheid tabs">
@@ -240,52 +262,58 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
         {billabilityView === "monthly" ? (
           <BillabilityLineChart rows={dashboard.billabilityByMonth} />
         ) : dashboard.employeeBillability.length > 0 ? (
-          <div className="pm-employee-table-wrap">
-            <table className="pm-employee-table">
-              <thead>
-                <tr>
-                  <th scope="col">Medewerker</th>
-                  <th scope="col">Billableheid</th>
-                  <th scope="col">Billable</th>
-                  <th scope="col">Beschikbaar</th>
-                  <th scope="col">Agenda-uren</th>
-                  <th scope="col">Betaalde overuren</th>
-                  <th scope="col">Agenda niet geassigned</th>
-                  <th scope="col">Verlof</th>
-                  <th scope="col">Rest</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dashboard.employeeBillability.map((employee) => (
-                  <tr key={employee.employeeId}>
-                    <th scope="row">
-                      <span className="pm-employee-name">
-                        <strong>{employee.name}</strong>
-                        <span>{employee.usedWorkingHoursFallback ? "40u/week fallback" : "Gripp werktijden"}</span>
-                      </span>
-                    </th>
-                    <td className="pm-employee-percent">
-                      <strong>{formatPercent(employee.billability)}%</strong>
-                      <span className="pm-employee-bar" aria-hidden="true">
-                        <span style={{ width: `${Math.max(0, Math.min(employee.billability, 100))}%` }} />
-                      </span>
-                    </td>
-                    <td>{formatHours(employee.billableHours)}</td>
-                    <td>{formatHours(employee.availableHours)}</td>
-                    <td>{formatHours(employee.calendarItemHours)}</td>
-                    <td>{formatHours(employee.paidOvertimeHours)}</td>
-                    <td>{formatHours(employee.planningWithoutTaskHours)}</td>
-                    <td>{formatHours(employee.leaveHours)}</td>
-                    <td className={restCellClassName(employee.capacityRemainingHours)} style={restCellStyle(employee.capacityRemainingHours)}>
-                      {formatHours(employee.capacityRemainingHours)}
-                    </td>
+          <>
+            <EmployeeBillabilityPeriodControls params={params} period={dashboard.employeeBillabilityPeriod} />
+            <div className="pm-employee-table-wrap">
+              <table className="pm-employee-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Medewerker</th>
+                    <th scope="col">Billableheid</th>
+                    <th scope="col">Billable</th>
+                    <th scope="col">Beschikbaar</th>
+                    <th scope="col">Agenda-uren</th>
+                    <th scope="col">Betaalde overuren</th>
+                    <th scope="col">Agenda niet geassigned</th>
+                    <th scope="col">Verlof</th>
+                    <th scope="col">Rest</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {dashboard.employeeBillability.map((employee) => (
+                    <tr key={employee.employeeId}>
+                      <th scope="row">
+                        <span className="pm-employee-name">
+                          <strong>{employee.name}</strong>
+                          <span>{employee.usedWorkingHoursFallback ? "40u/week fallback" : "Gripp werktijden"}</span>
+                        </span>
+                      </th>
+                      <td className="pm-employee-percent">
+                        <strong>{formatPercent(employee.billability)}%</strong>
+                        <span className="pm-employee-bar" aria-hidden="true">
+                          <span style={{ width: `${Math.max(0, Math.min(employee.billability, 100))}%` }} />
+                        </span>
+                      </td>
+                      <td>{formatHours(employee.billableHours)}</td>
+                      <td>{formatHours(employee.availableHours)}</td>
+                      <td>{formatHours(employee.calendarItemHours)}</td>
+                      <td>{formatHours(employee.paidOvertimeHours)}</td>
+                      <td>{formatHours(employee.planningWithoutTaskHours)}</td>
+                      <td>{formatHours(employee.leaveHours)}</td>
+                      <td className={restCellClassName(employee.capacityRemainingHours)} style={restCellStyle(employee.capacityRemainingHours)}>
+                        {formatHours(employee.capacityRemainingHours)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
-          <p className="empty-state">Geen medewerkers beschikbaar.</p>
+          <>
+            <EmployeeBillabilityPeriodControls params={params} period={dashboard.employeeBillabilityPeriod} />
+            <p className="empty-state">Geen medewerkers beschikbaar.</p>
+          </>
         )}
       </section>
 
@@ -358,8 +386,62 @@ function MetricCard({
   );
 }
 
+function EmployeeBillabilityPeriodControls({ params, period }: { params: PmSearchParams; period: EmployeeBillabilityPeriod }) {
+  const hiddenInputs = preservedPmParamInputs(params, new Set(["billabilityView", "employeePeriod", "employeeStart", "employeeEnd"]));
+
+  return (
+    <div className="pm-billability-period-controls">
+      <nav className="dashboard-tabs pm-period-tabs" aria-label="Periode billableheid per medewerker">
+        {(["week", "month", "year", "custom"] as PmEmployeeBillabilityPeriodPreset[]).map((preset) => (
+          <a
+            key={preset}
+            className={`dashboard-tab ${period.preset === preset ? "dashboard-tab--active" : ""}`}
+            href={pmEmployeeBillabilityPeriodHref(params, preset)}
+            aria-current={period.preset === preset ? "page" : undefined}
+          >
+            {employeeBillabilityPeriodPresetLabel(preset)}
+          </a>
+        ))}
+      </nav>
+
+      <form className="pm-period-form" action="/pm#pm-billability-detail">
+        {hiddenInputs.map(({ key, value }, index) => (
+          <input key={`${key}-${index}`} type="hidden" name={key} value={value} />
+        ))}
+        <input type="hidden" name="billabilityView" value="employees" />
+        <input type="hidden" name="employeePeriod" value="custom" />
+        <label>
+          Van
+          <input type="date" name="employeeStart" defaultValue={period.start} />
+        </label>
+        <label>
+          Tot
+          <input type="date" name="employeeEnd" defaultValue={period.end} />
+        </label>
+        <button type="submit">Laden</button>
+      </form>
+    </div>
+  );
+}
+
 function getPmBillabilityView(params: PmSearchParams): PmBillabilityView {
   return firstParam(params.billabilityView) === "monthly" ? "monthly" : "employees";
+}
+
+function getEmployeeBillabilityPeriodFromParams(params: PmSearchParams): EmployeeBillabilityPeriod {
+  const preset = firstParam(params.employeePeriod);
+  if (preset === "week") {
+    return employeeBillabilityPeriodFromPeriod(getCurrentWeekPeriod(), "week");
+  }
+  if (preset === "month") {
+    return employeeBillabilityPeriodFromPeriod(getCurrentMonthPeriod(), "month");
+  }
+  if (preset === "custom") {
+    const customPeriod = customEmployeeBillabilityPeriodFromParams(params);
+    return employeeBillabilityPeriodFromPeriod(customPeriod ?? getCurrentMonthPeriod(), "custom");
+  }
+
+  return employeeBillabilityPeriodFromPeriod(getYearToDatePeriod(), "year");
 }
 
 function pmBillabilityTabHref(params: PmSearchParams, view: PmBillabilityView) {
@@ -381,6 +463,61 @@ function pmBillabilityTabHref(params: PmSearchParams, view: PmBillabilityView) {
 
   const query = search.toString();
   return query ? `/pm?${query}#pm-billability-detail` : "/pm#pm-billability-detail";
+}
+
+function pmEmployeeBillabilityPeriodHref(params: PmSearchParams, preset: PmEmployeeBillabilityPeriodPreset) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (["billabilityView", "employeePeriod", "employeeStart", "employeeEnd"].includes(key)) {
+      continue;
+    }
+
+    for (const item of paramValues(value)) {
+      search.append(key, item);
+    }
+  }
+
+  search.set("billabilityView", "employees");
+  search.set("employeePeriod", preset);
+
+  if (preset === "custom") {
+    const customPeriod = customEmployeeBillabilityPeriodFromParams(params) ?? getCurrentMonthPeriod();
+    search.set("employeeStart", customPeriod.start);
+    search.set("employeeEnd", customPeriod.end);
+  }
+
+  return `/pm?${search.toString()}#pm-billability-detail`;
+}
+
+function preservedPmParamInputs(params: PmSearchParams, excludedKeys: Set<string>) {
+  const inputs: { key: string; value: string }[] = [];
+
+  for (const [key, value] of Object.entries(params)) {
+    if (excludedKeys.has(key)) {
+      continue;
+    }
+
+    paramValues(value).forEach((entry) => {
+      inputs.push({ key, value: entry });
+    });
+  }
+
+  return inputs;
+}
+
+function employeeBillabilityPeriodPresetLabel(preset: PmEmployeeBillabilityPeriodPreset) {
+  if (preset === "week") {
+    return "Week";
+  }
+  if (preset === "month") {
+    return "Maand";
+  }
+  if (preset === "custom") {
+    return "Aangepast";
+  }
+
+  return "Jaar";
 }
 
 function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
@@ -603,11 +740,12 @@ function BillabilityLineChart({ rows }: { rows: MonthBillability[] }) {
   );
 }
 
-async function getPmDashboardData(): Promise<PmDashboardData> {
+async function getPmDashboardData(employeeBillabilityPeriod: EmployeeBillabilityPeriod): Promise<PmDashboardData> {
   const period = getYearToDatePeriod();
+  const dataPeriod = mergePeriods(period, employeeBillabilityPeriod);
 
   if (!process.env.GRIPP_API_TOKEN) {
-    return buildDemoPmDashboardData(period, {
+    return buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
       mode: "demo",
       message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-cijfers te tonen."
     });
@@ -618,42 +756,65 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
     const issues: string[] = [];
     const [invoices, hours] = await Promise.all([
       requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
-      requiredData("uren", () => fetchHoursForPeriod(client, period))
+      requiredData("uren", () => fetchHoursForPeriod(client, dataPeriod))
     ]);
     const [employees, fetchedAbsenceRequestLines, fetchedAbsenceRequests, calendarItems] = await Promise.all([
       optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
-      optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, period)),
+      optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, dataPeriod)),
       optionalData(issues, "verlofaanvragen", [], () => fetchAbsenceRequests(client)),
-      optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, period))
+      optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, dataPeriod))
     ]);
     const employeeScope = buildPmEmployeeScope(employees);
     const scopedHours = hoursForEmployeeScope(hours, employeeScope);
     const scopedCalendarItems = calendarItemsForEmployeeScope(calendarItems, employeeScope);
     const absenceRequestLines = mergeAbsenceRequestLines(
       fetchedAbsenceRequestLines,
-      absenceRequestLinesFromRequests(fetchedAbsenceRequests, period)
+      absenceRequestLinesFromRequests(fetchedAbsenceRequests, dataPeriod)
     );
     const indexedAbsenceRequestsById = indexAbsenceRequestsById(fetchedAbsenceRequests);
     const absenceRequestsById = await optionalData(issues, "verlofaanvraagdetails", indexedAbsenceRequestsById, () =>
       fetchAbsenceRequestsById(client, absenceRequestLines, indexedAbsenceRequestsById)
     );
     const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
-    const paidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(scopedAbsenceRequestLines, absenceRequestsById, period);
     const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
-    const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
-      fetchWorkingHoursForEmployees(client, employeeScope.employees, scopedHours, scopedAbsenceRequestLines, absenceRequestsById, period)
+    const yearHours = recordsForPeriod(scopedHours, period);
+    const yearCalendarItems = recordsForPeriod(scopedCalendarItems, period);
+    const yearAbsenceRequestLines = recordsForPeriod(scopedAbsenceRequestLines, period);
+    const employeePeriodHours = recordsForPeriod(scopedHours, employeeBillabilityPeriod);
+    const employeePeriodCalendarItems = recordsForPeriod(scopedCalendarItems, employeeBillabilityPeriod);
+    const employeePeriodAbsenceRequestLines = recordsForPeriod(scopedAbsenceRequestLines, employeeBillabilityPeriod);
+    const paidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(yearAbsenceRequestLines, absenceRequestsById, period);
+    const employeePeriodPaidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(
+      employeePeriodAbsenceRequestLines,
+      absenceRequestsById,
+      employeeBillabilityPeriod
     );
+    const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
+      fetchWorkingHoursForEmployees(client, employeeScope.employees, yearHours, yearAbsenceRequestLines, absenceRequestsById, period)
+    );
+    const employeePeriodWorkingHoursCapacity = samePeriod(period, employeeBillabilityPeriod)
+      ? workingHoursCapacity
+      : await optionalData(issues, "werktijden medewerkerperiode", emptyWorkingHoursCapacity(), () =>
+          fetchWorkingHoursForEmployees(
+            client,
+            employeeScope.employees,
+            employeePeriodHours,
+            employeePeriodAbsenceRequestLines,
+            absenceRequestsById,
+            employeeBillabilityPeriod
+          )
+        );
 
     return buildPmDashboardData(
       invoices,
-      scopedHours,
+      yearHours,
       billabilitySources,
       {
         employees: employeeScope.employees,
         workingHoursByEmployeeId: workingHoursCapacity.workingHoursByEmployeeId,
         leaveHoursFromWorkingHoursByEmployeeId: workingHoursCapacity.leaveHoursByEmployeeId,
         paidOvertimeHoursByEmployeeId: numberMapForEmployeeScope(paidOvertimeHoursByEmployeeId, employeeScope),
-        absenceRequestLines: scopedAbsenceRequestLines,
+        absenceRequestLines: yearAbsenceRequestLines,
         absenceRequestsById
       },
       period,
@@ -662,34 +823,52 @@ async function getPmDashboardData(): Promise<PmDashboardData> {
         message: liveSourceMessage(issues)
       },
       employeeScope.excludedEmployeeCount,
-      scopedCalendarItems
+      yearCalendarItems,
+      employeeBillabilityPeriod,
+      employeePeriodHours,
+      {
+        employees: employeeScope.employees,
+        workingHoursByEmployeeId: employeePeriodWorkingHoursCapacity.workingHoursByEmployeeId,
+        leaveHoursFromWorkingHoursByEmployeeId: employeePeriodWorkingHoursCapacity.leaveHoursByEmployeeId,
+        paidOvertimeHoursByEmployeeId: numberMapForEmployeeScope(employeePeriodPaidOvertimeHoursByEmployeeId, employeeScope),
+        absenceRequestLines: employeePeriodAbsenceRequestLines,
+        absenceRequestsById
+      },
+      employeePeriodCalendarItems
     );
   } catch (error) {
-    return buildDemoPmDashboardData(period, {
+    return buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
       mode: "demo",
       message: `Live PM-data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
     });
   }
 }
 
-function buildDemoPmDashboardData(period: Period, source: DashboardSource) {
-  const demoHours = createDemoHours(period);
+function buildDemoPmDashboardData(period: Period, employeeBillabilityPeriod: EmployeeBillabilityPeriod, source: DashboardSource) {
+  const dataPeriod = mergePeriods(period, employeeBillabilityPeriod);
+  const demoHours = createDemoHours(dataPeriod);
   const capacitySources = createDemoCapacitySources(period);
+  const employeePeriodCapacitySources = createDemoCapacitySources(employeeBillabilityPeriod);
   const employeeScope = buildPmEmployeeScope(capacitySources.employees);
   const scopedHours = hoursForEmployeeScope(demoHours, employeeScope);
-  const scopedCalendarItems = calendarItemsForEmployeeScope(createDemoCalendarItems(period), employeeScope);
+  const scopedCalendarItems = calendarItemsForEmployeeScope(createDemoCalendarItems(dataPeriod), employeeScope);
   const scopedCapacitySources = capacitySourcesForEmployeeScope(capacitySources, employeeScope);
+  const scopedEmployeePeriodCapacitySources = capacitySourcesForEmployeeScope(employeePeriodCapacitySources, employeeScope);
   const billabilitySources = createDemoBillabilitySources(scopedHours);
 
   return buildPmDashboardData(
     createDemoInvoices(period),
-    scopedHours,
+    recordsForPeriod(scopedHours, period),
     billabilitySources,
     scopedCapacitySources,
     period,
     source,
     employeeScope.excludedEmployeeCount,
-    scopedCalendarItems
+    recordsForPeriod(scopedCalendarItems, period),
+    employeeBillabilityPeriod,
+    recordsForPeriod(scopedHours, employeeBillabilityPeriod),
+    scopedEmployeePeriodCapacitySources,
+    recordsForPeriod(scopedCalendarItems, employeeBillabilityPeriod)
   );
 }
 
@@ -794,6 +973,13 @@ function calendarItemsForEmployeeScope(calendarItems: JsonRecord[], employeeScop
   return calendarItems.filter((calendarItem) => {
     const employeeId = relationId(calendarItem, "calendaritememployee") ?? relationId(calendarItem, "employee");
     return employeeId === null || !employeeScope.excludedEmployeeIds.has(employeeId);
+  });
+}
+
+function recordsForPeriod(records: JsonRecord[], period: Period, field = "date") {
+  return records.filter((record) => {
+    const date = dateKeyFromValue(readField(record, field));
+    return Boolean(date && date >= period.start && date <= period.end);
   });
 }
 
@@ -1336,7 +1522,11 @@ function buildPmDashboardData(
   period: Period,
   source: DashboardSource,
   excludedEmployeeCount = 0,
-  calendarItems: JsonRecord[] = []
+  calendarItems: JsonRecord[] = [],
+  employeeBillabilityPeriod: EmployeeBillabilityPeriod = employeeBillabilityPeriodFromPeriod(period, "year"),
+  employeeBillabilityHours: JsonRecord[] = hours,
+  employeeBillabilityCapacitySources: CapacitySources = capacitySources,
+  employeeBillabilityCalendarItems: JsonRecord[] = calendarItems
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
@@ -1378,9 +1568,22 @@ function buildPmDashboardData(
 
   const employeeCapacityRows = buildEmployeeCapacityRows(capacitySources, hours, period);
   const capacity = buildCapacitySummary(employeeCapacityRows);
-  const employeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources, calendarItems, period);
-  const capacityRemainingHours = employeeBillability.reduce((total, row) => total + row.capacityRemainingHours, 0);
-  const calendarItemHours = employeeBillability.reduce((total, row) => total + row.calendarItemHours, 0);
+  const yearEmployeeBillability = buildEmployeeBillabilityRows(employeeCapacityRows, hours, billabilitySources, calendarItems, period);
+  const employeeBillabilityCapacityRows = buildEmployeeCapacityRows(
+    employeeBillabilityCapacitySources,
+    employeeBillabilityHours,
+    employeeBillabilityPeriod
+  );
+  const employeeBillability = buildEmployeeBillabilityRows(
+    employeeBillabilityCapacityRows,
+    employeeBillabilityHours,
+    billabilitySources,
+    employeeBillabilityCalendarItems,
+    employeeBillabilityPeriod
+  );
+  const employeeBillabilitySummary = buildBillabilitySummary(employeeBillability);
+  const capacityRemainingHours = yearEmployeeBillability.reduce((total, row) => total + row.capacityRemainingHours, 0);
+  const calendarItemHours = yearEmployeeBillability.reduce((total, row) => total + row.calendarItemHours, 0);
   const monthBuckets = makeMonthBuckets(period);
   const availableHoursByMonth = buildAvailableHoursByMonth(capacitySources, hours, period, monthBuckets);
   const revenueByMonthRows = monthBuckets.map((bucket) => ({
@@ -1413,6 +1616,8 @@ function buildPmDashboardData(
 
   return {
     period,
+    employeeBillabilityPeriod,
+    employeeBillabilitySummary,
     source,
     revenue,
     loggedHours,
@@ -1559,6 +1764,17 @@ function buildCapacitySummary(employeeCapacityRows: EmployeeCapacityRow[]): Capa
     availableHours,
     employeeCount: employeeCapacityRows.length,
     fallbackWorkingHoursEmployeeCount: employeeCapacityRows.filter((row) => row.usedWorkingHoursFallback).length
+  };
+}
+
+function buildBillabilitySummary(employeeBillabilityRows: EmployeeBillabilityRow[]): BillabilitySummary {
+  const billableHours = employeeBillabilityRows.reduce((total, row) => total + row.billableHours, 0);
+  const availableHours = employeeBillabilityRows.reduce((total, row) => total + row.availableHours, 0);
+
+  return {
+    billableHours,
+    availableHours,
+    billability: percent(billableHours, availableHours)
   };
 }
 
@@ -2139,6 +2355,55 @@ function getYearToDatePeriod(): Period {
     year,
     label: `${formatDate(start)} - ${formatDate(end)}`
   };
+}
+
+function getCurrentMonthPeriod(): Period {
+  const end = currentDateKey();
+  return buildPeriod(`${end.slice(0, 7)}-01`, end);
+}
+
+function getCurrentWeekPeriod(): Period {
+  const end = currentDateKey();
+  const endDate = parseDateKey(end) ?? new Date();
+  const daysSinceMonday = (endDate.getDay() + 6) % 7;
+  const startDate = new Date(endDate);
+  startDate.setDate(endDate.getDate() - daysSinceMonday);
+
+  return buildPeriod(dateKey(startDate), end);
+}
+
+function customEmployeeBillabilityPeriodFromParams(params: PmSearchParams): Period | null {
+  const start = firstParam(params.employeeStart);
+  const end = firstParam(params.employeeEnd);
+  if (!isDateKey(start) || !isDateKey(end)) {
+    return null;
+  }
+
+  return start <= end ? buildPeriod(start, end) : buildPeriod(end, start);
+}
+
+function employeeBillabilityPeriodFromPeriod(period: Period, preset: PmEmployeeBillabilityPeriodPreset): EmployeeBillabilityPeriod {
+  return {
+    ...period,
+    preset
+  };
+}
+
+function buildPeriod(start: string, end: string): Period {
+  return {
+    start,
+    end,
+    year: start.slice(0, 4),
+    label: `${formatDate(start)} - ${formatDate(end)}`
+  };
+}
+
+function mergePeriods(left: Period, right: Period): Period {
+  return buildPeriod(minDateKey(left.start, right.start), maxDateKey(left.end, right.end));
+}
+
+function samePeriod(left: Period, right: Period) {
+  return left.start === right.start && left.end === right.end;
 }
 
 function currentDateKey() {
