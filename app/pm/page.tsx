@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { CSSProperties } from "react";
+import { redirect } from "next/navigation.js";
 import { GrippClient } from "../../src/grippClient.js";
+import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
 import type { JsonValue } from "../../src/types.js";
 import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.js";
 import { DashboardFrame } from "../dashboard-frame.js";
@@ -29,8 +31,9 @@ type EmployeeBillabilityPeriod = Period & {
 };
 
 type DashboardSource = {
-  mode: "live" | "demo";
+  mode: "live" | "cache" | "demo";
   message: string;
+  noticeTone?: "success" | "warning" | "error";
 };
 
 type LineBillability = {
@@ -148,6 +151,19 @@ type PmDashboardData = {
   lastUpdated: string;
 };
 
+type CachedPmDashboardData = {
+  version: number;
+  savedAt: string;
+  dashboard: PmDashboardData;
+};
+
+type FreshPmDashboardData = {
+  dashboard: PmDashboardData;
+  issues: string[];
+};
+
+type PmCacheNotice = "refreshed" | "refresh_failed";
+
 const PAGE_SIZE = 250;
 const MAX_INVOICE_PAGES = 80;
 const MAX_HOUR_PAGES = 160;
@@ -166,6 +182,9 @@ const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overure
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
+const PM_DASHBOARD_CACHE_VERSION = 1;
+const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
+const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -195,7 +214,8 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
   const params = (await searchParams) ?? {};
   const billabilityView = getPmBillabilityView(params);
   const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
-  const dashboard = await getPmDashboardData(employeeBillabilityPeriod);
+  const cacheNotice = pmCacheNoticeFromParams(params);
+  const dashboard = await getPmDashboardData(employeeBillabilityPeriod, cacheNotice);
 
   return (
     <DashboardFrame>
@@ -207,14 +227,15 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
           </div>
           <div className="header-meta">
             <span className={`source-badge source-badge--${dashboard.source.mode}`}>
-              {dashboard.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
+              {sourceBadgeLabel(dashboard.source.mode)}
             </span>
             <span>{dashboard.period.label}</span>
             <span>Bijgewerkt {dashboard.lastUpdated}</span>
+            <PmDashboardRefreshForm params={params} />
           </div>
         </header>
 
-      {dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
+      {dashboard.source.message ? <p className={dataNoticeClassName(dashboard.source)}>{dashboard.source.message}</p> : null}
 
       <section className="metric-grid pm-metric-grid" aria-label="Kerncijfers management">
         <MetricCard href="#pm-revenue-detail" label="Omzet dit jaar" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
@@ -386,6 +407,37 @@ function MetricCard({
   );
 }
 
+function PmDashboardRefreshForm({ params }: { params: PmSearchParams }) {
+  const hiddenInputs = preservedPmParamInputs(params, new Set([PM_CACHE_NOTICE_PARAM]));
+
+  return (
+    <form className="pm-refresh-form" action={refreshPmDashboardAction}>
+      {hiddenInputs.map(({ key, value }, index) => (
+        <input key={`${key}-${index}`} type="hidden" name={key} value={value} />
+      ))}
+      <button className="pm-refresh-button" type="submit">
+        Bijwerken
+      </button>
+    </form>
+  );
+}
+
+async function refreshPmDashboardAction(formData: FormData) {
+  "use server";
+
+  const params = pmSearchParamsFromFormData(formData);
+  const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
+  let notice: PmCacheNotice = "refreshed";
+
+  try {
+    await refreshCachedPmDashboardData(employeeBillabilityPeriod);
+  } catch {
+    notice = "refresh_failed";
+  }
+
+  redirect(pmHrefWithCacheNotice(params, notice));
+}
+
 function EmployeeBillabilityPeriodControls({ params, period }: { params: PmSearchParams; period: EmployeeBillabilityPeriod }) {
   const hiddenInputs = preservedPmParamInputs(params, new Set(["billabilityView", "employeePeriod", "employeeStart", "employeeEnd"]));
 
@@ -448,7 +500,7 @@ function pmBillabilityTabHref(params: PmSearchParams, view: PmBillabilityView) {
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
-    if (key === "billabilityView") {
+    if (key === "billabilityView" || key === PM_CACHE_NOTICE_PARAM) {
       continue;
     }
 
@@ -469,7 +521,7 @@ function pmEmployeeBillabilityPeriodHref(params: PmSearchParams, preset: PmEmplo
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
-    if (["billabilityView", "employeePeriod", "employeeStart", "employeeEnd"].includes(key)) {
+    if (["billabilityView", "employeePeriod", "employeeStart", "employeeEnd", PM_CACHE_NOTICE_PARAM].includes(key)) {
       continue;
     }
 
@@ -494,7 +546,7 @@ function preservedPmParamInputs(params: PmSearchParams, excludedKeys: Set<string
   const inputs: { key: string; value: string }[] = [];
 
   for (const [key, value] of Object.entries(params)) {
-    if (excludedKeys.has(key)) {
+    if (excludedKeys.has(key) || key === PM_CACHE_NOTICE_PARAM) {
       continue;
     }
 
@@ -740,9 +792,11 @@ function BillabilityLineChart({ rows }: { rows: MonthBillability[] }) {
   );
 }
 
-async function getPmDashboardData(employeeBillabilityPeriod: EmployeeBillabilityPeriod): Promise<PmDashboardData> {
+async function getPmDashboardData(
+  employeeBillabilityPeriod: EmployeeBillabilityPeriod,
+  cacheNotice?: PmCacheNotice
+): Promise<PmDashboardData> {
   const period = getYearToDatePeriod();
-  const dataPeriod = mergePeriods(period, employeeBillabilityPeriod);
 
   if (!process.env.GRIPP_API_TOKEN) {
     return buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
@@ -751,97 +805,282 @@ async function getPmDashboardData(employeeBillabilityPeriod: EmployeeBillability
     });
   }
 
-  try {
-    const client = new GrippClient();
-    const issues: string[] = [];
-    const [invoices, hours] = await Promise.all([
-      optionalData(issues, "verkoopfacturen", [], () => fetchInvoicesForPeriod(client, period)),
-      requiredData("uren", () => fetchHoursForPeriod(client, dataPeriod))
-    ]);
-    const [employees, fetchedAbsenceRequestLines, fetchedAbsenceRequests, calendarItems] = await Promise.all([
-      optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
-      optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, dataPeriod)),
-      optionalData(issues, "verlofaanvragen", [], () => fetchAbsenceRequests(client)),
-      optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, dataPeriod))
-    ]);
-    const employeeScope = buildPmEmployeeScope(employees);
-    const scopedHours = hoursForEmployeeScope(hours, employeeScope);
-    const scopedCalendarItems = calendarItemsForEmployeeScope(calendarItems, employeeScope);
-    const absenceRequestLines = mergeAbsenceRequestLines(
-      fetchedAbsenceRequestLines,
-      absenceRequestLinesFromRequests(fetchedAbsenceRequests, dataPeriod)
-    );
-    const indexedAbsenceRequestsById = indexAbsenceRequestsById(fetchedAbsenceRequests);
-    const absenceRequestsById = await optionalData(issues, "verlofaanvraagdetails", indexedAbsenceRequestsById, () =>
-      fetchAbsenceRequestsById(client, absenceRequestLines, indexedAbsenceRequestsById)
-    );
-    const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
-    const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
-    const yearHours = recordsForPeriod(scopedHours, period);
-    const yearCalendarItems = recordsForPeriod(scopedCalendarItems, period);
-    const yearAbsenceRequestLines = recordsForPeriod(scopedAbsenceRequestLines, period);
-    const employeePeriodHours = recordsForPeriod(scopedHours, employeeBillabilityPeriod);
-    const employeePeriodCalendarItems = recordsForPeriod(scopedCalendarItems, employeeBillabilityPeriod);
-    const employeePeriodAbsenceRequestLines = recordsForPeriod(scopedAbsenceRequestLines, employeeBillabilityPeriod);
-    const paidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(yearAbsenceRequestLines, absenceRequestsById, period);
-    const employeePeriodPaidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(
-      employeePeriodAbsenceRequestLines,
-      absenceRequestsById,
-      employeeBillabilityPeriod
-    );
-    const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
-      fetchWorkingHoursForEmployees(client, employeeScope.employees, yearHours, yearAbsenceRequestLines, absenceRequestsById, period)
-    );
-    const employeePeriodWorkingHoursCapacity = samePeriod(period, employeeBillabilityPeriod)
-      ? workingHoursCapacity
-      : await optionalData(issues, "werktijden medewerkerperiode", emptyWorkingHoursCapacity(), () =>
-          fetchWorkingHoursForEmployees(
-            client,
-            employeeScope.employees,
-            employeePeriodHours,
-            employeePeriodAbsenceRequestLines,
-            absenceRequestsById,
-            employeeBillabilityPeriod
-          )
-        );
+  const cacheKey = pmDashboardCacheKey(period, employeeBillabilityPeriod);
+  const cached = await safeReadCachedPmDashboardData(cacheKey);
+  if (cached) {
+    return dashboardFromCache(cached, cacheNotice);
+  }
 
-    return buildPmDashboardData(
-      invoices,
-      yearHours,
-      billabilitySources,
-      {
-        employees: employeeScope.employees,
-        workingHoursByEmployeeId: workingHoursCapacity.workingHoursByEmployeeId,
-        leaveHoursFromWorkingHoursByEmployeeId: workingHoursCapacity.leaveHoursByEmployeeId,
-        paidOvertimeHoursByEmployeeId: numberMapForEmployeeScope(paidOvertimeHoursByEmployeeId, employeeScope),
-        absenceRequestLines: yearAbsenceRequestLines,
-        absenceRequestsById
-      },
-      period,
-      {
-        mode: "live",
-        message: liveSourceMessage(issues)
-      },
-      employeeScope.excludedEmployeeCount,
-      yearCalendarItems,
-      employeeBillabilityPeriod,
-      employeePeriodHours,
-      {
-        employees: employeeScope.employees,
-        workingHoursByEmployeeId: employeePeriodWorkingHoursCapacity.workingHoursByEmployeeId,
-        leaveHoursFromWorkingHoursByEmployeeId: employeePeriodWorkingHoursCapacity.leaveHoursByEmployeeId,
-        paidOvertimeHoursByEmployeeId: numberMapForEmployeeScope(employeePeriodPaidOvertimeHoursByEmployeeId, employeeScope),
-        absenceRequestLines: employeePeriodAbsenceRequestLines,
-        absenceRequestsById
-      },
-      employeePeriodCalendarItems
-    );
+  try {
+    const fresh = await loadFreshPmDashboardData(period, employeeBillabilityPeriod);
+    if (fresh.issues.length === 0) {
+      const cacheWriteIssue = await safeWriteCachedPmDashboardData(cacheKey, fresh.dashboard);
+      if (cacheWriteIssue) {
+        return dashboardWithSourceMessage(fresh.dashboard, cacheWriteIssue, "warning");
+      }
+    }
+
+    return fresh.dashboard;
   } catch (error) {
     return buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
       mode: "demo",
       message: `Live PM-data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
     });
   }
+}
+
+async function refreshCachedPmDashboardData(employeeBillabilityPeriod: EmployeeBillabilityPeriod): Promise<void> {
+  if (!process.env.GRIPP_API_TOKEN) {
+    throw new Error("GRIPP_API_TOKEN ontbreekt.");
+  }
+
+  const period = getYearToDatePeriod();
+  const fresh = await loadFreshPmDashboardData(period, employeeBillabilityPeriod);
+  if (fresh.issues.length > 0) {
+    throw new Error(fresh.issues.join("; "));
+  }
+
+  await writeCachedPmDashboardData(pmDashboardCacheKey(period, employeeBillabilityPeriod), fresh.dashboard);
+}
+
+async function loadFreshPmDashboardData(
+  period: Period,
+  employeeBillabilityPeriod: EmployeeBillabilityPeriod
+): Promise<FreshPmDashboardData> {
+  const dataPeriod = mergePeriods(period, employeeBillabilityPeriod);
+  const client = new GrippClient();
+  const issues: string[] = [];
+  const [invoices, hours] = await Promise.all([
+    optionalData(issues, "verkoopfacturen", [], () => fetchInvoicesForPeriod(client, period)),
+    requiredData("uren", () => fetchHoursForPeriod(client, dataPeriod))
+  ]);
+  const [employees, fetchedAbsenceRequestLines, fetchedAbsenceRequests, calendarItems] = await Promise.all([
+    optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
+    optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, dataPeriod)),
+    optionalData(issues, "verlofaanvragen", [], () => fetchAbsenceRequests(client)),
+    optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, dataPeriod))
+  ]);
+  const employeeScope = buildPmEmployeeScope(employees);
+  const scopedHours = hoursForEmployeeScope(hours, employeeScope);
+  const scopedCalendarItems = calendarItemsForEmployeeScope(calendarItems, employeeScope);
+  const absenceRequestLines = mergeAbsenceRequestLines(
+    fetchedAbsenceRequestLines,
+    absenceRequestLinesFromRequests(fetchedAbsenceRequests, dataPeriod)
+  );
+  const indexedAbsenceRequestsById = indexAbsenceRequestsById(fetchedAbsenceRequests);
+  const absenceRequestsById = await optionalData(issues, "verlofaanvraagdetails", indexedAbsenceRequestsById, () =>
+    fetchAbsenceRequestsById(client, absenceRequestLines, indexedAbsenceRequestsById)
+  );
+  const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
+  const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
+  const yearHours = recordsForPeriod(scopedHours, period);
+  const yearCalendarItems = recordsForPeriod(scopedCalendarItems, period);
+  const yearAbsenceRequestLines = recordsForPeriod(scopedAbsenceRequestLines, period);
+  const employeePeriodHours = recordsForPeriod(scopedHours, employeeBillabilityPeriod);
+  const employeePeriodCalendarItems = recordsForPeriod(scopedCalendarItems, employeeBillabilityPeriod);
+  const employeePeriodAbsenceRequestLines = recordsForPeriod(scopedAbsenceRequestLines, employeeBillabilityPeriod);
+  const paidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(yearAbsenceRequestLines, absenceRequestsById, period);
+  const employeePeriodPaidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(
+    employeePeriodAbsenceRequestLines,
+    absenceRequestsById,
+    employeeBillabilityPeriod
+  );
+  const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
+    fetchWorkingHoursForEmployees(client, employeeScope.employees, yearHours, yearAbsenceRequestLines, absenceRequestsById, period)
+  );
+  const employeePeriodWorkingHoursCapacity = samePeriod(period, employeeBillabilityPeriod)
+    ? workingHoursCapacity
+    : await optionalData(issues, "werktijden medewerkerperiode", emptyWorkingHoursCapacity(), () =>
+        fetchWorkingHoursForEmployees(
+          client,
+          employeeScope.employees,
+          employeePeriodHours,
+          employeePeriodAbsenceRequestLines,
+          absenceRequestsById,
+          employeeBillabilityPeriod
+        )
+      );
+
+  const dashboard = buildPmDashboardData(
+    invoices,
+    yearHours,
+    billabilitySources,
+    {
+      employees: employeeScope.employees,
+      workingHoursByEmployeeId: workingHoursCapacity.workingHoursByEmployeeId,
+      leaveHoursFromWorkingHoursByEmployeeId: workingHoursCapacity.leaveHoursByEmployeeId,
+      paidOvertimeHoursByEmployeeId: numberMapForEmployeeScope(paidOvertimeHoursByEmployeeId, employeeScope),
+      absenceRequestLines: yearAbsenceRequestLines,
+      absenceRequestsById
+    },
+    period,
+    {
+      mode: "live",
+      message: liveSourceMessage(issues),
+      noticeTone: issues.length > 0 ? "warning" : undefined
+    },
+    employeeScope.excludedEmployeeCount,
+    yearCalendarItems,
+    employeeBillabilityPeriod,
+    employeePeriodHours,
+    {
+      employees: employeeScope.employees,
+      workingHoursByEmployeeId: employeePeriodWorkingHoursCapacity.workingHoursByEmployeeId,
+      leaveHoursFromWorkingHoursByEmployeeId: employeePeriodWorkingHoursCapacity.leaveHoursByEmployeeId,
+      paidOvertimeHoursByEmployeeId: numberMapForEmployeeScope(employeePeriodPaidOvertimeHoursByEmployeeId, employeeScope),
+      absenceRequestLines: employeePeriodAbsenceRequestLines,
+      absenceRequestsById
+    },
+    employeePeriodCalendarItems
+  );
+
+  return { dashboard, issues };
+}
+
+async function safeReadCachedPmDashboardData(cacheKey: string): Promise<CachedPmDashboardData | null> {
+  try {
+    const cached = await readJsonCache<CachedPmDashboardData>(cacheKey);
+    return isCachedPmDashboardData(cached) ? cached : null;
+  } catch {
+    return null;
+  }
+}
+
+async function safeWriteCachedPmDashboardData(cacheKey: string, dashboard: PmDashboardData) {
+  try {
+    await writeCachedPmDashboardData(cacheKey, dashboard);
+    return "";
+  } catch (error) {
+    return `Cache kon niet worden opgeslagen${errorCode(error) ? ` (${errorCode(error)})` : ""}.`;
+  }
+}
+
+async function writeCachedPmDashboardData(cacheKey: string, dashboard: PmDashboardData): Promise<void> {
+  await writeJsonCache(cacheKey, {
+    version: PM_DASHBOARD_CACHE_VERSION,
+    savedAt: new Date().toISOString(),
+    dashboard
+  } satisfies CachedPmDashboardData);
+}
+
+function dashboardFromCache(cached: CachedPmDashboardData, notice?: PmCacheNotice): PmDashboardData {
+  const messages = [
+    cacheNoticeMessage(notice),
+    "Cache-data zichtbaar.",
+    cached.dashboard.source.message
+  ].filter(Boolean);
+  const noticeTone = notice === "refresh_failed" ? "error" : notice === "refreshed" ? "success" : cached.dashboard.source.noticeTone;
+
+  return {
+    ...cached.dashboard,
+    source: {
+      mode: "cache",
+      message: messages.join(" "),
+      noticeTone
+    }
+  };
+}
+
+function dashboardWithSourceMessage(
+  dashboard: PmDashboardData,
+  message: string,
+  noticeTone: DashboardSource["noticeTone"]
+): PmDashboardData {
+  return {
+    ...dashboard,
+    source: {
+      ...dashboard.source,
+      message: [dashboard.source.message, message].filter(Boolean).join(" "),
+      noticeTone: noticeTone ?? dashboard.source.noticeTone
+    }
+  };
+}
+
+function isCachedPmDashboardData(value: unknown): value is CachedPmDashboardData {
+  const record = asRecord(value);
+  return (
+    record?.version === PM_DASHBOARD_CACHE_VERSION &&
+    typeof record.savedAt === "string" &&
+    asRecord(record.dashboard) !== undefined
+  );
+}
+
+function pmDashboardCacheKey(period: Period, employeeBillabilityPeriod: EmployeeBillabilityPeriod) {
+  const employeePeriodKey =
+    employeeBillabilityPeriod.preset === "custom"
+      ? `custom:${employeeBillabilityPeriod.start}:${employeeBillabilityPeriod.end}`
+      : employeeBillabilityPeriod.preset;
+
+  return `${PM_DASHBOARD_CACHE_PREFIX}:${period.year}:employee-billability:${employeePeriodKey}`;
+}
+
+function sourceBadgeLabel(mode: DashboardSource["mode"]) {
+  if (mode === "live") {
+    return "Live uit Gripp";
+  }
+  if (mode === "cache") {
+    return "Cache uit Gripp";
+  }
+
+  return "Demo-data";
+}
+
+function dataNoticeClassName(source: DashboardSource) {
+  return `data-notice${source.noticeTone ? ` data-notice--${source.noticeTone}` : ""}`;
+}
+
+function pmCacheNoticeFromParams(params: PmSearchParams): PmCacheNotice | undefined {
+  const notice = firstParam(params[PM_CACHE_NOTICE_PARAM]);
+  return notice === "refreshed" || notice === "refresh_failed" ? notice : undefined;
+}
+
+function cacheNoticeMessage(notice?: PmCacheNotice) {
+  if (notice === "refreshed") {
+    return "Data bijgewerkt.";
+  }
+  if (notice === "refresh_failed") {
+    return "Verversing mislukt. Vorige cache blijft zichtbaar.";
+  }
+
+  return "";
+}
+
+function pmSearchParamsFromFormData(formData: FormData): PmSearchParams {
+  const params: PmSearchParams = {};
+
+  for (const [key, value] of formData.entries()) {
+    if (key.startsWith("$ACTION_") || key === PM_CACHE_NOTICE_PARAM || typeof value !== "string") {
+      continue;
+    }
+
+    const current = params[key];
+    if (Array.isArray(current)) {
+      current.push(value);
+    } else if (typeof current === "string") {
+      params[key] = [current, value];
+    } else {
+      params[key] = value;
+    }
+  }
+
+  return params;
+}
+
+function pmHrefWithCacheNotice(params: PmSearchParams, notice: PmCacheNotice) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (key === PM_CACHE_NOTICE_PARAM) {
+      continue;
+    }
+
+    for (const item of paramValues(value)) {
+      search.append(key, item);
+    }
+  }
+
+  search.set(PM_CACHE_NOTICE_PARAM, notice);
+  return `/pm?${search.toString()}`;
 }
 
 function buildDemoPmDashboardData(period: Period, employeeBillabilityPeriod: EmployeeBillabilityPeriod, source: DashboardSource) {

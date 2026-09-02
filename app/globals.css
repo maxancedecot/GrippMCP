@@ -124,6 +124,11 @@ select {
   background: var(--good-soft) !important;
 }
 
+.source-badge--cache {
+  border-color: rgba(37, 99, 235, 0.28) !important;
+  background: var(--blue-soft) !important;
+}
+
 .source-badge--demo {
   border-color: rgba(245, 158, 11, 0.32) !important;
   background: var(--warning-soft) !important;
@@ -149,6 +154,27 @@ select {
   border-color: rgba(239, 68, 68, 0.28);
   background: #fde8e5;
   color: var(--danger);
+}
+
+.pm-refresh-form {
+  margin: 0;
+}
+
+.pm-refresh-button {
+  min-height: 32px;
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--blue);
+  padding: 6px 10px;
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.pm-refresh-button:hover {
+  background: var(--blue-soft);
 }
 
 .dashboard-tabs {
