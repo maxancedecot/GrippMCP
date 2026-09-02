@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { CSSProperties } from "react";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import { GrippClient } from "../../src/grippClient.js";
 import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
@@ -219,6 +220,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
   const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
   const cacheNotice = pmCacheNoticeFromParams(params);
   const dashboard = await getPmDashboardData(employeeBillabilityPeriod, cacheNotice);
+  const canRefresh = Boolean(process.env.GRIPP_API_TOKEN);
 
   return (
     <DashboardFrame>
@@ -234,7 +236,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
             </span>
             <span>{dashboard.period.label}</span>
             <span>Bijgewerkt {dashboard.lastUpdated}</span>
-            <PmDashboardRefreshForm params={params} />
+            {canRefresh ? <PmDashboardRefreshForm params={params} /> : null}
           </div>
         </header>
 
@@ -434,6 +436,7 @@ async function refreshPmDashboardAction(formData: FormData) {
 
   try {
     await refreshCachedPmDashboardData(employeeBillabilityPeriod);
+    revalidatePath("/pm");
   } catch {
     notice = "refresh_failed";
   }
@@ -827,10 +830,13 @@ async function getPmDashboardData(
   const period = getYearToDatePeriod();
 
   if (!process.env.GRIPP_API_TOKEN) {
-    return buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
-      mode: "demo",
-      message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-cijfers te tonen."
-    });
+    return dashboardWithCacheNotice(
+      buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
+        mode: "demo",
+        message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-cijfers te tonen."
+      }),
+      cacheNotice
+    );
   }
 
   const cacheKey = pmDashboardCacheKey(period, employeeBillabilityPeriod);
@@ -848,12 +854,15 @@ async function getPmDashboardData(
       }
     }
 
-    return fresh.dashboard;
+    return dashboardWithCacheNotice(fresh.dashboard, cacheNotice);
   } catch (error) {
-    return buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
-      mode: "demo",
-      message: `Live PM-data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-    });
+    return dashboardWithCacheNotice(
+      buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
+        mode: "demo",
+        message: `Live PM-data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
+      }),
+      cacheNotice
+    );
   }
 }
 
@@ -864,10 +873,6 @@ async function refreshCachedPmDashboardData(employeeBillabilityPeriod: EmployeeB
 
   const period = getYearToDatePeriod();
   const fresh = await loadFreshPmDashboardData(period, employeeBillabilityPeriod);
-  if (fresh.issues.length > 0) {
-    throw new Error(fresh.issues.join("; "));
-  }
-
   await writeCachedPmDashboardData(pmDashboardCacheKey(period, employeeBillabilityPeriod), fresh.dashboard);
 }
 
@@ -997,7 +1002,7 @@ function dashboardFromCache(cached: CachedPmDashboardData, notice?: PmCacheNotic
     "Cache-data zichtbaar.",
     cached.dashboard.source.message
   ].filter(Boolean);
-  const noticeTone = notice === "refresh_failed" ? "error" : notice === "refreshed" ? "success" : cached.dashboard.source.noticeTone;
+  const noticeTone = cacheNoticeTone(notice, cached.dashboard.source.noticeTone);
 
   return {
     ...cached.dashboard,
@@ -1005,6 +1010,22 @@ function dashboardFromCache(cached: CachedPmDashboardData, notice?: PmCacheNotic
       mode: "cache",
       message: messages.join(" "),
       noticeTone
+    }
+  };
+}
+
+function dashboardWithCacheNotice(dashboard: PmDashboardData, notice?: PmCacheNotice): PmDashboardData {
+  const noticeMessage = cacheNoticeMessage(notice);
+  if (!noticeMessage) {
+    return dashboard;
+  }
+
+  return {
+    ...dashboard,
+    source: {
+      ...dashboard.source,
+      message: [noticeMessage, dashboard.source.message].filter(Boolean).join(" "),
+      noticeTone: cacheNoticeTone(notice, dashboard.source.noticeTone)
     }
   };
 }
@@ -1071,6 +1092,20 @@ function cacheNoticeMessage(notice?: PmCacheNotice) {
   }
 
   return "";
+}
+
+function cacheNoticeTone(notice?: PmCacheNotice, sourceTone?: DashboardSource["noticeTone"]): DashboardSource["noticeTone"] {
+  if (notice === "refresh_failed" || sourceTone === "error") {
+    return "error";
+  }
+  if (sourceTone === "warning") {
+    return "warning";
+  }
+  if (notice === "refreshed") {
+    return "success";
+  }
+
+  return sourceTone;
 }
 
 function pmSearchParamsFromFormData(formData: FormData): PmSearchParams {
