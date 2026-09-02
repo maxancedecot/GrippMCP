@@ -3,12 +3,17 @@ import { GrippBatchItemInput, GrippRpcRequest, GrippRpcResponse, JsonValue } fro
 
 const DEFAULT_API_URL = "https://api.gripp.com/public/api3.php";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
 const READONLY_METHOD_PATTERN = /\.(get|getone|getCompanyByCOC|getContent|getViewonlineUrl|getWorkingHours)$/;
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 export type GrippClientOptions = {
   apiUrl?: string;
   token?: string;
   timeoutMs?: number;
+  maxRetries?: number;
+  retryBaseDelayMs?: number;
   fetchImpl?: typeof fetch;
 };
 
@@ -16,12 +21,22 @@ export class GrippClient {
   private readonly apiUrl: string;
   private readonly token: string;
   private readonly timeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly retryBaseDelayMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: GrippClientOptions = {}) {
     this.apiUrl = options.apiUrl ?? process.env.GRIPP_API_URL ?? DEFAULT_API_URL;
     this.token = options.token ?? process.env.GRIPP_API_TOKEN ?? "";
     this.timeoutMs = options.timeoutMs ?? Number(process.env.GRIPP_REQUEST_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
+    this.maxRetries = nonNegativeNumber(
+      options.maxRetries,
+      numberFromEnv("GRIPP_MAX_RETRIES", DEFAULT_MAX_RETRIES)
+    );
+    this.retryBaseDelayMs = nonNegativeNumber(
+      options.retryBaseDelayMs,
+      numberFromEnv("GRIPP_RETRY_BASE_DELAY_MS", DEFAULT_RETRY_BASE_DELAY_MS)
+    );
     this.fetchImpl = options.fetchImpl ?? fetch;
 
     if (!this.token) {
@@ -81,6 +96,22 @@ export class GrippClient {
   }
 
   private async post(requests: GrippRpcRequest[]): Promise<GrippRpcResponse[]> {
+    const canRetry = requests.every((request) => READONLY_METHOD_PATTERN.test(request.method));
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.postOnce(requests);
+      } catch (error) {
+        if (!canRetry || attempt >= this.maxRetries || !isRetryableGrippError(error)) {
+          throw error;
+        }
+
+        await delay(this.retryBaseDelayMs * 2 ** attempt);
+      }
+    }
+  }
+
+  private async postOnce(requests: GrippRpcRequest[]): Promise<GrippRpcResponse[]> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -97,13 +128,12 @@ export class GrippClient {
 
       const text = await response.text();
       let data: unknown;
+      let parsedJson = true;
       try {
         data = text ? JSON.parse(text) : null;
       } catch {
-        throw new GrippMcpError("invalid_upstream_json", "Gripp returned a non-JSON response.", {
-          status: response.status,
-          body: text
-        });
+        parsedJson = false;
+        data = text;
       }
 
       if (!response.ok) {
@@ -112,6 +142,13 @@ export class GrippClient {
           statusText: response.statusText,
           body: data,
           rateLimit: getRateLimitHeaders(response)
+        });
+      }
+
+      if (!parsedJson) {
+        throw new GrippMcpError("invalid_upstream_json", "Gripp returned a non-JSON response.", {
+          status: response.status,
+          body: text
         });
       }
 
@@ -131,6 +168,50 @@ export class GrippClient {
       clearTimeout(timeout);
     }
   }
+}
+
+function numberFromEnv(name: string, fallback: number) {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const value = Number(raw);
+  return nonNegativeNumber(value, fallback);
+}
+
+function nonNegativeNumber(value: number | undefined, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function isRetryableGrippError(error: unknown) {
+  if (!(error instanceof GrippMcpError)) {
+    return false;
+  }
+
+  if (error.code === "timeout") {
+    return true;
+  }
+
+  if (error.code !== "upstream_http_error") {
+    return false;
+  }
+
+  const details = asRecord(error.details);
+  const status = details && typeof details.status === "number" ? details.status : null;
+  return status !== null && RETRYABLE_HTTP_STATUSES.has(status);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+}
+
+function delay(ms: number) {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isErrorResponse(response: GrippRpcResponse): boolean {

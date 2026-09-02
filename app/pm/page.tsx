@@ -755,7 +755,7 @@ async function getPmDashboardData(employeeBillabilityPeriod: EmployeeBillability
     const client = new GrippClient();
     const issues: string[] = [];
     const [invoices, hours] = await Promise.all([
-      requiredData("verkoopfacturen", () => fetchInvoicesForPeriod(client, period)),
+      optionalData(issues, "verkoopfacturen", [], () => fetchInvoicesForPeriod(client, period)),
       requiredData("uren", () => fetchHoursForPeriod(client, dataPeriod))
     ]);
     const [employees, fetchedAbsenceRequestLines, fetchedAbsenceRequests, calendarItems] = await Promise.all([

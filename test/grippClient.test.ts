@@ -70,6 +70,107 @@ test("GrippClient treats Gripp responses with error null as successful", async (
   assert.deepEqual(result, [{ id: 123 }]);
 });
 
+test("GrippClient retries transient HTTP failures", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+
+    if (calls === 1) {
+      return new Response(JSON.stringify({ error: "temporary" }), {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    }
+
+    return new Response(JSON.stringify([{ id: 1, result: [{ id: 123 }] }]), {
+      status: 200,
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+  }) as typeof fetch;
+
+  const client = new GrippClient({
+    apiUrl: "https://api.gripp.com/public/api3.php",
+    token: "test-token",
+    fetchImpl,
+    maxRetries: 1,
+    retryBaseDelayMs: 0
+  });
+
+  const result = await client.call("company.get", [[], { paging: { firstresult: 0, maxresults: 1 } }]);
+
+  assert.deepEqual(result, [{ id: 123 }]);
+  assert.equal(calls, 2);
+});
+
+test("GrippClient does not retry non-transient HTTP failures", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: "bad request" }), {
+      status: 400,
+      statusText: "Bad Request",
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+  }) as typeof fetch;
+
+  const client = new GrippClient({
+    apiUrl: "https://api.gripp.com/public/api3.php",
+    token: "test-token",
+    fetchImpl,
+    maxRetries: 2,
+    retryBaseDelayMs: 0
+  });
+
+  await assert.rejects(
+    () => client.call("company.get", [[], { paging: { firstresult: 0, maxresults: 1 } }]),
+    (error) => {
+      assert.equal(error instanceof GrippMcpError, true);
+      assert.equal((error as GrippMcpError).code, "upstream_http_error");
+      assert.equal(calls, 1);
+      return true;
+    }
+  );
+});
+
+test("GrippClient does not retry write-like calls", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: "temporary" }), {
+      status: 503,
+      statusText: "Service Unavailable",
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+  }) as typeof fetch;
+
+  const client = new GrippClient({
+    apiUrl: "https://api.gripp.com/public/api3.php",
+    token: "test-token",
+    fetchImpl,
+    maxRetries: 2,
+    retryBaseDelayMs: 0
+  });
+
+  await assert.rejects(
+    () => client.call("tag.create", [{ name: "Needs confirm" }], true),
+    (error) => {
+      assert.equal(error instanceof GrippMcpError, true);
+      assert.equal((error as GrippMcpError).code, "upstream_http_error");
+      assert.equal(calls, 1);
+      return true;
+    }
+  );
+});
+
 test("GrippClient surfaces Gripp error_code responses", async () => {
   const fetchImpl = (async () => {
     return new Response(
