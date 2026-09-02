@@ -179,12 +179,13 @@ const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
+const APPROVED_ABSENCE_STATUSES = new Set(["approved", "goedgekeurd"]);
 const REJECTED_ABSENCE_STATUSES = new Set(["REJECTED", "rejected", "afgewezen", "geweigerd"]);
 const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overuren", "Opbouw overuren"];
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
-const PM_DASHBOARD_CACHE_VERSION = 2;
+const PM_DASHBOARD_CACHE_VERSION = 3;
 const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 
@@ -2005,9 +2006,10 @@ function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: Json
       contractHours += Math.max(0, workingHours);
     }
 
-    const leaveFromRequestLines = leaveHoursForEmployee(leaveByEmployeeId.get(employeeId) ?? [], capacityStart, period.end);
+    const leaveLines = leaveByEmployeeId.get(employeeId) ?? [];
+    const leaveFromRequestLines = leaveHoursForEmployee(leaveLines, capacityStart, period.end);
     const leaveFromWorkingHours = capacitySources.leaveHoursFromWorkingHoursByEmployeeId.get(employeeId) ?? 0;
-    const leaveHours = Math.max(leaveFromRequestLines, leaveFromWorkingHours);
+    const leaveHours = leaveLines.length > 0 ? leaveFromRequestLines : leaveFromWorkingHours;
     const paidOvertimeHours = Math.max(0, capacitySources.paidOvertimeHoursByEmployeeId.get(employeeId) ?? 0);
 
     rows.push({
@@ -2245,8 +2247,9 @@ function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceReques
   const leaveByEmployeeId = new Map<number, JsonRecord[]>();
 
   for (const line of absenceRequestLines) {
-    const status = stringFrom(readField(line, "absencerequeststatus"))?.toUpperCase();
-    if (status && status !== "APPROVED") {
+    const absenceRequestId = relationId(line, "absencerequest");
+    const absenceRequest = absenceRequestId === null ? undefined : absenceRequestsById.get(absenceRequestId);
+    if (!isCountedLeaveAbsenceStatus(absenceStatusValue(line), absenceRequest ? absenceStatusValue(absenceRequest) : undefined)) {
       continue;
     }
 
@@ -2255,8 +2258,6 @@ function buildLeaveByEmployeeId(absenceRequestLines: JsonRecord[], absenceReques
       continue;
     }
 
-    const absenceRequestId = relationId(line, "absencerequest");
-    const absenceRequest = absenceRequestId === null ? undefined : absenceRequestsById.get(absenceRequestId);
     if (isPaidOvertimeAbsenceLine(line, absenceRequest)) {
       continue;
     }
@@ -2309,6 +2310,16 @@ function buildPaidOvertimeHoursByEmployeeId(absenceRequestLines: JsonRecord[], a
   return paidOvertimeHoursByEmployeeId;
 }
 
+function isCountedLeaveAbsenceStatus(lineStatus: unknown, requestStatus: unknown) {
+  const lineStatusValues = absenceStatusComparisonValues(lineStatus);
+  const statusValues = lineStatusValues.length > 0 ? lineStatusValues : absenceStatusComparisonValues(requestStatus);
+  if (statusValues.length === 0) {
+    return true;
+  }
+
+  return statusValues.some((status) => APPROVED_ABSENCE_STATUSES.has(status));
+}
+
 function isCountedPaidOvertimeAbsenceStatus(value: unknown) {
   const statusValues = absenceStatusComparisonValues(value);
   if (statusValues.length === 0) {
@@ -2333,6 +2344,17 @@ function absenceStatusComparisonValues(value: unknown) {
   }
 
   return Array.from(values).map(normalizeComparisonValue).filter(Boolean);
+}
+
+function absenceStatusValue(record: JsonRecord) {
+  for (const field of ["absencerequeststatus", "status", "state"]) {
+    const value = readField(record, field);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 function isPaidOvertimeAbsenceLine(line: JsonRecord, absenceRequest?: JsonRecord) {
@@ -3197,9 +3219,9 @@ function createDemoCapacitySources(period: Period): CapacitySources {
     { id: 4, screenname: "Daan Smit", employeesince: `${period.year}-03-01`, active: true, role: { id: 1, searchname: "Beheerder" } }
   ];
   const workingHoursByEmployeeId = new Map<number, number>([
-    [1, calculateDefaultContractHours(`${period.year}-01-01`, period.end)],
-    [2, calculateDefaultContractHours(`${period.year}-02-01`, period.end)],
-    [3, calculateDefaultContractHours(`${period.year}-01-15`, period.end) * 0.8]
+    [1, calculateDefaultContractHours(maxDateKey(period.start, `${period.year}-01-01`), period.end)],
+    [2, calculateDefaultContractHours(maxDateKey(period.start, `${period.year}-02-01`), period.end)],
+    [3, calculateDefaultContractHours(maxDateKey(period.start, `${period.year}-01-15`), period.end) * 0.8]
   ]);
   const absenceRequestsById = new Map<number, JsonRecord>([
     [1, { id: 1, employee: 1 }],
