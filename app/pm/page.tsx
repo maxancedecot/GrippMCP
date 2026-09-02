@@ -9,6 +9,7 @@ import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.
 import { DashboardFrame } from "../dashboard-frame.js";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export const metadata: Metadata = {
   title: "PM dashboard | Gripp",
@@ -168,6 +169,7 @@ type FreshPmDashboardData = {
 type PmCacheNotice = "refreshed" | "refresh_failed";
 
 const PAGE_SIZE = 250;
+const PAGE_FETCH_BATCH_SIZE = 8;
 const MAX_INVOICE_PAGES = 80;
 const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
@@ -189,6 +191,7 @@ const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
 const PM_DASHBOARD_CACHE_VERSION = 4;
 const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
+const PM_CACHE_ERROR_PARAM = "pmCacheError";
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -219,7 +222,8 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
   const billabilityView = getPmBillabilityView(params);
   const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
   const cacheNotice = pmCacheNoticeFromParams(params);
-  const dashboard = await getPmDashboardData(employeeBillabilityPeriod, cacheNotice);
+  const cacheError = pmCacheErrorFromParams(params);
+  const dashboard = await getPmDashboardData(employeeBillabilityPeriod, cacheNotice, cacheError);
   const canRefresh = Boolean(process.env.GRIPP_API_TOKEN);
 
   return (
@@ -413,7 +417,7 @@ function MetricCard({
 }
 
 function PmDashboardRefreshForm({ params }: { params: PmSearchParams }) {
-  const hiddenInputs = preservedPmParamInputs(params, new Set([PM_CACHE_NOTICE_PARAM]));
+  const hiddenInputs = preservedPmParamInputs(params, new Set([PM_CACHE_NOTICE_PARAM, PM_CACHE_ERROR_PARAM]));
 
   return (
     <form className="pm-refresh-form" action={refreshPmDashboardAction}>
@@ -433,15 +437,21 @@ async function refreshPmDashboardAction(formData: FormData) {
   const params = pmSearchParamsFromFormData(formData);
   const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
   let notice: PmCacheNotice = "refreshed";
+  let errorMessage = "";
 
   try {
     await refreshCachedPmDashboardData(employeeBillabilityPeriod);
     revalidatePath("/pm");
-  } catch {
+  } catch (error) {
     notice = "refresh_failed";
+    errorMessage = refreshFailureMessage(error);
+    console.error("PM dashboard refresh failed", {
+      message: error instanceof Error ? error.message : String(error),
+      code: errorCode(error)
+    });
   }
 
-  redirect(pmHrefWithCacheNotice(params, notice));
+  redirect(pmHrefWithCacheNotice(params, notice, errorMessage));
 }
 
 function EmployeeBillabilityPeriodControls({ params, period }: { params: PmSearchParams; period: EmployeeBillabilityPeriod }) {
@@ -506,7 +516,7 @@ function pmBillabilityTabHref(params: PmSearchParams, view: PmBillabilityView) {
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
-    if (key === "billabilityView" || key === PM_CACHE_NOTICE_PARAM) {
+    if (["billabilityView", PM_CACHE_NOTICE_PARAM, PM_CACHE_ERROR_PARAM].includes(key)) {
       continue;
     }
 
@@ -527,7 +537,7 @@ function pmEmployeeBillabilityPeriodHref(params: PmSearchParams, preset: PmEmplo
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
-    if (["billabilityView", "employeePeriod", "employeeStart", "employeeEnd", PM_CACHE_NOTICE_PARAM].includes(key)) {
+    if (["billabilityView", "employeePeriod", "employeeStart", "employeeEnd", PM_CACHE_NOTICE_PARAM, PM_CACHE_ERROR_PARAM].includes(key)) {
       continue;
     }
 
@@ -552,7 +562,7 @@ function preservedPmParamInputs(params: PmSearchParams, excludedKeys: Set<string
   const inputs: { key: string; value: string }[] = [];
 
   for (const [key, value] of Object.entries(params)) {
-    if (excludedKeys.has(key) || key === PM_CACHE_NOTICE_PARAM) {
+    if (excludedKeys.has(key) || key === PM_CACHE_NOTICE_PARAM || key === PM_CACHE_ERROR_PARAM) {
       continue;
     }
 
@@ -825,7 +835,8 @@ function BillabilityLineChart({ rows }: { rows: MonthBillability[] }) {
 
 async function getPmDashboardData(
   employeeBillabilityPeriod: EmployeeBillabilityPeriod,
-  cacheNotice?: PmCacheNotice
+  cacheNotice?: PmCacheNotice,
+  cacheError?: string
 ): Promise<PmDashboardData> {
   const period = getYearToDatePeriod();
 
@@ -835,14 +846,15 @@ async function getPmDashboardData(
         mode: "demo",
         message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-cijfers te tonen."
       }),
-      cacheNotice
+      cacheNotice,
+      cacheError
     );
   }
 
   const cacheKey = pmDashboardCacheKey(period, employeeBillabilityPeriod);
   const cached = await safeReadCachedPmDashboardData(cacheKey);
   if (cached) {
-    return dashboardFromCache(cached, cacheNotice);
+    return dashboardFromCache(cached, cacheNotice, cacheError);
   }
 
   try {
@@ -854,14 +866,15 @@ async function getPmDashboardData(
       }
     }
 
-    return dashboardWithCacheNotice(fresh.dashboard, cacheNotice);
+    return dashboardWithCacheNotice(fresh.dashboard, cacheNotice, cacheError);
   } catch (error) {
     return dashboardWithCacheNotice(
       buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
         mode: "demo",
         message: `Live PM-data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
       }),
-      cacheNotice
+      cacheNotice,
+      cacheError
     );
   }
 }
@@ -873,7 +886,10 @@ async function refreshCachedPmDashboardData(employeeBillabilityPeriod: EmployeeB
 
   const period = getYearToDatePeriod();
   const fresh = await loadFreshPmDashboardData(period, employeeBillabilityPeriod);
-  await writeCachedPmDashboardData(pmDashboardCacheKey(period, employeeBillabilityPeriod), fresh.dashboard);
+  const cacheWriteIssue = await safeWriteCachedPmDashboardData(pmDashboardCacheKey(period, employeeBillabilityPeriod), fresh.dashboard);
+  if (cacheWriteIssue) {
+    throw new Error(cacheWriteIssue);
+  }
 }
 
 async function loadFreshPmDashboardData(
@@ -996,9 +1012,9 @@ async function writeCachedPmDashboardData(cacheKey: string, dashboard: PmDashboa
   } satisfies CachedPmDashboardData);
 }
 
-function dashboardFromCache(cached: CachedPmDashboardData, notice?: PmCacheNotice): PmDashboardData {
+function dashboardFromCache(cached: CachedPmDashboardData, notice?: PmCacheNotice, errorMessage?: string): PmDashboardData {
   const messages = [
-    cacheNoticeMessage(notice),
+    cacheNoticeMessage(notice, errorMessage),
     "Cache-data zichtbaar.",
     cached.dashboard.source.message
   ].filter(Boolean);
@@ -1014,8 +1030,8 @@ function dashboardFromCache(cached: CachedPmDashboardData, notice?: PmCacheNotic
   };
 }
 
-function dashboardWithCacheNotice(dashboard: PmDashboardData, notice?: PmCacheNotice): PmDashboardData {
-  const noticeMessage = cacheNoticeMessage(notice);
+function dashboardWithCacheNotice(dashboard: PmDashboardData, notice?: PmCacheNotice, errorMessage?: string): PmDashboardData {
+  const noticeMessage = cacheNoticeMessage(notice, errorMessage);
   if (!noticeMessage) {
     return dashboard;
   }
@@ -1083,15 +1099,44 @@ function pmCacheNoticeFromParams(params: PmSearchParams): PmCacheNotice | undefi
   return notice === "refreshed" || notice === "refresh_failed" ? notice : undefined;
 }
 
-function cacheNoticeMessage(notice?: PmCacheNotice) {
+function pmCacheErrorFromParams(params: PmSearchParams) {
+  return safeRefreshErrorMessage(firstParam(params[PM_CACHE_ERROR_PARAM]) ?? "");
+}
+
+function cacheNoticeMessage(notice?: PmCacheNotice, errorMessage?: string) {
   if (notice === "refreshed") {
     return "Data bijgewerkt.";
   }
   if (notice === "refresh_failed") {
-    return "Verversing mislukt. Vorige cache blijft zichtbaar.";
+    return `Verversing mislukt${errorMessage ? `: ${errorMessage}` : ""}. Vorige cache blijft zichtbaar.`;
   }
 
   return "";
+}
+
+function refreshFailureMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("uren niet geladen")) {
+    return safeRefreshErrorMessage(message);
+  }
+  if (message.startsWith("Cache kon niet worden opgeslagen")) {
+    return safeRefreshErrorMessage(message);
+  }
+  if (message.includes("GRIPP_API_TOKEN")) {
+    return "GRIPP_API_TOKEN ontbreekt.";
+  }
+
+  const code = errorCode(error);
+  if (code) {
+    return `Technische fout (${code})`;
+  }
+
+  return "Technische fout tijdens verversen";
+}
+
+function safeRefreshErrorMessage(value: string) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized;
 }
 
 function cacheNoticeTone(notice?: PmCacheNotice, sourceTone?: DashboardSource["noticeTone"]): DashboardSource["noticeTone"] {
@@ -1112,7 +1157,7 @@ function pmSearchParamsFromFormData(formData: FormData): PmSearchParams {
   const params: PmSearchParams = {};
 
   for (const [key, value] of formData.entries()) {
-    if (key.startsWith("$ACTION_") || key === PM_CACHE_NOTICE_PARAM || typeof value !== "string") {
+    if (key.startsWith("$ACTION_") || key === PM_CACHE_NOTICE_PARAM || key === PM_CACHE_ERROR_PARAM || typeof value !== "string") {
       continue;
     }
 
@@ -1129,11 +1174,11 @@ function pmSearchParamsFromFormData(formData: FormData): PmSearchParams {
   return params;
 }
 
-function pmHrefWithCacheNotice(params: PmSearchParams, notice: PmCacheNotice) {
+function pmHrefWithCacheNotice(params: PmSearchParams, notice: PmCacheNotice, errorMessage = "") {
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
-    if (key === PM_CACHE_NOTICE_PARAM) {
+    if (key === PM_CACHE_NOTICE_PARAM || key === PM_CACHE_ERROR_PARAM) {
       continue;
     }
 
@@ -1143,6 +1188,10 @@ function pmHrefWithCacheNotice(params: PmSearchParams, notice: PmCacheNotice) {
   }
 
   search.set(PM_CACHE_NOTICE_PARAM, notice);
+  const safeErrorMessage = safeRefreshErrorMessage(errorMessage);
+  if (notice === "refresh_failed" && safeErrorMessage) {
+    search.set(PM_CACHE_ERROR_PARAM, safeErrorMessage);
+  }
   return `/pm?${search.toString()}`;
 }
 
@@ -1415,129 +1464,43 @@ function errorCode(error: unknown) {
 }
 
 async function fetchInvoicesForPeriod(client: GrippClient, period: Period) {
-  const records: JsonRecord[] = [];
   const filters: JsonValue[] = [
     { field: "invoice.reportdate", operator: "greaterequals", value: period.start },
     { field: "invoice.reportdate", operator: "lessequals", value: period.end }
   ];
 
-  for (let page = 0; page < MAX_INVOICE_PAGES; page += 1) {
-    const result = await client.call("invoice.get", [
-      filters,
-      {
-        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
-        orderings: [{ field: "invoice.reportdate", direction: "asc" }]
-      }
-    ] as JsonValue[]);
-    const pageRecords = asRecords(result);
-    records.push(...pageRecords);
-
-    if (pageRecords.length < PAGE_SIZE) {
-      break;
-    }
-  }
-
-  return records;
+  return fetchPagedRecords(client, "invoice", filters, [{ field: "invoice.reportdate", direction: "asc" }], MAX_INVOICE_PAGES);
 }
 
 async function fetchHoursForPeriod(client: GrippClient, period: Period) {
-  const records: JsonRecord[] = [];
   const filters: JsonValue[] = [
     { field: "hour.date", operator: "greaterequals", value: period.start },
     { field: "hour.date", operator: "lessequals", value: period.end }
   ];
 
-  for (let page = 0; page < MAX_HOUR_PAGES; page += 1) {
-    const result = await client.call("hour.get", [
-      filters,
-      {
-        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
-        orderings: [{ field: "hour.date", direction: "asc" }]
-      }
-    ] as JsonValue[]);
-    const pageRecords = asRecords(result);
-    records.push(...pageRecords);
-
-    if (pageRecords.length < PAGE_SIZE) {
-      break;
-    }
-  }
-
-  return records;
+  return fetchPagedRecords(client, "hour", filters, [{ field: "hour.date", direction: "asc" }], MAX_HOUR_PAGES);
 }
 
 async function fetchCalendarItemsForPeriod(client: GrippClient, period: Period) {
-  const records: JsonRecord[] = [];
   const filters: JsonValue[] = [
     { field: "calendaritem.date", operator: "greaterequals", value: period.start },
     { field: "calendaritem.date", operator: "lessequals", value: period.end }
   ];
 
-  for (let page = 0; page < MAX_CALENDAR_ITEM_PAGES; page += 1) {
-    const result = await client.call("calendaritem.get", [
-      filters,
-      {
-        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
-        orderings: [{ field: "calendaritem.date", direction: "asc" }]
-      }
-    ] as JsonValue[]);
-    const pageRecords = asRecords(result);
-    records.push(...pageRecords);
-
-    if (pageRecords.length < PAGE_SIZE) {
-      break;
-    }
-  }
-
-  return records;
+  return fetchPagedRecords(client, "calendaritem", filters, [{ field: "calendaritem.date", direction: "asc" }], MAX_CALENDAR_ITEM_PAGES);
 }
 
 async function fetchEmployees(client: GrippClient) {
-  const records: JsonRecord[] = [];
-
-  for (let page = 0; page < MAX_EMPLOYEE_PAGES; page += 1) {
-    const result = await client.call("employee.get", [
-      [],
-      {
-        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
-        orderings: [{ field: "employee.id", direction: "asc" }]
-      }
-    ] as JsonValue[]);
-    const pageRecords = asRecords(result);
-    records.push(...pageRecords);
-
-    if (pageRecords.length < PAGE_SIZE) {
-      break;
-    }
-  }
-
-  return records;
+  return fetchPagedRecords(client, "employee", [], [{ field: "employee.id", direction: "asc" }], MAX_EMPLOYEE_PAGES);
 }
 
 async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Period) {
-  const records: JsonRecord[] = [];
   const filters: JsonValue[] = [
     { field: "absencerequestline.date", operator: "greaterequals", value: period.start },
     { field: "absencerequestline.date", operator: "lessequals", value: period.end }
   ];
 
-  for (let page = 0; page < MAX_ABSENCE_LINE_PAGES; page += 1) {
-    const result = await client.call("absencerequestline.get", [
-      filters,
-      {
-        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
-        orderings: [{ field: "absencerequestline.date", direction: "asc" }]
-      }
-    ] as JsonValue[]);
-    const pageRecords = asRecords(result);
-    records.push(...pageRecords);
-
-    if (pageRecords.length < PAGE_SIZE) {
-      break;
-    }
-  }
-
-  return records;
+  return fetchPagedRecords(client, "absencerequestline", filters, [{ field: "absencerequestline.date", direction: "asc" }], MAX_ABSENCE_LINE_PAGES);
 }
 
 async function fetchAbsenceRequests(client: GrippClient) {
@@ -1797,23 +1760,51 @@ async function fetchPagedRecords(
 ) {
   const records: JsonRecord[] = [];
 
-  for (let page = 0; page < maxPages; page += 1) {
-    const result = await client.call(`${entity}.get`, [
-      filters,
-      {
-        paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
-        orderings
-      }
-    ] as JsonValue[]);
-    const pageRecords = asRecords(result);
-    records.push(...pageRecords);
+  const firstPageRecords = asRecords(await client.call(`${entity}.get`, pagedGetParams(filters, orderings, 0)));
+  records.push(...firstPageRecords);
+  if (firstPageRecords.length < PAGE_SIZE) {
+    return records;
+  }
 
-    if (pageRecords.length < PAGE_SIZE) {
+  for (let firstPage = 1; firstPage < maxPages; firstPage += PAGE_FETCH_BATCH_SIZE) {
+    const pages = Array.from(
+      { length: Math.min(PAGE_FETCH_BATCH_SIZE, maxPages - firstPage) },
+      (_, index) => firstPage + index
+    );
+    const results = await client.batch(
+      pages.map((page) => ({
+        method: `${entity}.get`,
+        params: pagedGetParams(filters, orderings, page)
+      }))
+    );
+
+    let reachedLastPage = false;
+    for (const result of results) {
+      if (reachedLastPage) {
+        break;
+      }
+
+      const pageRecords = asRecords(result);
+      records.push(...pageRecords);
+      reachedLastPage = pageRecords.length < PAGE_SIZE;
+    }
+
+    if (reachedLastPage) {
       break;
     }
   }
 
   return records;
+}
+
+function pagedGetParams(filters: JsonValue[], orderings: JsonValue[], page: number): JsonValue[] {
+  return [
+    filters,
+    {
+      paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
+      orderings
+    }
+  ] as JsonValue[];
 }
 
 function buildPmDashboardData(
