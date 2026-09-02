@@ -179,13 +179,13 @@ const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const REST_TONE_MAX_HOURS = 160;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
-const APPROVED_ABSENCE_STATUSES = new Set(["approved", "goedgekeurd"]);
+const COUNTED_LEAVE_ABSENCE_STATUSES = new Set(["approved", "goedgekeurd", "pending", "inaanvraag", "aangevraagd"]);
 const REJECTED_ABSENCE_STATUSES = new Set(["REJECTED", "rejected", "afgewezen", "geweigerd"]);
 const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overuren", "Opbouw overuren"];
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
-const PM_DASHBOARD_CACHE_VERSION = 3;
+const PM_DASHBOARD_CACHE_VERSION = 4;
 const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 
@@ -2317,7 +2317,7 @@ function isCountedLeaveAbsenceStatus(lineStatus: unknown, requestStatus: unknown
     return true;
   }
 
-  return statusValues.some((status) => APPROVED_ABSENCE_STATUSES.has(status));
+  return statusValues.some((status) => COUNTED_LEAVE_ABSENCE_STATUSES.has(status));
 }
 
 function isCountedPaidOvertimeAbsenceStatus(value: unknown) {
