@@ -10,8 +10,7 @@ import {
   type SiteAnalyticsCvrLinkRow,
   type SiteAnalyticsMetricSummary,
   type SiteAnalyticsPeriod,
-  type SiteAnalyticsReferrerRow,
-  type SiteAnalyticsSiteSummary
+  type SiteAnalyticsReferrerRow
 } from "../../src/siteAnalytics.js";
 import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.js";
 import { DashboardFrame } from "../dashboard-frame.js";
@@ -72,7 +71,6 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
     connectedDashboardPromise,
     getPublicSiteAnalyticsSites()
   ]);
-  const overviewSites = dashboard.sites;
   const overviewCvrLinks = dashboard.cvrLinks;
   const siteTabs = configuredSites.length > 0 ? configuredSites : connectedDashboard.sites;
 
@@ -161,7 +159,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               </div>
               <span className="panel-total">{overviewCvrLinks.length} koppelingen</span>
             </div>
-            <CvrOverviewTable rows={overviewCvrLinks} sites={overviewSites} />
+            <CvrOverviewTable rows={overviewCvrLinks} />
           </article>
 
           <article className="panel">
@@ -275,12 +273,10 @@ function TrafficChart({ rows }: { rows: SiteAnalyticsDailyRow[] }) {
   );
 }
 
-function CvrOverviewTable({ rows, sites }: { rows: SiteAnalyticsCvrLinkRow[]; sites: SiteAnalyticsSiteSummary[] }) {
+function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
   if (rows.length === 0) {
     return <p className="empty-state">Geen projectpagina's gekoppeld aan bedankingspagina's.</p>;
   }
-
-  const sitesById = new Map(sites.map((site) => [site.id, site]));
 
   return (
     <div className="table-wrap">
@@ -294,14 +290,10 @@ function CvrOverviewTable({ rows, sites }: { rows: SiteAnalyticsCvrLinkRow[]; si
         </thead>
         <tbody>
           {rows.map((link) => {
-            const site = sitesById.get(link.siteId);
-
             return (
               <tr key={link.id}>
                 <td>
                   <span className="row-title">{link.sourceTitle}</span>
-                  <PagePathLink siteUrl={site?.url} path={link.sourcePath} />
-                  <span className="cell-muted">{link.siteName}</span>
                 </td>
                 <td>
                   <span className="row-title">{formatNumber(link.sourceVisitors)}</span>
@@ -316,32 +308,6 @@ function CvrOverviewTable({ rows, sites }: { rows: SiteAnalyticsCvrLinkRow[]; si
       </table>
     </div>
   );
-}
-
-function PagePathLink({ siteUrl, path }: { siteUrl: string | undefined; path: string }) {
-  const href = pageUrlForSitePath(siteUrl, path);
-
-  if (!href) {
-    return <span className="cell-muted">{path}</span>;
-  }
-
-  return (
-    <a className="cell-muted path-link" href={href} target="_blank" rel="noreferrer">
-      {path}
-    </a>
-  );
-}
-
-function pageUrlForSitePath(siteUrl: string | undefined, path: string) {
-  if (!siteUrl) {
-    return "";
-  }
-
-  try {
-    return new URL(path, siteUrl.endsWith("/") ? siteUrl : `${siteUrl}/`).toString();
-  } catch {
-    return "";
-  }
 }
 
 function ReferrerTable({ rows, totals }: { rows: SiteAnalyticsReferrerRow[]; totals: SiteAnalyticsMetricSummary }) {
