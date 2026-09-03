@@ -285,6 +285,7 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
           <tr>
             <th>Projectpagina</th>
             <th>Bezoekers</th>
+            <th>Conversion</th>
             <th>CVR</th>
           </tr>
         </thead>
@@ -297,6 +298,9 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
                 </td>
                 <td>
                   <span className="row-title">{formatNumber(link.sourceVisitors)}</span>
+                </td>
+                <td>
+                  <span className="row-title">{formatNumber(link.targetVisitors)}</span>
                 </td>
                 <td>
                   <span className="cvr-overview-rate">{formatConversionRate(link.conversionRatePercent)}%</span>

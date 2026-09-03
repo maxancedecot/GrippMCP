@@ -243,14 +243,6 @@ const IGNORED_PAGE_QUERY_PARAMS = new Set([
   "mc_eid",
   "msclkid",
   "ttclid",
-  "utm_campaign",
-  "utm_content",
-  "utm_creative_format",
-  "utm_id",
-  "utm_marketing_tactic",
-  "utm_medium",
-  "utm_source",
-  "utm_term",
   "wbraid"
 ]);
 
@@ -1376,7 +1368,8 @@ function normalizedPageQuery(params: URLSearchParams) {
 
   params.forEach((value, key) => {
     const normalizedKey = normalizeString(key, 80);
-    if (!normalizedKey || IGNORED_PAGE_QUERY_PARAMS.has(normalizedKey.toLowerCase())) {
+    const lowerKey = normalizedKey.toLowerCase();
+    if (!normalizedKey || lowerKey.startsWith("utm_") || IGNORED_PAGE_QUERY_PARAMS.has(lowerKey)) {
       return;
     }
 
