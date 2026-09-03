@@ -99,6 +99,15 @@ export type SiteAnalyticsCvrLinkRow = SiteAnalyticsCvrLink & {
   targetVisitors: number;
   targetPageViews: number;
   conversionRatePercent: number;
+  dailySeries: SiteAnalyticsCvrDailyPoint[];
+};
+
+export type SiteAnalyticsCvrDailyPoint = {
+  date: string;
+  label: string;
+  sourceVisitors: number;
+  targetVisitors: number;
+  conversionRatePercent: number;
 };
 
 export type SiteAnalyticsDashboardData = {
@@ -450,6 +459,7 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
   const siteAccumulators = new Map<string, SiteAccumulator>();
   const pageAccumulators = new Map<string, PageAccumulator>();
   const referrerAccumulators = new Map<string, ReferrerAccumulator>();
+  const pageDailyVisitors = new Map<string, Map<string, Set<string>>>();
   const totals = emptyDashboardAccumulator();
 
   for (const site of siteList) {
@@ -473,7 +483,7 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
         continue;
       }
 
-      mergeDailySiteAnalyticsData(daily, site, totals, siteAccumulators, pageAccumulators, referrerAccumulators, dailyRows);
+      mergeDailySiteAnalyticsData(daily, site, totals, siteAccumulators, pageAccumulators, referrerAccumulators, dailyRows, pageDailyVisitors);
     }
   }
 
@@ -488,7 +498,7 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
     .map(cvrPageCandidateFromAccumulator)
     .sort(sortCvrPageCandidates);
   const cvrLinks = storedCvrLinks
-    .map((link) => cvrLinkRowFromLink(link, sitesById, pageAccumulators))
+    .map((link) => cvrLinkRowFromLink(link, sitesById, pageAccumulators, dateKeys, pageDailyVisitors))
     .sort((left, right) => left.siteName.localeCompare(right.siteName) || right.sourceVisitors - left.sourceVisitors || left.sourcePath.localeCompare(right.sourcePath));
   const referrerRows = Array.from(referrerAccumulators.values())
     .map((referrer) => ({
@@ -895,7 +905,8 @@ function mergeDailySiteAnalyticsData(
   siteAccumulators: Map<string, SiteAccumulator>,
   pageAccumulators: Map<string, PageAccumulator>,
   referrerAccumulators: Map<string, ReferrerAccumulator>,
-  dailyAccumulators: Map<string, DailyAccumulator>
+  dailyAccumulators: Map<string, DailyAccumulator>,
+  pageDailyVisitors: Map<string, Map<string, Set<string>>>
 ) {
   const siteAccumulator = siteAccumulators.get(site.id) ?? emptySiteAccumulator(site);
   const dailyAccumulator = dailyAccumulators.get(daily.date);
@@ -935,9 +946,14 @@ function mergeDailySiteAnalyticsData(
     pageAccumulator.pageViews += page.views;
     pageAccumulator.engagementMs += page.engagementMs;
     pageAccumulator.title = page.title || pageAccumulator.title;
+    const dailyVisitorsForDate = pageDailyVisitors.get(daily.date) ?? new Map<string, Set<string>>();
+    const dailyVisitorsForPage = dailyVisitorsForDate.get(key) ?? new Set<string>();
     for (const visitor of page.visitors) {
       pageAccumulator.visitors.add(visitor);
+      dailyVisitorsForPage.add(visitor);
     }
+    dailyVisitorsForDate.set(key, dailyVisitorsForPage);
+    pageDailyVisitors.set(daily.date, dailyVisitorsForDate);
     for (const session of page.sessions) {
       pageAccumulator.sessions.add(session);
     }
@@ -1003,7 +1019,9 @@ function cvrPageCandidateFromAccumulator(accumulator: PageAccumulator): SiteAnal
 function cvrLinkRowFromLink(
   link: SiteAnalyticsCvrLink,
   sitesById: Map<string, SiteAnalyticsPublicSite>,
-  pageAccumulators: Map<string, PageAccumulator>
+  pageAccumulators: Map<string, PageAccumulator>,
+  dateKeys: string[],
+  pageDailyVisitors: Map<string, Map<string, Set<string>>>
 ): SiteAnalyticsCvrLinkRow {
   const sourcePage = pageAccumulators.get(pageAccumulatorKey(link.siteId, link.sourcePath));
   const targetPage = pageAccumulators.get(pageAccumulatorKey(link.siteId, link.targetPath));
@@ -1019,8 +1037,32 @@ function cvrLinkRowFromLink(
     targetTitle: targetPage?.title || link.targetTitle || link.targetPath,
     targetVisitors,
     targetPageViews: targetPage?.pageViews ?? 0,
-    conversionRatePercent: conversionRatePercent(targetVisitors, sourceVisitors)
+    conversionRatePercent: conversionRatePercent(targetVisitors, sourceVisitors),
+    dailySeries: cvrDailySeriesForLink(link, dateKeys, pageDailyVisitors)
   };
+}
+
+function cvrDailySeriesForLink(
+  link: SiteAnalyticsCvrLink,
+  dateKeys: string[],
+  pageDailyVisitors: Map<string, Map<string, Set<string>>>
+): SiteAnalyticsCvrDailyPoint[] {
+  const sourceKey = pageAccumulatorKey(link.siteId, link.sourcePath);
+  const targetKey = pageAccumulatorKey(link.siteId, link.targetPath);
+
+  return dateKeys.map((date) => {
+    const dayVisitors = pageDailyVisitors.get(date);
+    const sourceVisitors = dayVisitors?.get(sourceKey)?.size ?? 0;
+    const targetVisitors = dayVisitors?.get(targetKey)?.size ?? 0;
+
+    return {
+      date,
+      label: dateFormatter.format(dateFromKey(date)),
+      sourceVisitors,
+      targetVisitors,
+      conversionRatePercent: conversionRatePercent(targetVisitors, sourceVisitors)
+    };
+  });
 }
 
 function sortCvrPageCandidates(left: SiteAnalyticsCvrPageCandidate, right: SiteAnalyticsCvrPageCandidate) {
@@ -1104,6 +1146,25 @@ function isDailySiteAnalyticsData(value: unknown): value is DailySiteAnalyticsDa
   );
 }
 
+function demoCvrDailySeries(period: SiteAnalyticsPeriod, sourceVisitorsTotal: number, targetVisitorsTotal: number): SiteAnalyticsCvrDailyPoint[] {
+  const dates = dateKeysForPeriod(period);
+  const dayCount = dates.length || 1;
+
+  return dates.map((date, index) => {
+    const wave = 0.75 + 0.5 * Math.abs(Math.sin(index * 0.7));
+    const sourceVisitors = Math.max(1, Math.round((sourceVisitorsTotal / dayCount) * wave));
+    const targetVisitors = Math.max(0, Math.round((targetVisitorsTotal / dayCount) * wave));
+
+    return {
+      date,
+      label: dateFormatter.format(dateFromKey(date)),
+      sourceVisitors,
+      targetVisitors,
+      conversionRatePercent: conversionRatePercent(targetVisitors, sourceVisitors)
+    };
+  });
+}
+
 function createDemoSiteAnalyticsDashboardData(
   period: SiteAnalyticsPeriod,
   selectedSiteId: string | undefined,
@@ -1170,6 +1231,7 @@ function createDemoSiteAnalyticsDashboardData(
       targetVisitors: 52,
       targetPageViews: 68,
       conversionRatePercent: conversionRatePercent(52, 420),
+      dailySeries: demoCvrDailySeries(period, 420, 52),
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
     },
@@ -1186,6 +1248,7 @@ function createDemoSiteAnalyticsDashboardData(
       targetVisitors: 63,
       targetPageViews: 84,
       conversionRatePercent: conversionRatePercent(63, 530),
+      dailySeries: demoCvrDailySeries(period, 530, 63),
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
     },
@@ -1202,6 +1265,7 @@ function createDemoSiteAnalyticsDashboardData(
       targetVisitors: 74,
       targetPageViews: 96,
       conversionRatePercent: conversionRatePercent(74, 412),
+      dailySeries: demoCvrDailySeries(period, 412, 74),
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
     }

@@ -6,15 +6,14 @@ import {
   getPublicSiteAnalyticsSites,
   getSiteAnalyticsDashboardData,
   upsertSiteAnalyticsCvrLink,
-  type SiteAnalyticsDailyRow,
   type SiteAnalyticsCvrLinkRow,
   type SiteAnalyticsMetricSummary,
   type SiteAnalyticsPeriod,
   type SiteAnalyticsReferrerRow
 } from "../../src/siteAnalytics.js";
-import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 import { CvrMappingBoard } from "./cvr-mapping-board.js";
+import { CvrTrendChart } from "./cvr-trend-chart.js";
 
 export const dynamic = "force-dynamic";
 
@@ -144,12 +143,11 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <section className="panel site-analytics-chart-panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Verkeer</p>
-              <h2>Weergaven en bezoekers</h2>
+              <p className="eyebrow">Conversie</p>
+              <h2>CVR-verloop</h2>
             </div>
-            <span className="panel-total">{periodLabel(dashboard.period)}</span>
           </div>
-          <TrafficChart rows={dashboard.dailyRows} />
+          <CvrTrendChart links={overviewCvrLinks} periodLabel={periodLabel(dashboard.period)} />
         </section>
 
         <section className="site-analytics-detail-grid">
@@ -206,72 +204,6 @@ function MetricCard({
       <strong>{value}</strong>
       <p>{detail}</p>
     </article>
-  );
-}
-
-function TrafficChart({ rows }: { rows: SiteAnalyticsDailyRow[] }) {
-  const width = Math.max(760, rows.length * 42);
-  const height = 320;
-  const padding = { top: 28, right: 34, bottom: 48, left: 74 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-  const maximum = Math.max(1, ...rows.flatMap((row) => [row.pageViews, row.uniqueVisitors]));
-  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
-  const yFor = (value: number) => padding.top + ((maximum - value) / maximum) * chartHeight;
-  const viewPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.pageViews) }));
-  const visitorPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.uniqueVisitors) }));
-  const viewPath = smoothLinePath(viewPoints);
-  const visitorPath = smoothLinePath(visitorPoints);
-  const areaPath = smoothAreaPath(viewPoints, yFor(0));
-  const gridTicks = Array.from({ length: 5 }, (_, index) => {
-    const value = Math.round(maximum - (maximum * index) / 4);
-    return { key: index, value, y: yFor(value) };
-  });
-  const labelEvery = Math.max(1, Math.ceil(rows.length / 8));
-
-  return (
-    <div className="site-analytics-chart">
-      <div className="revenue-line-legend" aria-hidden="true">
-        <span><i className="site-analytics-legend-dot site-analytics-legend-dot--views" />Weergaven</span>
-        <span><i className="site-analytics-legend-dot site-analytics-legend-dot--visitors" />Bezoekers</span>
-      </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label={`Verkeer: ${rows.map((row) => `${row.label} ${row.pageViews} weergaven, ${row.uniqueVisitors} bezoekers`).join(", ")}`}
-      >
-        <defs>
-          <linearGradient id="site-analytics-traffic-gradient" x1="0" x2="0" y1={padding.top} y2={height - padding.bottom} gradientUnits="userSpaceOnUse">
-            <stop className="site-analytics-gradient-start" offset="0%" />
-            <stop className="site-analytics-gradient-end" offset="100%" />
-          </linearGradient>
-        </defs>
-        <rect className="revenue-line-plot-bg" x={padding.left} y={padding.top} width={chartWidth} height={chartHeight} rx="6" />
-        {gridTicks.map((tick) => (
-          <g key={tick.key}>
-            <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={tick.y} y2={tick.y} />
-            <text className="revenue-line-y-label" x={padding.left - 12} y={tick.y + 4} textAnchor="end">
-              {formatNumber(tick.value)}
-            </text>
-          </g>
-        ))}
-        {rows.length > 1 ? <path className="site-analytics-area" d={areaPath} fill="url(#site-analytics-traffic-gradient)" /> : null}
-        {rows.length > 1 ? <path className="site-analytics-line site-analytics-line--views" d={viewPath} /> : null}
-        {rows.length > 1 ? <path className="site-analytics-line site-analytics-line--visitors" d={visitorPath} /> : null}
-        {rows.map((row, index) => (
-          <g key={row.date}>
-            <title>{`${row.label}: ${formatNumber(row.pageViews)} weergaven, ${formatNumber(row.uniqueVisitors)} bezoekers, ${formatNumber(row.sessions)} sessies`}</title>
-            <circle className="site-analytics-point site-analytics-point--views" cx={viewPoints[index].x} cy={viewPoints[index].y} r="3.5" />
-            <circle className="site-analytics-point site-analytics-point--visitors" cx={visitorPoints[index].x} cy={visitorPoints[index].y} r="3" />
-            {index % labelEvery === 0 || index === rows.length - 1 ? (
-              <text className="revenue-line-label" x={viewPoints[index].x} y={height - 20} textAnchor={index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle"}>
-                {row.label}
-              </text>
-            ) : null}
-          </g>
-        ))}
-      </svg>
-    </div>
   );
 }
 

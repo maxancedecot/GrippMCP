@@ -1400,10 +1400,6 @@ td .inline-bar {
   transform: rotate(45deg);
 }
 
-.site-analytics-legend-dot--visitors {
-  border-color: var(--blue);
-}
-
 .site-analytics-gradient-start {
   stop-color: var(--good);
   stop-opacity: 0.12;
@@ -1429,10 +1425,6 @@ td .inline-bar {
   stroke: var(--good);
 }
 
-.site-analytics-line--visitors {
-  stroke: var(--blue);
-}
-
 .site-analytics-point {
   fill: var(--surface);
   stroke-width: 2.2;
@@ -1440,10 +1432,6 @@ td .inline-bar {
 
 .site-analytics-point--views {
   stroke: var(--good);
-}
-
-.site-analytics-point--visitors {
-  stroke: var(--blue);
 }
 
 .cvr-overview-table th:nth-child(2),
@@ -1527,6 +1515,15 @@ td .inline-bar {
 
 .cvr-mapping-heading {
   align-items: center;
+}
+
+.cvr-trend-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
 }
 
 .cvr-mapping-toolbar {
