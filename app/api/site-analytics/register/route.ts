@@ -1,4 +1,5 @@
 import {
+  deleteRegisteredSiteAnalyticsSite,
   registerSiteAnalyticsSite,
   verifySiteAnalyticsRegistrationToken
 } from "../../../../src/siteAnalytics.js";
@@ -35,6 +36,17 @@ export async function POST(request: Request) {
   }
 }
 
+export async function DELETE(request: Request) {
+  const payload = await safeJson(request);
+  const siteId = siteIdFromRequest(request, payload);
+  const token = siteTokenFromRequest(request, payload);
+  if (!(await deleteRegisteredSiteAnalyticsSite(siteId, token))) {
+    return json({ error: "unauthorized_site" }, 401);
+  }
+
+  return json({ ok: true });
+}
+
 async function safeJson(request: Request) {
   try {
     return await request.json();
@@ -53,6 +65,25 @@ function tokenFromRequest(request: Request, payload: unknown) {
   return bearer || header || body;
 }
 
+function siteTokenFromRequest(request: Request, payload: unknown) {
+  const authorization = request.headers.get("authorization") ?? "";
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  const header = request.headers.get("x-site-analytics-token")?.trim();
+  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : undefined;
+  const body = typeof record?.site_token === "string" ? record.site_token.trim() : "";
+
+  return bearer || header || body;
+}
+
+function siteIdFromRequest(request: Request, payload: unknown) {
+  const url = new URL(request.url);
+  const query = url.searchParams.get("site_id") ?? url.searchParams.get("siteId") ?? "";
+  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : undefined;
+  const body = record?.site_id ?? record?.siteId;
+
+  return typeof body === "string" ? body : query;
+}
+
 function json(payload: unknown, status = 200) {
   return Response.json(payload, {
     status,
@@ -63,7 +94,7 @@ function json(payload: unknown, status = 200) {
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Site-Analytics-Registration-Token"
+    "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Site-Analytics-Registration-Token, X-Site-Analytics-Token"
   };
 }

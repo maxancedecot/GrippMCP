@@ -285,6 +285,26 @@ export async function registerSiteAnalyticsSite(payload: unknown, options: { now
   };
 }
 
+export async function deleteRegisteredSiteAnalyticsSite(siteId: string, token: string): Promise<boolean> {
+  const normalizedSiteId = normalizeIdentifier(siteId);
+  if (!normalizedSiteId || !token) {
+    return false;
+  }
+
+  const registry = await readSiteAnalyticsRegistry();
+  const existingIndex = registry.sites.findIndex((site) => site.id === normalizedSiteId);
+  const site = existingIndex >= 0 ? registry.sites[existingIndex] : undefined;
+  if (!site || !safeEqual(hashSecret(token), hashSecret(site.token))) {
+    return false;
+  }
+
+  registry.sites.splice(existingIndex, 1);
+  registry.updatedAt = new Date().toISOString();
+  await writeJsonCache(SITE_ANALYTICS_REGISTRY_CACHE_KEY, registry);
+
+  return true;
+}
+
 export async function recordSiteAnalyticsEvent(payload: unknown): Promise<{ accepted: true }> {
   const event = normalizeSiteAnalyticsEvent(payload);
   const daily = await readDailySiteAnalyticsData(event.siteId, event.receivedAt);

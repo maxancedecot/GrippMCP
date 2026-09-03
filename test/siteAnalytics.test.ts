@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  deleteRegisteredSiteAnalyticsSite,
   getConfiguredSiteAnalyticsSites,
   getPublicSiteAnalyticsSites,
   getSiteAnalyticsDashboardData,
@@ -40,6 +41,9 @@ test("site analytics auto-registers sites and validates generated tokens", async
     assert.equal(sites.some((site) => site.id === registration.site.id), true);
     assert.equal(await verifySiteAnalyticsToken(registration.site.id, registration.siteToken), true);
     assert.equal(await verifySiteAnalyticsToken(registration.site.id, "wrong-token"), false);
+    assert.equal(await deleteRegisteredSiteAnalyticsSite(registration.site.id, "wrong-token"), false);
+    assert.equal(await deleteRegisteredSiteAnalyticsSite(registration.site.id, registration.siteToken), true);
+    assert.equal((await getPublicSiteAnalyticsSites()).some((site) => site.id === registration.site.id), false);
   });
 });
 

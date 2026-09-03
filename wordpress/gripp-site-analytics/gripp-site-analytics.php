@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Gripp Site Analytics
  * Description: Collecte les performances d'un site WordPress et les envoie vers le dashboard central.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Author: Gripp MCP
  * License: GPL-2.0-or-later
  */
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class Gripp_Site_Analytics_Plugin {
-    private const VERSION = '0.2.0';
+    private const VERSION = '0.2.1';
     private const OPTION_NAME = 'gripp_site_analytics_options';
     private const REST_NAMESPACE = 'gripp-site-analytics/v1';
     private const REST_ROUTE = '/event';
@@ -40,6 +40,7 @@ final class Gripp_Site_Analytics_Plugin {
         add_action('admin_menu', [$this, 'register_admin_page']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_init', [$this, 'maybe_auto_register_site'], 20);
+        add_action('admin_post_gripp_site_analytics_register', [$this, 'handle_manual_register']);
         add_action('rest_api_init', [$this, 'register_rest_routes']);
         add_action('wp_enqueue_scripts', [$this, 'enqueue_tracker']);
     }
@@ -110,7 +111,10 @@ final class Gripp_Site_Analytics_Plugin {
         ?>
         <div class="wrap">
             <h1>Gripp Site Analytics</h1>
-            <?php $this->render_connection_notice($this->options()); ?>
+            <?php
+            $options = $this->options();
+            $this->render_connection_notice($options);
+            ?>
             <form action="options.php" method="post">
                 <?php
                 settings_fields('gripp_site_analytics');
@@ -118,6 +122,7 @@ final class Gripp_Site_Analytics_Plugin {
                 submit_button('Enregistrer');
                 ?>
             </form>
+            <?php $this->render_manual_register_form($options); ?>
         </div>
         <?php
     }
@@ -192,10 +197,32 @@ final class Gripp_Site_Analytics_Plugin {
             return;
         }
 
+        if (!empty($options['registration_attempted_at'])) {
+            ?>
+            <div class="notice notice-warning inline">
+                <p>Connexion pas encore finalisee. Cliquez sur Connecter maintenant pour relancer et afficher l'erreur exacte.</p>
+            </div>
+            <?php
+            return;
+        }
+
         ?>
         <div class="notice notice-info inline">
-            <p>Connexion automatique en cours. Rechargez cette page si le statut ne change pas.</p>
+            <p>Connexion prete. Cliquez sur Enregistrer, puis sur Connecter maintenant si le statut ne passe pas en connecte.</p>
         </div>
+        <?php
+    }
+
+    public function render_manual_register_form(array $options): void {
+        if ($this->is_configured($options) || !self::dashboard_url_from_options($options)) {
+            return;
+        }
+        ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 12px;">
+            <input type="hidden" name="action" value="gripp_site_analytics_register" />
+            <?php wp_nonce_field('gripp_site_analytics_register'); ?>
+            <?php submit_button('Connecter maintenant', 'secondary', 'submit', false); ?>
+        </form>
         <?php
     }
 
@@ -233,7 +260,30 @@ final class Gripp_Site_Analytics_Plugin {
         $this->register_site_with_dashboard($options, $dashboard_url);
     }
 
-    private function register_site_with_dashboard(array $options, string $dashboard_url): void {
+    public function handle_manual_register(): void {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('Acces refuse.', 'gripp-site-analytics'));
+        }
+
+        check_admin_referer('gripp_site_analytics_register');
+
+        $options = $this->options();
+        if (empty($options['public_key'])) {
+            $options['public_key'] = wp_generate_password(32, false, false);
+        }
+        $options = self::apply_default_dashboard_options($options);
+        $dashboard_url = self::dashboard_url_from_options($options);
+        if ($dashboard_url) {
+            $this->register_site_with_dashboard($options, $dashboard_url);
+        } else {
+            $this->store_registration_error($options, 'URL dashboard manquante');
+        }
+
+        wp_safe_redirect(admin_url('options-general.php?page=gripp-site-analytics'));
+        exit;
+    }
+
+    private function register_site_with_dashboard(array $options, string $dashboard_url): bool {
         $options['registration_attempted_at'] = time();
         $options['registration_error'] = '';
         update_option(self::OPTION_NAME, $options, false);
@@ -260,14 +310,15 @@ final class Gripp_Site_Analytics_Plugin {
 
         if (is_wp_error($response)) {
             $this->store_registration_error($options, $response->get_error_message());
-            return;
+            return false;
         }
 
         $status = (int) wp_remote_retrieve_response_code($response);
-        $body = json_decode((string) wp_remote_retrieve_body($response), true);
+        $raw_body = (string) wp_remote_retrieve_body($response);
+        $body = json_decode($raw_body, true);
         if ($status < 200 || $status >= 300 || !is_array($body)) {
-            $this->store_registration_error($options, 'le dashboard a refuse l enregistrement');
-            return;
+            $this->store_registration_error($options, $this->format_registration_http_error($response, $body, $raw_body));
+            return false;
         }
 
         $site_id = sanitize_key($body['site_id'] ?? '');
@@ -275,7 +326,7 @@ final class Gripp_Site_Analytics_Plugin {
         $collect_url = esc_url_raw($body['collect_url'] ?? self::build_dashboard_endpoint_url($dashboard_url, self::COLLECT_PATH));
         if (!$site_id || !$site_token || !$collect_url) {
             $this->store_registration_error($options, 'reponse dashboard incomplete');
-            return;
+            return false;
         }
 
         $options['dashboard_url'] = $dashboard_url;
@@ -284,11 +335,25 @@ final class Gripp_Site_Analytics_Plugin {
         $options['site_token'] = $site_token;
         $options['registration_error'] = '';
         update_option(self::OPTION_NAME, $options, false);
+
+        return true;
     }
 
     private function store_registration_error(array $options, string $message): void {
         $options['registration_error'] = sanitize_text_field($message);
         update_option(self::OPTION_NAME, $options, false);
+    }
+
+    private function format_registration_http_error($response, $body, string $raw_body): string {
+        $status = (int) wp_remote_retrieve_response_code($response);
+        $message = (string) wp_remote_retrieve_response_message($response);
+        if (is_array($body) && !empty($body['error'])) {
+            $message = (string) $body['error'];
+        } elseif ($raw_body !== '') {
+            $message = substr(wp_strip_all_tags($raw_body), 0, 160);
+        }
+
+        return trim('HTTP ' . (string) $status . ' ' . $message);
     }
 
     public function register_rest_routes(): void {
