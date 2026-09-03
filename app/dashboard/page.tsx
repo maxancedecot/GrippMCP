@@ -38,6 +38,13 @@ const conversionRateFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1
 });
+const tableDateTimeFormatter = new Intl.DateTimeFormat("nl-BE", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit"
+});
 
 async function createCvrLinkAction(formData: FormData) {
   "use server";
@@ -65,9 +72,15 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   const params = (await searchParams) ?? {};
   const days = dashboardDaysFromParams(params);
   const siteId = firstParam(params.site);
-  const dashboard = await getSiteAnalyticsDashboardData({ days, siteId });
-  const configuredSites = await getPublicSiteAnalyticsSites();
-  const siteTabs = configuredSites.length > 0 ? configuredSites : dashboard.sites;
+  const dashboardPromise = getSiteAnalyticsDashboardData({ days, siteId });
+  const connectedDashboardPromise = siteId ? getSiteAnalyticsDashboardData({ days }) : dashboardPromise;
+  const [dashboard, connectedDashboard, configuredSites] = await Promise.all([
+    dashboardPromise,
+    connectedDashboardPromise,
+    getPublicSiteAnalyticsSites()
+  ]);
+  const overviewSites = connectedDashboard.sites;
+  const siteTabs = configuredSites.length > 0 ? configuredSites : overviewSites;
 
   return (
     <DashboardFrame>
@@ -148,12 +161,12 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <section className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Sites</p>
+              <p className="eyebrow">Verbonden websites</p>
               <h2>Overzicht</h2>
             </div>
-            <span className="panel-total">{dashboard.sites.length} sites</span>
+            <span className="panel-total">{overviewSites.length} websites</span>
           </div>
-          <SiteSummaryTable rows={dashboard.sites} />
+          <SiteSummaryTable rows={overviewSites} />
         </section>
 
         <CvrMappingBoard
@@ -280,7 +293,7 @@ function TrafficChart({ rows }: { rows: SiteAnalyticsDailyRow[] }) {
 
 function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
   if (rows.length === 0) {
-    return <p className="empty-state">Geen sites in deze selectie.</p>;
+    return <p className="empty-state">Geen verbonden websites.</p>;
   }
 
   return (
@@ -288,7 +301,8 @@ function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
       <table className="site-analytics-table">
         <thead>
           <tr>
-            <th>Site</th>
+            <th>Website</th>
+            <th>Connectie</th>
             <th>Weergaven</th>
             <th>Bezoekers</th>
             <th>Sessies</th>
@@ -303,6 +317,10 @@ function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
               <td>
                 <span className="row-title">{site.name}</span>
                 <span className="cell-muted">{site.url || site.id}</span>
+              </td>
+              <td>
+                <span className="connection-pill">Verbonden</span>
+                <span className="cell-muted">{formatLastSeen(site.lastSeenAt)}</span>
               </td>
               <td>{formatNumber(site.pageViews)}</td>
               <td>{formatNumber(site.uniqueVisitors)}</td>
@@ -330,6 +348,19 @@ function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
       </table>
     </div>
   );
+}
+
+function formatLastSeen(value: string | undefined) {
+  if (!value) {
+    return "Nog geen meting";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Laatst gemeten";
+  }
+
+  return `Laatst gemeten ${tableDateTimeFormatter.format(date)}`;
 }
 
 function PageTable({ rows }: { rows: SiteAnalyticsPageRow[] }) {

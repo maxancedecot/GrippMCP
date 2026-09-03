@@ -1267,7 +1267,7 @@ td .inline-bar {
 }
 
 .site-analytics-table {
-  min-width: 900px;
+  min-width: 980px;
 }
 
 .site-analytics-page-table {
@@ -1302,6 +1302,20 @@ td .inline-bar {
   font-size: 12px;
   font-weight: 760;
   text-align: right;
+}
+
+.connection-pill {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(16, 185, 129, 0.32);
+  border-radius: 8px;
+  background: var(--good-soft);
+  color: var(--ink);
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 760;
 }
 
 .cvr-mapping-panel {
