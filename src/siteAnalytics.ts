@@ -188,12 +188,12 @@ const MAX_STRING_LENGTH = 300;
 const MAX_TITLE_LENGTH = 180;
 const MAX_ENGAGEMENT_DELTA_MS = 60 * 60 * 1000;
 
-const dateFormatter = new Intl.DateTimeFormat("fr-BE", {
+const dateFormatter = new Intl.DateTimeFormat("nl-BE", {
   day: "2-digit",
   month: "short"
 });
 
-const dateTimeFormatter = new Intl.DateTimeFormat("fr-BE", {
+const dateTimeFormatter = new Intl.DateTimeFormat("nl-BE", {
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
@@ -381,7 +381,7 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
   const latestEventAt = siteRows.map((site) => site.lastSeenAt).filter((value): value is string => Boolean(value)).sort().at(-1);
   const sourceMessage =
     totals.pageViews === 0
-      ? "Aucune donnée collectée sur cette période."
+      ? "Geen gegevens verzameld in deze periode."
       : "";
 
   return {
@@ -794,9 +794,9 @@ function createDemoSiteAnalyticsDashboardData(
   now: Date
 ): SiteAnalyticsDashboardData {
   const demoSites: SiteAnalyticsPublicSite[] = [
-    { id: "studio", name: "Studio principal", url: "https://studio.example" },
-    { id: "shop", name: "Boutique WordPress", url: "https://shop.example" },
-    { id: "blog", name: "Blog contenu", url: "https://blog.example" }
+    { id: "studio", name: "Hoofdstudio", url: "https://studio.example" },
+    { id: "shop", name: "WordPress-shop", url: "https://shop.example" },
+    { id: "blog", name: "Contentblog", url: "https://blog.example" }
   ];
   const activeSites = selectedSiteId ? demoSites.filter((site) => site.id === selectedSiteId) : demoSites;
   const sites = activeSites.length > 0 ? activeSites : demoSites;
@@ -826,7 +826,7 @@ function createDemoSiteAnalyticsDashboardData(
   return {
     source: {
       mode: "demo",
-      message: "Données demo visibles. Installez le plugin WordPress depuis ce dashboard pour connecter un premier site."
+      message: "Demogegevens zichtbaar. Installeer de WordPress-plugin vanuit dit dashboard om je eerste site te verbinden."
     },
     period,
     sites: siteRows,
@@ -840,10 +840,10 @@ function createDemoSiteAnalyticsDashboardData(
     },
     dailyRows,
     pageRows: [
-      { siteId: "studio", siteName: "Studio principal", path: "/", title: "Accueil", pageViews: 1830, uniqueVisitors: 1112, sessions: 1270, avgTimeOnPageSeconds: 64, avgScrollPercent: 76 },
-      { siteId: "shop", siteName: "Boutique WordPress", path: "/produits", title: "Produits", pageViews: 1264, uniqueVisitors: 812, sessions: 940, avgTimeOnPageSeconds: 82, avgScrollPercent: 69 },
-      { siteId: "blog", siteName: "Blog contenu", path: "/blog", title: "Articles", pageViews: 1088, uniqueVisitors: 744, sessions: 802, avgTimeOnPageSeconds: 95, avgScrollPercent: 81 },
-      { siteId: "studio", siteName: "Studio principal", path: "/contact", title: "Contact", pageViews: 642, uniqueVisitors: 420, sessions: 458, avgTimeOnPageSeconds: 47, avgScrollPercent: 58 }
+      { siteId: "studio", siteName: "Hoofdstudio", path: "/", title: "Home", pageViews: 1830, uniqueVisitors: 1112, sessions: 1270, avgTimeOnPageSeconds: 64, avgScrollPercent: 76 },
+      { siteId: "shop", siteName: "WordPress-shop", path: "/producten", title: "Producten", pageViews: 1264, uniqueVisitors: 812, sessions: 940, avgTimeOnPageSeconds: 82, avgScrollPercent: 69 },
+      { siteId: "blog", siteName: "Contentblog", path: "/blog", title: "Artikelen", pageViews: 1088, uniqueVisitors: 744, sessions: 802, avgTimeOnPageSeconds: 95, avgScrollPercent: 81 },
+      { siteId: "studio", siteName: "Hoofdstudio", path: "/contact", title: "Contact", pageViews: 642, uniqueVisitors: 420, sessions: 458, avgTimeOnPageSeconds: 47, avgScrollPercent: 58 }
     ].filter((row) => !selectedSiteId || row.siteId === selectedSiteId),
     referrerRows: [
       { source: "google / organic", pageViews: 3120, sessions: 2290 },
@@ -862,7 +862,7 @@ function siteAnalyticsPeriod(days: number, now: Date): SiteAnalyticsPeriod {
     days,
     start,
     end,
-    label: `${days} derniers jours`
+    label: `Laatste ${days} dagen`
   };
 }
 

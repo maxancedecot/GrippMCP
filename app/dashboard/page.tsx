@@ -15,16 +15,16 @@ import { DashboardFrame } from "../dashboard-frame.js";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Performance WordPress | Dashboard",
-  description: "Dashboard centralise des performances des sites WordPress."
+  title: "WordPress-prestaties | Dashboard",
+  description: "Centraal dashboard voor de prestaties van WordPress-sites."
 };
 
 type DashboardSearchParams = Record<string, string | string[] | undefined>;
 
 const periodOptions = [7, 30, 90];
 
-const numberFormatter = new Intl.NumberFormat("fr-BE");
-const percentFormatter = new Intl.NumberFormat("fr-BE", {
+const numberFormatter = new Intl.NumberFormat("nl-BE");
+const percentFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 0
 });
@@ -42,18 +42,18 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <main className="dashboard-shell site-analytics-shell">
         <header className="dashboard-header">
           <div>
-            <p className="eyebrow">WordPress analytics</p>
-            <h1>Performance des sites</h1>
+            <p className="eyebrow">WordPress-analyse</p>
+            <h1>Websiteprestaties</h1>
           </div>
           <div className="header-meta">
             <a className="header-meta-link" href="/api/site-analytics/plugin" download>
-              Plugin WordPress
+              WordPress-plugin
             </a>
             <span className={`source-badge source-badge--${dashboard.source.mode}`}>
-              {dashboard.source.mode === "live" ? "Sites connectes" : "Demo-data"}
+              {dashboard.source.mode === "live" ? "Verbonden sites" : "Demogegevens"}
             </span>
             <span>{dashboard.period.label}</span>
-            <span>Mis a jour {dashboard.lastUpdated}</span>
+            <span>Bijgewerkt {dashboard.lastUpdated}</span>
           </div>
         </header>
 
@@ -68,7 +68,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
                 href={dashboardHref({ params, days: periodDays, siteId: dashboard.selectedSiteId })}
                 aria-current={dashboard.period.days === periodDays ? "page" : undefined}
               >
-                {periodDays}j
+                {periodDays}d
               </a>
             ))}
           </nav>
@@ -79,7 +79,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               href={dashboardHref({ params, days: dashboard.period.days })}
               aria-current={!dashboard.selectedSiteId ? "page" : undefined}
             >
-              Tous
+              Alle
             </a>
             {siteTabs.map((site) => (
               <a
@@ -94,19 +94,19 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           </nav>
         </div>
 
-        <section className="metric-grid site-analytics-metric-grid" aria-label="KPI WordPress">
-          <MetricCard label="Vues" value={formatNumber(dashboard.totals.pageViews)} detail="Pages vues" tone="good" />
-          <MetricCard label="Visiteurs" value={formatNumber(dashboard.totals.uniqueVisitors)} detail="Visiteurs uniques" tone="blue" />
-          <MetricCard label="Sessions" value={formatNumber(dashboard.totals.sessions)} detail="Sessions uniques" tone="neutral" />
-          <MetricCard label="Temps moyen" value={formatDuration(dashboard.totals.avgTimeOnPageSeconds)} detail="Temps actif par vue" tone="warning" />
-          <MetricCard label="Scroll moyen" value={`${formatPercent(dashboard.totals.avgScrollPercent)}%`} detail="Profondeur maximale" tone="overtime" />
+        <section className="metric-grid site-analytics-metric-grid" aria-label="WordPress KPI's">
+          <MetricCard label="Weergaven" value={formatNumber(dashboard.totals.pageViews)} detail="Paginaweergaven" tone="good" />
+          <MetricCard label="Bezoekers" value={formatNumber(dashboard.totals.uniqueVisitors)} detail="Unieke bezoekers" tone="blue" />
+          <MetricCard label="Sessies" value={formatNumber(dashboard.totals.sessions)} detail="Unieke sessies" tone="neutral" />
+          <MetricCard label="Gemiddelde tijd" value={formatDuration(dashboard.totals.avgTimeOnPageSeconds)} detail="Actieve tijd per weergave" tone="warning" />
+          <MetricCard label="Gem. scroll" value={`${formatPercent(dashboard.totals.avgScrollPercent)}%`} detail="Maximale diepte" tone="overtime" />
         </section>
 
         <section className="panel site-analytics-chart-panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Trafic</p>
-              <h2>Vues et visiteurs</h2>
+              <p className="eyebrow">Verkeer</p>
+              <h2>Weergaven en bezoekers</h2>
             </div>
             <span className="panel-total">{periodLabel(dashboard.period)}</span>
           </div>
@@ -117,7 +117,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Sites</p>
-              <h2>Vue d'ensemble</h2>
+              <h2>Overzicht</h2>
             </div>
             <span className="panel-total">{dashboard.sites.length} sites</span>
           </div>
@@ -128,8 +128,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <article className="panel">
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">Pages</p>
-                <h2>Pages principales</h2>
+                <p className="eyebrow">Pagina's</p>
+                <h2>Belangrijkste pagina's</h2>
               </div>
             </div>
             <PageTable rows={dashboard.pageRows} />
@@ -138,8 +138,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <article className="panel">
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">Acquisition</p>
-                <h2>Referents</h2>
+                <p className="eyebrow">Acquisitie</p>
+                <h2>Verwijzers</h2>
               </div>
             </div>
             <ReferrerTable rows={dashboard.referrerRows} totals={dashboard.totals} />
@@ -193,13 +193,13 @@ function TrafficChart({ rows }: { rows: SiteAnalyticsDailyRow[] }) {
   return (
     <div className="site-analytics-chart">
       <div className="revenue-line-legend" aria-hidden="true">
-        <span><i className="site-analytics-legend-dot site-analytics-legend-dot--views" />Vues</span>
-        <span><i className="site-analytics-legend-dot site-analytics-legend-dot--visitors" />Visiteurs</span>
+        <span><i className="site-analytics-legend-dot site-analytics-legend-dot--views" />Weergaven</span>
+        <span><i className="site-analytics-legend-dot site-analytics-legend-dot--visitors" />Bezoekers</span>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Trafic: ${rows.map((row) => `${row.label} ${row.pageViews} vues, ${row.uniqueVisitors} visiteurs`).join(", ")}`}
+        aria-label={`Verkeer: ${rows.map((row) => `${row.label} ${row.pageViews} weergaven, ${row.uniqueVisitors} bezoekers`).join(", ")}`}
       >
         <defs>
           <linearGradient id="site-analytics-traffic-gradient" x1="0" x2="0" y1={padding.top} y2={height - padding.bottom} gradientUnits="userSpaceOnUse">
@@ -221,7 +221,7 @@ function TrafficChart({ rows }: { rows: SiteAnalyticsDailyRow[] }) {
         {rows.length > 1 ? <path className="site-analytics-line site-analytics-line--visitors" d={visitorPath} /> : null}
         {rows.map((row, index) => (
           <g key={row.date}>
-            <title>{`${row.label}: ${formatNumber(row.pageViews)} vues, ${formatNumber(row.uniqueVisitors)} visiteurs, ${formatNumber(row.sessions)} sessions`}</title>
+            <title>{`${row.label}: ${formatNumber(row.pageViews)} weergaven, ${formatNumber(row.uniqueVisitors)} bezoekers, ${formatNumber(row.sessions)} sessies`}</title>
             <circle className="site-analytics-point site-analytics-point--views" cx={viewPoints[index].x} cy={viewPoints[index].y} r="3.5" />
             <circle className="site-analytics-point site-analytics-point--visitors" cx={visitorPoints[index].x} cy={visitorPoints[index].y} r="3" />
             {index % labelEvery === 0 || index === rows.length - 1 ? (
@@ -238,7 +238,7 @@ function TrafficChart({ rows }: { rows: SiteAnalyticsDailyRow[] }) {
 
 function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
   if (rows.length === 0) {
-    return <p className="empty-state">Aucun site dans cette selection.</p>;
+    return <p className="empty-state">Geen sites in deze selectie.</p>;
   }
 
   return (
@@ -247,10 +247,10 @@ function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
         <thead>
           <tr>
             <th>Site</th>
-            <th>Vues</th>
-            <th>Visiteurs</th>
-            <th>Sessions</th>
-            <th>Temps</th>
+            <th>Weergaven</th>
+            <th>Bezoekers</th>
+            <th>Sessies</th>
+            <th>Tijd</th>
             <th>Scroll</th>
           </tr>
         </thead>
@@ -278,7 +278,7 @@ function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
 
 function PageTable({ rows }: { rows: SiteAnalyticsPageRow[] }) {
   if (rows.length === 0) {
-    return <p className="empty-state">Aucune page mesuree sur cette periode.</p>;
+    return <p className="empty-state">Geen pagina gemeten in deze periode.</p>;
   }
 
   return (
@@ -286,10 +286,10 @@ function PageTable({ rows }: { rows: SiteAnalyticsPageRow[] }) {
       <table className="site-analytics-table site-analytics-page-table">
         <thead>
           <tr>
-            <th>Page</th>
-            <th>Vues</th>
-            <th>Visiteurs</th>
-            <th>Temps</th>
+            <th>Pagina</th>
+            <th>Weergaven</th>
+            <th>Bezoekers</th>
+            <th>Tijd</th>
             <th>Scroll</th>
           </tr>
         </thead>
@@ -316,7 +316,7 @@ function PageTable({ rows }: { rows: SiteAnalyticsPageRow[] }) {
 
 function ReferrerTable({ rows, totals }: { rows: SiteAnalyticsReferrerRow[]; totals: SiteAnalyticsMetricSummary }) {
   if (rows.length === 0) {
-    return <p className="empty-state">Aucun referent sur cette periode.</p>;
+    return <p className="empty-state">Geen verwijzers in deze periode.</p>;
   }
 
   return (
@@ -328,7 +328,7 @@ function ReferrerTable({ rows, totals }: { rows: SiteAnalyticsReferrerRow[]; tot
           <div className="site-analytics-referrer-row" key={row.source}>
             <div>
               <span className="row-title">{row.source}</span>
-              <span className="cell-muted">{formatNumber(row.sessions)} sessions</span>
+              <span className="cell-muted">{formatNumber(row.sessions)} sessies</span>
             </div>
             <div className="site-analytics-referrer-metrics">
               <strong>{formatNumber(row.pageViews)}</strong>
@@ -416,7 +416,7 @@ function formatDuration(seconds: number) {
 
 function formatDate(value: string) {
   const [year, month, day] = value.split("-").map(Number);
-  return new Intl.DateTimeFormat("fr-BE", {
+  return new Intl.DateTimeFormat("nl-BE", {
     day: "2-digit",
     month: "short",
     year: "numeric"
