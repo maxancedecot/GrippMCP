@@ -1,12 +1,12 @@
-# Gripp Site Analytics
+# Ledoux Performance Tracker
 
 Plugin WordPress qui collecte les performances d'un site et les envoie vers le dashboard central Next.js.
 
 ## Installation
 
 1. Uploader `gripp-site-analytics.zip` via `Extensions > Ajouter une extension > Televerser une extension`.
-2. Activer `Gripp Site Analytics` dans WordPress.
-3. Ouvrir `Reglages > Gripp Analytics`.
+2. Activer `Ledoux Performance Tracker` dans WordPress.
+3. Ouvrir `Reglages > Ledoux Performance Tracker`.
 4. Si l'URL du dashboard n'est pas deja preconfiguree dans le ZIP, renseigner uniquement l'URL du dashboard, par exemple `https://votre-domaine.vercel.app`.
 5. Cliquer sur `Tester la connexion dashboard` quand le statut est connecte.
 6. Vider le cache WordPress/hebergeur/CDN apres installation ou mise a jour du plugin.

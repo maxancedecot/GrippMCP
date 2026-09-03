@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: Gripp Site Analytics
+ * Plugin Name: Ledoux Performance Tracker
  * Description: Collecte les performances d'un site WordPress et les envoie vers le dashboard central.
  * Version: 0.2.4
  * Author: Gripp MCP
@@ -50,8 +50,8 @@ final class Gripp_Site_Analytics_Plugin {
 
     public function register_admin_page(): void {
         add_options_page(
-            'Gripp Site Analytics',
-            'Gripp Analytics',
+            'Ledoux Performance Tracker',
+            'Ledoux Performance Tracker',
             'manage_options',
             'gripp-site-analytics',
             [$this, 'render_settings_page']
@@ -116,7 +116,7 @@ final class Gripp_Site_Analytics_Plugin {
         }
         ?>
         <div class="wrap">
-            <h1>Gripp Site Analytics</h1>
+            <h1>Ledoux Performance Tracker</h1>
             <?php
             $options = $this->options();
             $this->render_connection_notice($options);
