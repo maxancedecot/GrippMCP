@@ -152,15 +152,27 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           <TrafficChart rows={dashboard.dailyRows} />
         </section>
 
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Gekoppelde pagina's</p>
-              <h2>Overzicht</h2>
+        <section className="site-analytics-detail-grid">
+          <article className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Gekoppelde pagina's</p>
+                <h2>Overzicht</h2>
+              </div>
+              <span className="panel-total">{overviewCvrLinks.length} koppelingen</span>
             </div>
-            <span className="panel-total">{overviewCvrLinks.length} koppelingen</span>
-          </div>
-          <CvrOverviewTable rows={overviewCvrLinks} sites={overviewSites} />
+            <CvrOverviewTable rows={overviewCvrLinks} sites={overviewSites} />
+          </article>
+
+          <article className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Acquisitie</p>
+                <h2>Verwijzers</h2>
+              </div>
+            </div>
+            <ReferrerTable rows={dashboard.referrerRows} totals={dashboard.totals} />
+          </article>
         </section>
 
         <CvrMappingBoard
@@ -172,16 +184,6 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           createAction={createCvrLinkAction}
           deleteAction={deleteCvrLinkAction}
         />
-
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Acquisitie</p>
-              <h2>Verwijzers</h2>
-            </div>
-          </div>
-          <ReferrerTable rows={dashboard.referrerRows} totals={dashboard.totals} />
-        </section>
       </main>
     </DashboardFrame>
   );
