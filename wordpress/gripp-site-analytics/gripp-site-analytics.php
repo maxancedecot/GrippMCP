@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Gripp Site Analytics
  * Description: Collecte les performances d'un site WordPress et les envoie vers le dashboard central.
- * Version: 0.2.2
+ * Version: 0.2.3
  * Author: Gripp MCP
  * License: GPL-2.0-or-later
  */
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class Gripp_Site_Analytics_Plugin {
-    private const VERSION = '0.2.2';
+    private const VERSION = '0.2.3';
     private const OPTION_NAME = 'gripp_site_analytics_options';
     private const REST_NAMESPACE = 'gripp-site-analytics/v1';
     private const REST_ROUTE = '/event';
@@ -39,8 +39,8 @@ final class Gripp_Site_Analytics_Plugin {
 
     public function boot(): void {
         add_action('admin_menu', [$this, 'register_admin_page']);
+        add_action('init', [$this, 'maybe_auto_register_site'], 20);
         add_action('admin_init', [$this, 'register_settings']);
-        add_action('admin_init', [$this, 'maybe_auto_register_site'], 20);
         add_action('admin_post_gripp_site_analytics_register', [$this, 'handle_manual_register']);
         add_action('admin_post_gripp_site_analytics_ping', [$this, 'handle_dashboard_ping']);
         add_action('rest_api_init', [$this, 'register_rest_routes']);
@@ -104,6 +104,7 @@ final class Gripp_Site_Analytics_Plugin {
             'public_key' => sanitize_text_field($existing['public_key'] ?? wp_generate_password(32, false, false)),
             'registration_attempted_at' => $reset_connection ? 0 : absint($existing['registration_attempted_at'] ?? 0),
             'registration_error' => $reset_connection ? '' : sanitize_text_field($existing['registration_error'] ?? ''),
+            'registration_plugin_version' => $reset_connection ? '' : sanitize_text_field($existing['registration_plugin_version'] ?? ''),
             'last_ping_at' => $reset_connection ? 0 : absint($existing['last_ping_at'] ?? 0),
             'ping_error' => $reset_connection ? '' : sanitize_text_field($existing['ping_error'] ?? '')
         ];
@@ -256,37 +257,7 @@ final class Gripp_Site_Analytics_Plugin {
     }
 
     public function maybe_auto_register_site(): void {
-        if (!current_user_can('manage_options')) {
-            return;
-        }
-
-        $options = $this->options();
-        if (empty($options['public_key'])) {
-            $options['public_key'] = wp_generate_password(32, false, false);
-            update_option(self::OPTION_NAME, $options, false);
-        }
-
-        $options_with_defaults = self::apply_default_dashboard_options($options);
-        if ($options_with_defaults !== $options) {
-            $options = $options_with_defaults;
-            update_option(self::OPTION_NAME, $options, false);
-        }
-
-        if ($this->is_configured($options)) {
-            return;
-        }
-
-        $dashboard_url = self::dashboard_url_from_options($options);
-        if (!$dashboard_url) {
-            return;
-        }
-
-        $last_attempt = absint($options['registration_attempted_at'] ?? 0);
-        if (!empty($options['registration_error']) && $last_attempt > 0 && time() - $last_attempt < 300) {
-            return;
-        }
-
-        $this->register_site_with_dashboard($options, $dashboard_url);
+        $this->ensure_dashboard_registration($this->options());
     }
 
     public function handle_manual_register(): void {
@@ -319,7 +290,7 @@ final class Gripp_Site_Analytics_Plugin {
 
         check_admin_referer('gripp_site_analytics_ping');
 
-        $options = $this->options();
+        $options = $this->ensure_dashboard_registration($this->options());
         if ($this->is_configured($options)) {
             $this->ping_dashboard($options);
         } else {
@@ -333,6 +304,7 @@ final class Gripp_Site_Analytics_Plugin {
     private function register_site_with_dashboard(array $options, string $dashboard_url): bool {
         $options['registration_attempted_at'] = time();
         $options['registration_error'] = '';
+        $options['registration_plugin_version'] = self::VERSION;
         update_option(self::OPTION_NAME, $options, false);
 
         $headers = [
@@ -462,7 +434,7 @@ final class Gripp_Site_Analytics_Plugin {
     }
 
     public function enqueue_tracker(): void {
-        $options = $this->options();
+        $options = $this->ensure_dashboard_registration($this->options());
         if (!$this->should_track_current_request($options)) {
             return;
         }
@@ -478,7 +450,7 @@ final class Gripp_Site_Analytics_Plugin {
     }
 
     public function render_tracker_fallback(): void {
-        $options = $this->options();
+        $options = $this->ensure_dashboard_registration($this->options());
         if (!$this->should_track_current_request($options)) {
             return;
         }
@@ -499,7 +471,7 @@ final class Gripp_Site_Analytics_Plugin {
     }
 
     public function handle_event(WP_REST_Request $request) {
-        $options = $this->options();
+        $options = $this->ensure_dashboard_registration($this->options());
         if (!$this->is_configured($options)) {
             return new WP_Error('gripp_site_analytics_not_configured', 'Plugin analytics non configure.', ['status' => 503]);
         }
@@ -567,6 +539,45 @@ final class Gripp_Site_Analytics_Plugin {
 
     private function is_configured(array $options): bool {
         return !empty($options['endpoint_url']) && !empty($options['site_id']) && !empty($options['site_token']) && !empty($options['public_key']);
+    }
+
+    private function ensure_dashboard_registration(array $options): array {
+        if (empty($options['public_key'])) {
+            $options['public_key'] = wp_generate_password(32, false, false);
+            update_option(self::OPTION_NAME, $options, false);
+        }
+
+        $options_with_defaults = self::apply_default_dashboard_options($options);
+        if ($options_with_defaults !== $options) {
+            $options = $options_with_defaults;
+            update_option(self::OPTION_NAME, $options, false);
+        }
+
+        if ($this->is_configured($options)) {
+            return $options;
+        }
+
+        $dashboard_url = self::dashboard_url_from_options($options);
+        if (!$dashboard_url || !$this->can_attempt_registration($options)) {
+            return $options;
+        }
+
+        $this->register_site_with_dashboard($options, $dashboard_url);
+
+        return $this->options();
+    }
+
+    private function can_attempt_registration(array $options): bool {
+        if ((string) ($options['registration_plugin_version'] ?? '') !== self::VERSION) {
+            return true;
+        }
+
+        $last_attempt = absint($options['registration_attempted_at'] ?? 0);
+        if ($last_attempt > 0 && time() - $last_attempt < 300) {
+            return false;
+        }
+
+        return true;
     }
 
     private function should_track_current_request(array $options): bool {

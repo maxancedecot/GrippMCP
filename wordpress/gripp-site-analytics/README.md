@@ -11,7 +11,7 @@ Plugin WordPress qui collecte les performances d'un site et les envoie vers le d
 5. Cliquer sur `Tester la connexion dashboard` quand le statut est connecte.
 6. Vider le cache WordPress/hebergeur/CDN apres installation ou mise a jour du plugin.
 
-Le plugin s'enregistre ensuite automatiquement. Le dashboard genere le Site ID et le token, puis le plugin les stocke dans WordPress.
+Le plugin s'enregistre ensuite automatiquement depuis l'admin ou depuis la premiere requete publique si le ZIP est preconfigure. Le dashboard genere le Site ID et le token, puis le plugin les stocke dans WordPress.
 
 ## Configuration Next.js
 
