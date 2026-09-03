@@ -1156,6 +1156,177 @@ td .inline-bar {
   color: var(--muted);
 }
 
+.site-analytics-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.site-analytics-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.site-analytics-controls .dashboard-tabs {
+  margin: 0;
+}
+
+.site-analytics-site-tabs {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.site-analytics-metric-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+.site-analytics-chart-panel {
+  min-width: 0;
+}
+
+.site-analytics-chart {
+  overflow-x: auto;
+  scrollbar-color: var(--border) transparent;
+}
+
+.site-analytics-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 760px;
+  height: auto;
+  border-radius: 8px;
+}
+
+.site-analytics-legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 3px solid var(--good);
+  background: transparent;
+}
+
+.site-analytics-legend-dot--visitors {
+  border-color: var(--blue);
+}
+
+.site-analytics-gradient-start {
+  stop-color: var(--good);
+  stop-opacity: 0.2;
+}
+
+.site-analytics-gradient-end {
+  stop-color: var(--good);
+  stop-opacity: 0;
+}
+
+.site-analytics-area {
+  opacity: 0.88;
+}
+
+.site-analytics-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+}
+
+.site-analytics-line--views {
+  stroke: var(--good);
+}
+
+.site-analytics-line--visitors {
+  stroke: var(--blue);
+}
+
+.site-analytics-point {
+  fill: var(--surface);
+  stroke-width: 2.2;
+}
+
+.site-analytics-point--views {
+  stroke: var(--good);
+}
+
+.site-analytics-point--visitors {
+  stroke: var(--blue);
+}
+
+.site-analytics-table {
+  min-width: 760px;
+}
+
+.site-analytics-page-table {
+  min-width: 840px;
+}
+
+.site-analytics-scroll-bar {
+  display: grid;
+  grid-template-columns: minmax(92px, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.site-analytics-scroll-bar > span {
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-strong);
+}
+
+.site-analytics-scroll-bar > span > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--blue), var(--good));
+}
+
+.site-analytics-scroll-bar strong {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+  text-align: right;
+}
+
+.site-analytics-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+  gap: 14px;
+}
+
+.site-analytics-referrer-list {
+  display: grid;
+  gap: 12px;
+}
+
+.site-analytics-referrer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.42fr);
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.site-analytics-referrer-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.site-analytics-referrer-metrics {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.site-analytics-referrer-metrics strong {
+  font-size: 14px;
+}
+
 .pm-employee-table-wrap {
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -1701,8 +1872,13 @@ td .inline-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .site-analytics-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dashboard-grid,
-  .table-grid {
+  .table-grid,
+  .site-analytics-detail-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1738,6 +1914,14 @@ td .inline-bar {
     width: 100%;
   }
 
+  .site-analytics-controls {
+    align-items: stretch;
+  }
+
+  .site-analytics-site-tabs {
+    justify-content: flex-start;
+  }
+
   .dashboard-tab {
     flex: 1;
   }
@@ -1770,8 +1954,17 @@ td .inline-bar {
 
   .employee-filter-list,
   .metric-grid,
-  .project-metric-grid {
+  .project-metric-grid,
+  .site-analytics-metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .site-analytics-referrer-row {
+    grid-template-columns: 1fr;
+  }
+
+  .site-analytics-referrer-metrics {
+    justify-items: stretch;
   }
 
   .project-filter-form {
