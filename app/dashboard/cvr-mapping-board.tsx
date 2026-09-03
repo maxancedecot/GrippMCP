@@ -32,6 +32,28 @@ type LinePath = {
   preview: boolean;
 };
 
+const ignoredPageQueryParams = new Set([
+  "_ga",
+  "_gl",
+  "fbclid",
+  "gbraid",
+  "gclid",
+  "li_fat_id",
+  "mc_cid",
+  "mc_eid",
+  "msclkid",
+  "ttclid",
+  "utm_campaign",
+  "utm_content",
+  "utm_creative_format",
+  "utm_id",
+  "utm_marketing_tactic",
+  "utm_medium",
+  "utm_source",
+  "utm_term",
+  "wbraid"
+]);
+
 const numberFormatter = new Intl.NumberFormat("nl-BE");
 const conversionRateFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
@@ -52,6 +74,8 @@ export function CvrMappingBoard({
   const [activeSiteId, setActiveSiteId] = useState(defaultSiteId);
   const [selectedSourcePath, setSelectedSourcePath] = useState("");
   const [selectedTargetPath, setSelectedTargetPath] = useState("");
+  const [sourceInputValue, setSourceInputValue] = useState("");
+  const [targetInputValue, setTargetInputValue] = useState("");
   const [linePaths, setLinePaths] = useState<LinePath[]>([]);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const sourceRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -74,6 +98,8 @@ export function CvrMappingBoard({
   useEffect(() => {
     setSelectedSourcePath("");
     setSelectedTargetPath("");
+    setSourceInputValue("");
+    setTargetInputValue("");
   }, [activeSiteId]);
 
   const activePages = useMemo(() => pages.filter((page) => page.siteId === activeSiteId), [activeSiteId, pages]);
@@ -88,9 +114,12 @@ export function CvrMappingBoard({
     () => sortTargetPages(activePages.filter((page) => isThankYouPage(page) || targetLinkedPaths.has(page.path)), targetLinkedPaths),
     [activePages, targetLinkedPaths]
   );
-  const selectedLinkExists = activeLinks.some((link) => link.sourcePath === selectedSourcePath && link.targetPath === selectedTargetPath);
-  const samePathSelected = Boolean(selectedSourcePath && selectedTargetPath && selectedSourcePath === selectedTargetPath);
-  const canCreate = Boolean(activeSiteId && selectedSourcePath && selectedTargetPath && !selectedLinkExists && !samePathSelected);
+  const sourcePathValue = normalizeClientPagePath(sourceInputValue);
+  const targetPathValue = normalizeClientPagePath(targetInputValue);
+  const targetLooksValid = !targetInputValue.trim() || isThankYouPath(targetInputValue);
+  const selectedLinkExists = activeLinks.some((link) => link.sourcePath === sourcePathValue && link.targetPath === targetPathValue);
+  const samePathSelected = Boolean(sourcePathValue && targetPathValue && sourcePathValue === targetPathValue);
+  const canCreate = Boolean(activeSiteId && sourcePathValue && targetPathValue && targetLooksValid && !selectedLinkExists && !samePathSelected);
   const linePairs = useMemo<LinePair[]>(
     () => {
       const pairs: LinePair[] = activeLinks.map((link) => ({
@@ -102,15 +131,15 @@ export function CvrMappingBoard({
       if (canCreate) {
         pairs.push({
           key: "preview",
-          sourcePath: selectedSourcePath,
-          targetPath: selectedTargetPath,
+          sourcePath: sourcePathValue,
+          targetPath: targetPathValue,
           preview: true
         });
       }
 
       return pairs;
     },
-    [activeLinks, canCreate, selectedSourcePath, selectedTargetPath]
+    [activeLinks, canCreate, sourcePathValue, targetPathValue]
   );
 
   useLayoutEffect(() => {
@@ -169,6 +198,14 @@ export function CvrMappingBoard({
   }, [linePairs, sourcePages, targetPages]);
 
   const activeSiteName = siteOptions.find((site) => site.id === activeSiteId)?.name ?? "Site";
+  const selectSourcePage = (path: string) => {
+    setSelectedSourcePath(path);
+    setSourceInputValue(path);
+  };
+  const selectTargetPage = (path: string) => {
+    setSelectedTargetPath(path);
+    setTargetInputValue(path);
+  };
 
   return (
     <section className="panel cvr-mapping-panel">
@@ -211,7 +248,7 @@ export function CvrMappingBoard({
           otherSelectedPath={selectedTargetPath}
           emptyLabel="Geen projectpagina's gemeten."
           refMap={sourceRefs}
-          onSelect={setSelectedSourcePath}
+          onSelect={selectSourcePage}
         />
         <PageColumn
           title="Thank-you pagina's"
@@ -221,18 +258,40 @@ export function CvrMappingBoard({
           otherSelectedPath={selectedSourcePath}
           emptyLabel="Geen thank-you of bedankt pagina's gemeten."
           refMap={targetRefs}
-          onSelect={setSelectedTargetPath}
+          onSelect={selectTargetPage}
         />
       </div>
 
       <form action={createAction} className="cvr-action-bar">
         <input type="hidden" name="site_id" value={activeSiteId} />
-        <input type="hidden" name="source_path" value={selectedSourcePath} />
-        <input type="hidden" name="target_path" value={selectedTargetPath} />
+        <input type="hidden" name="source_path" value={sourceInputValue} />
+        <input type="hidden" name="target_path" value={targetInputValue} />
         <input type="hidden" name="return_to" value={returnTo} />
-        <div className="cvr-selection-summary">
-          <span>{selectedSourcePath || "Projectpagina"}</span>
-          <span>{selectedTargetPath || "Thank-you pagina"}</span>
+        <div className="cvr-manual-fields">
+          <label>
+            <span>Project-URL</span>
+            <input
+              type="text"
+              value={sourceInputValue}
+              placeholder="/projecten/crollet/"
+              onChange={(event) => {
+                setSourceInputValue(event.target.value);
+                setSelectedSourcePath(normalizeClientPagePath(event.target.value));
+              }}
+            />
+          </label>
+          <label>
+            <span>Bedankpagina-URL</span>
+            <input
+              type="text"
+              value={targetInputValue}
+              placeholder="/bedankt-afspraak/?p_slug=crollet"
+              onChange={(event) => {
+                setTargetInputValue(event.target.value);
+                setSelectedTargetPath(normalizeClientPagePath(event.target.value));
+              }}
+            />
+          </label>
         </div>
         <button className="cvr-save-button" type="submit" disabled={!canCreate}>
           Koppeling opslaan
@@ -240,6 +299,7 @@ export function CvrMappingBoard({
       </form>
 
       {samePathSelected ? <p className="cvr-form-note cvr-form-note--error">Kies twee verschillende pagina's.</p> : null}
+      {!targetLooksValid ? <p className="cvr-form-note cvr-form-note--error">Bedankpagina-URL moet thankyou of bedankt bevatten.</p> : null}
       {selectedLinkExists ? <p className="cvr-form-note">Deze koppeling bestaat al.</p> : null}
 
       <div className="cvr-links-list">
@@ -392,9 +452,48 @@ function isThankYouPage(page: SiteAnalyticsCvrPageCandidate) {
 }
 
 function isThankYouPath(path: string) {
-  const normalized = path.toLowerCase();
+  const normalized = normalizeClientPagePath(path).toLowerCase();
   const spaced = normalized.replace(/%20|[_-]+/g, " ");
   return normalized.includes("thankyou") || spaced.includes("thank you") || normalized.includes("bedankt");
+}
+
+function normalizeClientPagePath(value: string) {
+  const raw = value.trim();
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const url = new URL(raw, "https://site-analytics.local");
+    const pathname = (url.pathname || "/").replace(/\/{2,}/g, "/");
+    const query = normalizedClientPageQuery(url.searchParams);
+    return query ? `${pathname}?${query}` : pathname;
+  } catch {
+    return "";
+  }
+}
+
+function normalizedClientPageQuery(params: URLSearchParams) {
+  const entries: Array<[string, string]> = [];
+
+  params.forEach((value, key) => {
+    const normalizedKey = key.trim();
+    const normalizedValue = value.trim();
+    if (!normalizedKey || !normalizedValue || ignoredPageQueryParams.has(normalizedKey.toLowerCase())) {
+      return;
+    }
+
+    entries.push([normalizedKey, normalizedValue]);
+  });
+
+  entries.sort((left, right) => left[0].localeCompare(right[0]) || left[1].localeCompare(right[1]));
+
+  const query = new URLSearchParams();
+  for (const [key, value] of entries) {
+    query.append(key, value);
+  }
+
+  return query.toString();
 }
 
 function refForPath(refMap: MutableRefObject<Map<string, HTMLButtonElement>>, path: string) {

@@ -156,7 +156,7 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
     const link = await upsertSiteAnalyticsCvrLink(
       {
         site_id: siteId,
-        source_path: "/projectnaam1",
+        source_path: "https://example.com/projectnaam1",
         target_path: "https://example.com/bedankt-afspraak/?p_slug=crollet"
       },
       { now: new Date("2026-01-01T10:00:00.000Z") }
