@@ -7,6 +7,7 @@ import {
   getSiteAnalyticsDashboardData,
   upsertSiteAnalyticsCvrLink,
   type SiteAnalyticsDailyRow,
+  type SiteAnalyticsCvrLinkRow,
   type SiteAnalyticsMetricSummary,
   type SiteAnalyticsPageRow,
   type SiteAnalyticsPeriod,
@@ -37,13 +38,6 @@ const percentFormatter = new Intl.NumberFormat("nl-BE", {
 const conversionRateFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1
-});
-const tableDateTimeFormatter = new Intl.DateTimeFormat("nl-BE", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit"
 });
 
 async function createCvrLinkAction(formData: FormData) {
@@ -80,6 +74,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
     getPublicSiteAnalyticsSites()
   ]);
   const overviewSites = connectedDashboard.sites;
+  const overviewCvrLinks = connectedDashboard.cvrLinks;
   const siteTabs = configuredSites.length > 0 ? configuredSites : overviewSites;
 
   return (
@@ -161,12 +156,12 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <section className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Verbonden websites</p>
+              <p className="eyebrow">Gekoppelde pagina's</p>
               <h2>Overzicht</h2>
             </div>
-            <span className="panel-total">{overviewSites.length} websites</span>
+            <span className="panel-total">{overviewCvrLinks.length} koppelingen</span>
           </div>
-          <SiteSummaryTable rows={overviewSites} />
+          <CvrOverviewTable rows={overviewCvrLinks} sites={overviewSites} />
         </section>
 
         <CvrMappingBoard
@@ -291,76 +286,88 @@ function TrafficChart({ rows }: { rows: SiteAnalyticsDailyRow[] }) {
   );
 }
 
-function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
+function CvrOverviewTable({ rows, sites }: { rows: SiteAnalyticsCvrLinkRow[]; sites: SiteAnalyticsSiteSummary[] }) {
   if (rows.length === 0) {
-    return <p className="empty-state">Geen verbonden websites.</p>;
+    return <p className="empty-state">Geen projectpagina's gekoppeld aan bedankingspagina's.</p>;
   }
+
+  const sitesById = new Map(sites.map((site) => [site.id, site]));
 
   return (
     <div className="table-wrap">
-      <table className="site-analytics-table">
+      <table className="site-analytics-table cvr-overview-table">
         <thead>
           <tr>
             <th>Website</th>
-            <th>Connectie</th>
-            <th>Weergaven</th>
-            <th>Bezoekers</th>
-            <th>Sessies</th>
+            <th>Projectpagina</th>
+            <th>Bedankingspagina</th>
+            <th>Projectbezoekers</th>
+            <th>Conversies</th>
             <th>CVR</th>
-            <th>Tijd</th>
-            <th>Scroll</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((site) => (
-            <tr key={site.id}>
-              <td>
-                <span className="row-title">{site.name}</span>
-                <span className="cell-muted">{site.url || site.id}</span>
-              </td>
-              <td>
-                <span className="connection-pill">Verbonden</span>
-                <span className="cell-muted">{formatLastSeen(site.lastSeenAt)}</span>
-              </td>
-              <td>{formatNumber(site.pageViews)}</td>
-              <td>{formatNumber(site.uniqueVisitors)}</td>
-              <td>{formatNumber(site.sessions)}</td>
-              <td>
-                {site.cvrLinkCount > 0 ? (
-                  <>
-                    <span className="row-title">{formatConversionRate(site.conversionRatePercent)}%</span>
-                    <span className="cell-muted">{formatNumber(site.cvrConversionVisitors)} conversies / {formatNumber(site.cvrSourceVisitors)} projectbezoekers</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="row-title">-</span>
-                    <span className="cell-muted">Geen CVR-koppeling</span>
-                  </>
-                )}
-              </td>
-              <td>{formatDuration(site.avgTimeOnPageSeconds)}</td>
-              <td>
-                <ScrollBar value={site.avgScrollPercent} />
-              </td>
-            </tr>
-          ))}
+          {rows.map((link) => {
+            const site = sitesById.get(link.siteId);
+
+            return (
+              <tr key={link.id}>
+                <td>
+                  <span className="row-title">{link.siteName}</span>
+                  <span className="cell-muted">{site?.url || link.siteId}</span>
+                </td>
+                <td>
+                  <span className="row-title">{link.sourceTitle}</span>
+                  <PagePathLink siteUrl={site?.url} path={link.sourcePath} />
+                </td>
+                <td>
+                  <span className="row-title">{link.targetTitle}</span>
+                  <PagePathLink siteUrl={site?.url} path={link.targetPath} />
+                </td>
+                <td>
+                  <span className="row-title">{formatNumber(link.sourceVisitors)}</span>
+                  <span className="cell-muted">{formatNumber(link.sourcePageViews)} weergaven</span>
+                </td>
+                <td>
+                  <span className="row-title">{formatNumber(link.targetVisitors)}</span>
+                  <span className="cell-muted">{formatNumber(link.targetPageViews)} weergaven</span>
+                </td>
+                <td>
+                  <span className="cvr-overview-rate">{formatConversionRate(link.conversionRatePercent)}%</span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-function formatLastSeen(value: string | undefined) {
-  if (!value) {
-    return "Nog geen meting";
+function PagePathLink({ siteUrl, path }: { siteUrl: string | undefined; path: string }) {
+  const href = pageUrlForSitePath(siteUrl, path);
+
+  if (!href) {
+    return <span className="cell-muted">{path}</span>;
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Laatst gemeten";
+  return (
+    <a className="cell-muted path-link" href={href} target="_blank" rel="noreferrer">
+      {path}
+    </a>
+  );
+}
+
+function pageUrlForSitePath(siteUrl: string | undefined, path: string) {
+  if (!siteUrl) {
+    return "";
   }
 
-  return `Laatst gemeten ${tableDateTimeFormatter.format(date)}`;
+  try {
+    return new URL(path, siteUrl.endsWith("/") ? siteUrl : `${siteUrl}/`).toString();
+  } catch {
+    return "";
+  }
 }
 
 function PageTable({ rows }: { rows: SiteAnalyticsPageRow[] }) {

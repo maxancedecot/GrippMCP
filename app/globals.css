@@ -1450,6 +1450,41 @@ td .inline-bar {
   min-width: 980px;
 }
 
+.cvr-overview-table {
+  min-width: 1120px;
+}
+
+.cvr-overview-table th:nth-child(2),
+.cvr-overview-table th:nth-child(3) {
+  width: 28%;
+}
+
+.path-link {
+  color: var(--good);
+  text-decoration: none;
+}
+
+.path-link:hover {
+  color: var(--yellow-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cvr-overview-rate {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  border: 1px solid rgba(255, 196, 0, 0.32);
+  background: var(--good-soft);
+  clip-path: var(--clip-sm);
+  color: var(--good);
+  padding: 6px 10px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .site-analytics-page-table {
   min-width: 840px;
 }
