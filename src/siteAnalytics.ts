@@ -483,7 +483,6 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
     .slice(0, 50);
   const sitesById = new Map(siteList.map((site) => [site.id, site]));
   const storedCvrLinks = (await readSiteAnalyticsCvrLinkData()).links.filter((link) => sitesById.has(link.siteId));
-  ensureCvrLinkPageCandidates(storedCvrLinks, sitesById, pageAccumulators);
   applyCvrLinksToSiteAccumulators(storedCvrLinks, siteAccumulators, pageAccumulators);
   const cvrPageCandidates = Array.from(pageAccumulators.values())
     .map(cvrPageCandidateFromAccumulator)
@@ -963,32 +962,6 @@ function mergeDailySiteAnalyticsData(
   }
 
   siteAccumulators.set(site.id, siteAccumulator);
-}
-
-function ensureCvrLinkPageCandidates(
-  links: SiteAnalyticsCvrLink[],
-  sitesById: Map<string, SiteAnalyticsPublicSite>,
-  pageAccumulators: Map<string, PageAccumulator>
-) {
-  for (const link of links) {
-    const site = sitesById.get(link.siteId);
-    if (!site) {
-      continue;
-    }
-
-    for (const path of [link.sourcePath, link.targetPath]) {
-      const key = pageAccumulatorKey(link.siteId, path);
-      if (!pageAccumulators.has(key)) {
-        pageAccumulators.set(key, {
-          ...emptyDashboardAccumulator(),
-          siteId: link.siteId,
-          siteName: site.name,
-          path,
-          title: path
-        });
-      }
-    }
-  }
 }
 
 function applyCvrLinksToSiteAccumulators(
