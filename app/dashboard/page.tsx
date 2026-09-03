@@ -9,7 +9,6 @@ import {
   type SiteAnalyticsDailyRow,
   type SiteAnalyticsCvrLinkRow,
   type SiteAnalyticsMetricSummary,
-  type SiteAnalyticsPageRow,
   type SiteAnalyticsPeriod,
   type SiteAnalyticsReferrerRow,
   type SiteAnalyticsSiteSummary
@@ -73,9 +72,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
     connectedDashboardPromise,
     getPublicSiteAnalyticsSites()
   ]);
-  const overviewSites = connectedDashboard.sites;
-  const overviewCvrLinks = connectedDashboard.cvrLinks;
-  const siteTabs = configuredSites.length > 0 ? configuredSites : overviewSites;
+  const overviewSites = dashboard.sites;
+  const overviewCvrLinks = dashboard.cvrLinks;
+  const siteTabs = configuredSites.length > 0 ? configuredSites : connectedDashboard.sites;
 
   return (
     <DashboardFrame>
@@ -174,26 +173,14 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           deleteAction={deleteCvrLinkAction}
         />
 
-        <section className="site-analytics-detail-grid">
-          <article className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Pagina's</p>
-                <h2>Belangrijkste pagina's</h2>
-              </div>
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Acquisitie</p>
+              <h2>Verwijzers</h2>
             </div>
-            <PageTable rows={dashboard.pageRows} />
-          </article>
-
-          <article className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Acquisitie</p>
-                <h2>Verwijzers</h2>
-              </div>
-            </div>
-            <ReferrerTable rows={dashboard.referrerRows} totals={dashboard.totals} />
-          </article>
+          </div>
+          <ReferrerTable rows={dashboard.referrerRows} totals={dashboard.totals} />
         </section>
       </main>
     </DashboardFrame>
@@ -353,44 +340,6 @@ function pageUrlForSitePath(siteUrl: string | undefined, path: string) {
   } catch {
     return "";
   }
-}
-
-function PageTable({ rows }: { rows: SiteAnalyticsPageRow[] }) {
-  if (rows.length === 0) {
-    return <p className="empty-state">Geen pagina gemeten in deze periode.</p>;
-  }
-
-  return (
-    <div className="table-wrap">
-      <table className="site-analytics-table site-analytics-page-table">
-        <thead>
-          <tr>
-            <th>Pagina</th>
-            <th>Weergaven</th>
-            <th>Bezoekers</th>
-            <th>Tijd</th>
-            <th>Scroll</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((page) => (
-            <tr key={`${page.siteId}:${page.path}`}>
-              <td>
-                <span className="row-title">{page.title}</span>
-                <span className="cell-muted">{page.siteName} - {page.path}</span>
-              </td>
-              <td>{formatNumber(page.pageViews)}</td>
-              <td>{formatNumber(page.uniqueVisitors)}</td>
-              <td>{formatDuration(page.avgTimeOnPageSeconds)}</td>
-              <td>
-                <ScrollBar value={page.avgScrollPercent} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
 }
 
 function ReferrerTable({ rows, totals }: { rows: SiteAnalyticsReferrerRow[]; totals: SiteAnalyticsMetricSummary }) {
