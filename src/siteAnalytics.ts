@@ -923,12 +923,13 @@ function mergeDailySiteAnalyticsData(
   }
 
   for (const page of Object.values(daily.pages)) {
-    const key = pageAccumulatorKey(site.id, page.path);
+    const path = normalizePagePath(page.path) || page.path;
+    const key = pageAccumulatorKey(site.id, path);
     const pageAccumulator = pageAccumulators.get(key) ?? {
       ...emptyDashboardAccumulator(),
       siteId: site.id,
       siteName: site.name,
-      path: page.path,
+      path,
       title: page.title
     };
     pageAccumulator.pageViews += page.views;
@@ -1383,7 +1384,7 @@ function normalizedPageQuery(params: URLSearchParams) {
   params.forEach((value, key) => {
     const normalizedKey = normalizeString(key, 80);
     const lowerKey = normalizedKey.toLowerCase();
-    if (!normalizedKey || lowerKey.startsWith("utm_") || IGNORED_PAGE_QUERY_PARAMS.has(lowerKey)) {
+    if (!normalizedKey || lowerKey.startsWith("utm_") || lowerKey.startsWith("gad_") || IGNORED_PAGE_QUERY_PARAMS.has(lowerKey)) {
       return;
     }
 
