@@ -298,11 +298,8 @@ function CvrOverviewTable({ rows, sites }: { rows: SiteAnalyticsCvrLinkRow[]; si
       <table className="site-analytics-table cvr-overview-table">
         <thead>
           <tr>
-            <th>Website</th>
             <th>Projectpagina</th>
-            <th>Bedankingspagina</th>
-            <th>Projectpagina weergaven</th>
-            <th>Bedankpagina weergaven</th>
+            <th>Bezoekers</th>
             <th>CVR</th>
           </tr>
         </thead>
@@ -313,24 +310,12 @@ function CvrOverviewTable({ rows, sites }: { rows: SiteAnalyticsCvrLinkRow[]; si
             return (
               <tr key={link.id}>
                 <td>
-                  <span className="row-title">{link.siteName}</span>
-                  <span className="cell-muted">{site?.url || link.siteId}</span>
-                </td>
-                <td>
                   <span className="row-title">{link.sourceTitle}</span>
                   <PagePathLink siteUrl={site?.url} path={link.sourcePath} />
+                  <span className="cell-muted">{link.siteName}</span>
                 </td>
                 <td>
-                  <span className="row-title">{link.targetTitle}</span>
-                  <PagePathLink siteUrl={site?.url} path={link.targetPath} />
-                </td>
-                <td>
-                  <span className="row-title">{formatNumber(link.sourcePageViews)}</span>
-                  <span className="cell-muted">{formatNumber(link.sourceVisitors)} bezoekers</span>
-                </td>
-                <td>
-                  <span className="row-title">{formatNumber(link.targetPageViews)}</span>
-                  <span className="cell-muted">{formatNumber(link.targetVisitors)} bezoekers</span>
+                  <span className="row-title">{formatNumber(link.sourceVisitors)}</span>
                 </td>
                 <td>
                   <span className="cvr-overview-rate">{formatConversionRate(link.conversionRatePercent)}%</span>
