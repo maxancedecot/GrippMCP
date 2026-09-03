@@ -103,7 +103,8 @@ select {
   font-size: 14px;
 }
 
-.header-meta span {
+.header-meta span,
+.header-meta-link {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
@@ -112,6 +113,17 @@ select {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+.header-meta-link {
+  color: var(--blue);
+  font-weight: 740;
+  text-decoration: none;
+}
+
+.header-meta-link:hover {
+  border-color: rgba(59, 130, 246, 0.36);
+  background: var(--blue-soft);
 }
 
 .source-badge {
@@ -1903,7 +1915,8 @@ td .inline-bar {
     gap: 6px;
   }
 
-  .header-meta span {
+  .header-meta span,
+  .header-meta-link {
     min-height: 30px;
     padding: 5px 8px;
     font-size: 13px;

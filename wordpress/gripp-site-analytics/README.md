@@ -4,34 +4,23 @@ Plugin WordPress qui collecte les performances d'un site et les envoie vers le d
 
 ## Installation
 
-1. Copier le dossier `gripp-site-analytics` dans `wp-content/plugins/`.
+1. Uploader `gripp-site-analytics.zip` via `Extensions > Ajouter une extension > Televerser une extension`.
 2. Activer `Gripp Site Analytics` dans WordPress.
 3. Ouvrir `Reglages > Gripp Analytics`.
-4. Renseigner:
-   - Endpoint dashboard: `https://votre-domaine.vercel.app/api/site-analytics/collect`
-   - Site ID: identifiant unique, par exemple `client-site`
-   - Token site: token configure dans `SITE_ANALYTICS_SITES`
+4. Si l'URL du dashboard n'est pas deja preconfiguree dans le ZIP, renseigner uniquement l'URL du dashboard, par exemple `https://votre-domaine.vercel.app`.
+
+Le plugin s'enregistre ensuite automatiquement. Le dashboard genere le Site ID et le token, puis le plugin les stocke dans WordPress.
 
 ## Configuration Next.js
 
-Ajouter chaque site dans `SITE_ANALYTICS_SITES`:
+Pour l'enregistrement automatique en production, configure un stockage persistant:
 
-```json
-[
-  {
-    "id": "client-site",
-    "name": "Client Site",
-    "url": "https://client.example",
-    "token": "generez-un-token-long-unique"
-  }
-]
-```
+- `KV_REST_API_URL`
+- `KV_REST_API_TOKEN`
 
-Un token peut etre genere avec:
+`SITE_ANALYTICS_SITES` reste supporte pour declarer des sites manuellement, mais il n'est plus obligatoire pour les nouveaux sites qui utilisent l'enregistrement automatique.
 
-```bash
-openssl rand -hex 32
-```
+Optionnel: si `SITE_ANALYTICS_REGISTRATION_TOKEN` est configure dans Vercel, le ZIP du plugin doit etre preconfigure avec le meme token.
 
 ## Donnees collectees
 

@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readJsonCache, writeJsonCache } from "./jsonCache.js";
 
 export type SiteAnalyticsConfiguredSite = {
@@ -9,6 +9,11 @@ export type SiteAnalyticsConfiguredSite = {
 };
 
 export type SiteAnalyticsPublicSite = Omit<SiteAnalyticsConfiguredSite, "token">;
+
+export type SiteAnalyticsRegistrationResult = {
+  site: SiteAnalyticsPublicSite;
+  siteToken: string;
+};
 
 export type SiteAnalyticsSource = {
   mode: "live" | "demo";
@@ -111,6 +116,18 @@ type DailySiteAnalyticsData = {
   lastEventAt?: string;
 };
 
+type SiteAnalyticsRegisteredSite = SiteAnalyticsConfiguredSite & {
+  installationHash: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type SiteAnalyticsRegistryData = {
+  version: 1;
+  sites: SiteAnalyticsRegisteredSite[];
+  updatedAt?: string;
+};
+
 type DailyPageAnalyticsData = {
   path: string;
   title: string;
@@ -164,6 +181,7 @@ type DailyAccumulator = {
 
 const SITE_ANALYTICS_VERSION = 1;
 const SITE_ANALYTICS_CACHE_PREFIX = `site-analytics:v${SITE_ANALYTICS_VERSION}`;
+const SITE_ANALYTICS_REGISTRY_CACHE_KEY = `${SITE_ANALYTICS_CACHE_PREFIX}:registry`;
 const DEFAULT_DASHBOARD_DAYS = 30;
 const MAX_DASHBOARD_DAYS = 90;
 const MAX_STRING_LENGTH = 300;
@@ -199,18 +217,72 @@ export function getConfiguredSiteAnalyticsSites(): SiteAnalyticsConfiguredSite[]
   return fallbackSite ? [fallbackSite] : [];
 }
 
-export function getPublicSiteAnalyticsSites(): SiteAnalyticsPublicSite[] {
-  return getConfiguredSiteAnalyticsSites().map(({ token: _token, ...site }) => site);
+export async function getSiteAnalyticsSites(): Promise<SiteAnalyticsConfiguredSite[]> {
+  const configuredSites = getConfiguredSiteAnalyticsSites();
+  const registeredSites = await readRegisteredSiteAnalyticsSites();
+
+  return mergeConfiguredAndRegisteredSites(configuredSites, registeredSites);
 }
 
-export function verifySiteAnalyticsToken(siteId: string, token: string) {
+export async function getPublicSiteAnalyticsSites(): Promise<SiteAnalyticsPublicSite[]> {
+  return (await getSiteAnalyticsSites()).map(({ token: _token, ...site }) => site);
+}
+
+export async function verifySiteAnalyticsToken(siteId: string, token: string) {
   const normalizedSiteId = normalizeIdentifier(siteId);
-  const site = getConfiguredSiteAnalyticsSites().find((candidate) => candidate.id === normalizedSiteId);
+  const site = (await getSiteAnalyticsSites()).find((candidate) => candidate.id === normalizedSiteId);
   if (!site || !token) {
     return false;
   }
 
   return safeEqual(hashSecret(token), hashSecret(site.token));
+}
+
+export function verifySiteAnalyticsRegistrationToken(token: string) {
+  const requiredToken = normalizeString(process.env.SITE_ANALYTICS_REGISTRATION_TOKEN, 500);
+  if (!requiredToken) {
+    return true;
+  }
+
+  return Boolean(token) && safeEqual(hashSecret(token), hashSecret(requiredToken));
+}
+
+export async function registerSiteAnalyticsSite(payload: unknown, options: { now?: Date } = {}): Promise<SiteAnalyticsRegistrationResult> {
+  const registration = normalizeSiteAnalyticsRegistration(payload);
+  const now = (options.now ?? new Date()).toISOString();
+  const registry = await readSiteAnalyticsRegistry();
+  const existingIndex = registry.sites.findIndex((site) => site.installationHash === registration.installationHash);
+  const existingSite = existingIndex >= 0 ? registry.sites[existingIndex] : undefined;
+  const site: SiteAnalyticsRegisteredSite = existingSite
+    ? {
+        ...existingSite,
+        name: registration.name,
+        url: registration.url,
+        updatedAt: now
+      }
+    : {
+        id: registration.id,
+        name: registration.name,
+        url: registration.url,
+        token: randomBytes(32).toString("hex"),
+        installationHash: registration.installationHash,
+        createdAt: now,
+        updatedAt: now
+      };
+
+  if (existingIndex >= 0) {
+    registry.sites[existingIndex] = site;
+  } else {
+    registry.sites.push(site);
+  }
+  registry.updatedAt = now;
+
+  await writeJsonCache(SITE_ANALYTICS_REGISTRY_CACHE_KEY, registry);
+
+  return {
+    site: publicSiteFromConfiguredSite(site),
+    siteToken: site.token
+  };
 }
 
 export async function recordSiteAnalyticsEvent(payload: unknown): Promise<{ accepted: true }> {
@@ -226,7 +298,7 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
   const now = options.now ?? new Date();
   const days = normalizeDashboardDays(options.days);
   const period = siteAnalyticsPeriod(days, now);
-  const configuredSites = getConfiguredSiteAnalyticsSites();
+  const configuredSites = await getSiteAnalyticsSites();
   const publicSites = configuredSites.map(({ token: _token, ...site }) => site);
   const selectedSiteId = normalizeOptionalIdentifier(options.siteId);
   const selectedSites = selectedSiteId ? publicSites.filter((site) => site.id === selectedSiteId) : publicSites;
@@ -339,6 +411,52 @@ function sitesFromJsonEnv(value: string | undefined) {
   return Array.from(byId.values());
 }
 
+async function readRegisteredSiteAnalyticsSites() {
+  return (await readSiteAnalyticsRegistry()).sites;
+}
+
+async function readSiteAnalyticsRegistry(): Promise<SiteAnalyticsRegistryData> {
+  const cached = await readJsonCache<SiteAnalyticsRegistryData>(SITE_ANALYTICS_REGISTRY_CACHE_KEY);
+  if (isSiteAnalyticsRegistryData(cached)) {
+    return {
+      version: SITE_ANALYTICS_VERSION,
+      sites: cached.sites.map(registeredSiteFromRecord).filter((site): site is SiteAnalyticsRegisteredSite => Boolean(site)),
+      updatedAt: normalizeString(cached.updatedAt, 40) || undefined
+    };
+  }
+
+  return {
+    version: SITE_ANALYTICS_VERSION,
+    sites: []
+  };
+}
+
+function isSiteAnalyticsRegistryData(value: unknown): value is SiteAnalyticsRegistryData {
+  const record = asRecord(value);
+  if (record?.version !== SITE_ANALYTICS_VERSION || !Array.isArray(record.sites)) {
+    return false;
+  }
+
+  return true;
+}
+
+function mergeConfiguredAndRegisteredSites(
+  configuredSites: SiteAnalyticsConfiguredSite[],
+  registeredSites: SiteAnalyticsRegisteredSite[]
+) {
+  const sitesById = new Map<string, SiteAnalyticsConfiguredSite>();
+  for (const site of configuredSites) {
+    sitesById.set(site.id, site);
+  }
+  for (const site of registeredSites) {
+    if (!sitesById.has(site.id)) {
+      sitesById.set(site.id, site);
+    }
+  }
+
+  return Array.from(sitesById.values());
+}
+
 function siteFromRecord(value: unknown): SiteAnalyticsConfiguredSite | null {
   const record = asRecord(value);
   if (!record) {
@@ -356,6 +474,49 @@ function siteFromRecord(value: unknown): SiteAnalyticsConfiguredSite | null {
     name: normalizeString(record.name, 120) || id,
     url: normalizeSiteUrl(stringFrom(record.url)) || "",
     token
+  };
+}
+
+function registeredSiteFromRecord(value: unknown): SiteAnalyticsRegisteredSite | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const site = siteFromRecord(record);
+  const installationHash = normalizeString(record.installationHash, 128);
+  if (!site || !installationHash) {
+    return null;
+  }
+
+  return {
+    ...site,
+    installationHash,
+    createdAt: normalizeString(record.createdAt, 40) || new Date(0).toISOString(),
+    updatedAt: normalizeString(record.updatedAt, 40) || new Date(0).toISOString()
+  };
+}
+
+function normalizeSiteAnalyticsRegistration(payload: unknown) {
+  const record = asRecord(payload);
+  if (!record) {
+    throw new Error("Payload d'enregistrement invalide.");
+  }
+
+  const url = normalizeHttpSiteUrl(stringFrom(record.site_url ?? record.siteUrl ?? record.url));
+  const installationId = normalizeString(record.installation_id ?? record.installationId, 300);
+  if (!url || !installationId) {
+    throw new Error("Payload d'enregistrement incomplet.");
+  }
+
+  const installationHash = createHash("sha256").update(`${url}:${installationId}`).digest("hex");
+  const name = normalizeString(record.site_name ?? record.siteName ?? record.name, 120) || siteNameFromUrl(url);
+
+  return {
+    id: siteIdForRegistration(url, installationHash),
+    name,
+    url,
+    installationHash
   };
 }
 
@@ -645,7 +806,7 @@ function createDemoSiteAnalyticsDashboardData(
   return {
     source: {
       mode: "demo",
-      message: "Données demo visibles. Configure SITE_ANALYTICS_SITES pour afficher les sites WordPress connectés."
+      message: "Données demo visibles. Installez le plugin WordPress depuis ce dashboard pour connecter un premier site."
     },
     period,
     sites: siteRows,
@@ -740,6 +901,50 @@ function normalizeSiteUrl(value: string | undefined) {
   } catch {
     return raw.replace(/\/$/, "");
   }
+}
+
+function normalizeHttpSiteUrl(value: string | undefined) {
+  const raw = normalizeString(value, 500);
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return "";
+    }
+
+    return `${url.origin}${url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return "";
+  }
+}
+
+function siteNameFromUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.hostname.replace(/^www\./, "") || "Site WordPress";
+  } catch {
+    return "Site WordPress";
+  }
+}
+
+function siteIdForRegistration(siteUrl: string, installationHash: string) {
+  let slugSource = "wordpress-site";
+  try {
+    slugSource = new URL(siteUrl).hostname.replace(/^www\./, "").replace(/\./g, "-");
+  } catch {
+    slugSource = siteUrl;
+  }
+
+  const slug = normalizeIdentifier(slugSource) || "wordpress-site";
+  return normalizeIdentifier(`${slug}-${installationHash.slice(0, 10)}`);
+}
+
+function publicSiteFromConfiguredSite(site: SiteAnalyticsConfiguredSite): SiteAnalyticsPublicSite {
+  const { token: _token, ...publicSite } = site;
+  return publicSite;
 }
 
 function normalizePagePath(value: string | undefined) {

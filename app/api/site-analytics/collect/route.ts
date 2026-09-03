@@ -1,6 +1,6 @@
 import {
-  getConfiguredSiteAnalyticsSites,
   recordSiteAnalyticsEvent,
+  getSiteAnalyticsSites,
   verifySiteAnalyticsToken
 } from "../../../../src/siteAnalytics.js";
 
@@ -19,11 +19,11 @@ export async function POST(request: Request) {
   const siteId = siteIdFromPayload(payload);
   const token = tokenFromRequest(request);
 
-  if (getConfiguredSiteAnalyticsSites().length === 0) {
+  if ((await getSiteAnalyticsSites()).length === 0) {
     return json({ error: "site_analytics_not_configured" }, 503);
   }
 
-  if (!siteId || !verifySiteAnalyticsToken(siteId, token)) {
+  if (!siteId || !(await verifySiteAnalyticsToken(siteId, token))) {
     return json({ error: "unauthorized_site" }, 401);
   }
 

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Gripp Site Analytics
  * Description: Collecte les performances d'un site WordPress et les envoie vers le dashboard central.
- * Version: 0.1.0
+ * Version: 0.2.0
  * Author: Gripp MCP
  * License: GPL-2.0-or-later
  */
@@ -12,10 +12,14 @@ if (!defined('ABSPATH')) {
 }
 
 final class Gripp_Site_Analytics_Plugin {
-    private const VERSION = '0.1.0';
+    private const VERSION = '0.2.0';
     private const OPTION_NAME = 'gripp_site_analytics_options';
     private const REST_NAMESPACE = 'gripp-site-analytics/v1';
     private const REST_ROUTE = '/event';
+    private const COLLECT_PATH = '/api/site-analytics/collect';
+    private const REGISTER_PATH = '/api/site-analytics/register';
+    private const DEFAULT_DASHBOARD_URL = '';
+    private const REGISTRATION_TOKEN = '';
     private const SCRIPT_HANDLE = 'gripp-site-analytics';
 
     public static function activate(): void {
@@ -26,13 +30,16 @@ final class Gripp_Site_Analytics_Plugin {
 
         if (empty($options['public_key'])) {
             $options['public_key'] = wp_generate_password(32, false, false);
-            update_option(self::OPTION_NAME, $options, false);
         }
+
+        $options = self::apply_default_dashboard_options($options);
+        update_option(self::OPTION_NAME, $options, false);
     }
 
     public function boot(): void {
         add_action('admin_menu', [$this, 'register_admin_page']);
         add_action('admin_init', [$this, 'register_settings']);
+        add_action('admin_init', [$this, 'maybe_auto_register_site'], 20);
         add_action('rest_api_init', [$this, 'register_rest_routes']);
         add_action('wp_enqueue_scripts', [$this, 'enqueue_tracker']);
     }
@@ -61,20 +68,10 @@ final class Gripp_Site_Analytics_Plugin {
             'gripp-site-analytics'
         );
 
-        add_settings_field('endpoint_url', 'Endpoint dashboard', [$this, 'render_text_field'], 'gripp-site-analytics', 'gripp_site_analytics_main', [
-            'name' => 'endpoint_url',
-            'placeholder' => 'https://votre-domaine.vercel.app/api/site-analytics/collect',
+        add_settings_field('dashboard_url', 'URL dashboard', [$this, 'render_text_field'], 'gripp-site-analytics', 'gripp_site_analytics_main', [
+            'name' => 'dashboard_url',
+            'placeholder' => 'https://votre-domaine.vercel.app',
             'type' => 'url'
-        ]);
-        add_settings_field('site_id', 'Site ID', [$this, 'render_text_field'], 'gripp-site-analytics', 'gripp_site_analytics_main', [
-            'name' => 'site_id',
-            'placeholder' => 'client-site',
-            'type' => 'text'
-        ]);
-        add_settings_field('site_token', 'Token site', [$this, 'render_text_field'], 'gripp-site-analytics', 'gripp_site_analytics_main', [
-            'name' => 'site_token',
-            'placeholder' => 'token genere pour ce site',
-            'type' => 'password'
         ]);
         add_settings_field('track_logged_in', 'Utilisateurs connectes', [$this, 'render_checkbox_field'], 'gripp-site-analytics', 'gripp_site_analytics_main', [
             'name' => 'track_logged_in',
@@ -85,13 +82,24 @@ final class Gripp_Site_Analytics_Plugin {
     public function sanitize_options($input): array {
         $existing = $this->options();
         $input = is_array($input) ? $input : [];
+        $existing_dashboard_url = self::dashboard_url_from_options($existing);
+        $has_dashboard_input = array_key_exists('dashboard_url', $input);
+        $dashboard_url = self::normalize_dashboard_url((string) ($input['dashboard_url'] ?? $existing_dashboard_url));
+        $dashboard_cleared = $has_dashboard_input && $dashboard_url === '';
+        $dashboard_changed = $dashboard_url !== '' && $existing_dashboard_url !== '' && $dashboard_url !== $existing_dashboard_url;
+        $reset_connection = $dashboard_changed || $dashboard_cleared;
+        $site_id = $reset_connection ? '' : sanitize_key($existing['site_id'] ?? '');
+        $site_token = $reset_connection ? '' : sanitize_text_field($existing['site_token'] ?? '');
 
         return [
-            'endpoint_url' => esc_url_raw($input['endpoint_url'] ?? ''),
-            'site_id' => sanitize_key($input['site_id'] ?? ''),
-            'site_token' => sanitize_text_field($input['site_token'] ?? ''),
+            'dashboard_url' => $dashboard_url,
+            'endpoint_url' => $dashboard_url ? self::build_dashboard_endpoint_url($dashboard_url, self::COLLECT_PATH) : '',
+            'site_id' => $site_id,
+            'site_token' => $site_token,
             'track_logged_in' => !empty($input['track_logged_in']) ? '1' : '',
-            'public_key' => sanitize_text_field($existing['public_key'] ?? wp_generate_password(32, false, false))
+            'public_key' => sanitize_text_field($existing['public_key'] ?? wp_generate_password(32, false, false)),
+            'registration_attempted_at' => $reset_connection ? 0 : absint($existing['registration_attempted_at'] ?? 0),
+            'registration_error' => $reset_connection ? '' : sanitize_text_field($existing['registration_error'] ?? '')
         ];
     }
 
@@ -102,6 +110,7 @@ final class Gripp_Site_Analytics_Plugin {
         ?>
         <div class="wrap">
             <h1>Gripp Site Analytics</h1>
+            <?php $this->render_connection_notice($this->options()); ?>
             <form action="options.php" method="post">
                 <?php
                 settings_fields('gripp_site_analytics');
@@ -119,6 +128,9 @@ final class Gripp_Site_Analytics_Plugin {
         $type = (string) ($args['type'] ?? 'text');
         $placeholder = (string) ($args['placeholder'] ?? '');
         $value = (string) ($options[$name] ?? '');
+        if ($name === 'dashboard_url' && $value === '') {
+            $value = self::DEFAULT_DASHBOARD_URL;
+        }
         ?>
         <input
             class="regular-text"
@@ -146,6 +158,137 @@ final class Gripp_Site_Analytics_Plugin {
             <?php echo esc_html($label); ?>
         </label>
         <?php
+    }
+
+    public function render_connection_notice(array $options): void {
+        if ($this->is_configured($options)) {
+            ?>
+            <div class="notice notice-success inline">
+                <p>
+                    <?php echo esc_html('Connecte au dashboard. Site ID: ' . (string) $options['site_id']); ?>
+                </p>
+            </div>
+            <?php
+            return;
+        }
+
+        if (!self::dashboard_url_from_options($options)) {
+            ?>
+            <div class="notice notice-warning inline">
+                <p>Ajoutez l'URL du dashboard pour lancer la connexion automatique.</p>
+            </div>
+            <?php
+            return;
+        }
+
+        if (!empty($options['registration_error'])) {
+            ?>
+            <div class="notice notice-error inline">
+                <p>
+                    <?php echo esc_html('Connexion automatique echouee: ' . (string) $options['registration_error']); ?>
+                </p>
+            </div>
+            <?php
+            return;
+        }
+
+        ?>
+        <div class="notice notice-info inline">
+            <p>Connexion automatique en cours. Rechargez cette page si le statut ne change pas.</p>
+        </div>
+        <?php
+    }
+
+    public function maybe_auto_register_site(): void {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $options = $this->options();
+        if (empty($options['public_key'])) {
+            $options['public_key'] = wp_generate_password(32, false, false);
+            update_option(self::OPTION_NAME, $options, false);
+        }
+
+        $options_with_defaults = self::apply_default_dashboard_options($options);
+        if ($options_with_defaults !== $options) {
+            $options = $options_with_defaults;
+            update_option(self::OPTION_NAME, $options, false);
+        }
+
+        if ($this->is_configured($options)) {
+            return;
+        }
+
+        $dashboard_url = self::dashboard_url_from_options($options);
+        if (!$dashboard_url) {
+            return;
+        }
+
+        $last_attempt = absint($options['registration_attempted_at'] ?? 0);
+        if (!empty($options['registration_error']) && $last_attempt > 0 && time() - $last_attempt < 300) {
+            return;
+        }
+
+        $this->register_site_with_dashboard($options, $dashboard_url);
+    }
+
+    private function register_site_with_dashboard(array $options, string $dashboard_url): void {
+        $options['registration_attempted_at'] = time();
+        $options['registration_error'] = '';
+        update_option(self::OPTION_NAME, $options, false);
+
+        $headers = [
+            'Accept' => 'application/json',
+            'Content-Type' => 'application/json'
+        ];
+        if (self::REGISTRATION_TOKEN !== '') {
+            $headers['X-Site-Analytics-Registration-Token'] = self::REGISTRATION_TOKEN;
+        }
+
+        $response = wp_remote_post(self::build_dashboard_endpoint_url($dashboard_url, self::REGISTER_PATH), [
+            'timeout' => 10,
+            'redirection' => 0,
+            'headers' => $headers,
+            'body' => wp_json_encode([
+                'site_url' => home_url('/'),
+                'site_name' => get_bloginfo('name'),
+                'installation_id' => (string) ($options['public_key'] ?? ''),
+                'plugin_version' => self::VERSION
+            ])
+        ]);
+
+        if (is_wp_error($response)) {
+            $this->store_registration_error($options, $response->get_error_message());
+            return;
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        $body = json_decode((string) wp_remote_retrieve_body($response), true);
+        if ($status < 200 || $status >= 300 || !is_array($body)) {
+            $this->store_registration_error($options, 'le dashboard a refuse l enregistrement');
+            return;
+        }
+
+        $site_id = sanitize_key($body['site_id'] ?? '');
+        $site_token = sanitize_text_field($body['site_token'] ?? '');
+        $collect_url = esc_url_raw($body['collect_url'] ?? self::build_dashboard_endpoint_url($dashboard_url, self::COLLECT_PATH));
+        if (!$site_id || !$site_token || !$collect_url) {
+            $this->store_registration_error($options, 'reponse dashboard incomplete');
+            return;
+        }
+
+        $options['dashboard_url'] = $dashboard_url;
+        $options['endpoint_url'] = $collect_url;
+        $options['site_id'] = $site_id;
+        $options['site_token'] = $site_token;
+        $options['registration_error'] = '';
+        update_option(self::OPTION_NAME, $options, false);
+    }
+
+    private function store_registration_error(array $options, string $message): void {
+        $options['registration_error'] = sanitize_text_field($message);
+        update_option(self::OPTION_NAME, $options, false);
     }
 
     public function register_rest_routes(): void {
@@ -250,6 +393,90 @@ final class Gripp_Site_Analytics_Plugin {
 
     private function is_configured(array $options): bool {
         return !empty($options['endpoint_url']) && !empty($options['site_id']) && !empty($options['site_token']) && !empty($options['public_key']);
+    }
+
+    private static function apply_default_dashboard_options(array $options): array {
+        $dashboard_url = self::dashboard_url_from_options($options);
+        if (!$dashboard_url && self::DEFAULT_DASHBOARD_URL !== '') {
+            $dashboard_url = self::normalize_dashboard_url(self::DEFAULT_DASHBOARD_URL);
+            if ($dashboard_url) {
+                $options['dashboard_url'] = $dashboard_url;
+            }
+        }
+
+        if ($dashboard_url) {
+            $options['dashboard_url'] = $dashboard_url;
+            if (empty($options['endpoint_url'])) {
+                $options['endpoint_url'] = self::build_dashboard_endpoint_url($dashboard_url, self::COLLECT_PATH);
+            }
+        }
+
+        return $options;
+    }
+
+    private static function dashboard_url_from_options(array $options): string {
+        $dashboard_url = self::normalize_dashboard_url((string) ($options['dashboard_url'] ?? ''));
+        if ($dashboard_url) {
+            return $dashboard_url;
+        }
+
+        return self::dashboard_url_from_endpoint((string) ($options['endpoint_url'] ?? ''));
+    }
+
+    private static function dashboard_url_from_endpoint(string $endpoint_url): string {
+        $endpoint_url = esc_url_raw($endpoint_url);
+        if (!$endpoint_url) {
+            return '';
+        }
+
+        $parts = parse_url($endpoint_url);
+        if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+            return '';
+        }
+
+        $path = (string) ($parts['path'] ?? '');
+        if (substr($path, -strlen(self::COLLECT_PATH)) !== self::COLLECT_PATH) {
+            return self::normalize_dashboard_url($endpoint_url);
+        }
+
+        $base_path = substr($path, 0, -strlen(self::COLLECT_PATH));
+        $origin = strtolower((string) $parts['scheme']) . '://' . (string) $parts['host'];
+        if (!empty($parts['port'])) {
+            $origin .= ':' . (string) $parts['port'];
+        }
+
+        return self::normalize_dashboard_url($origin . $base_path);
+    }
+
+    private static function normalize_dashboard_url(string $dashboard_url): string {
+        $dashboard_url = esc_url_raw(trim($dashboard_url));
+        if (!$dashboard_url) {
+            return '';
+        }
+
+        $parts = parse_url($dashboard_url);
+        if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+            return '';
+        }
+
+        $scheme = strtolower((string) $parts['scheme']);
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            return '';
+        }
+
+        $url = $scheme . '://' . (string) $parts['host'];
+        if (!empty($parts['port'])) {
+            $url .= ':' . (string) $parts['port'];
+        }
+        if (!empty($parts['path']) && $parts['path'] !== '/') {
+            $url .= '/' . trim((string) $parts['path'], '/');
+        }
+
+        return rtrim($url, '/');
+    }
+
+    private static function build_dashboard_endpoint_url(string $dashboard_url, string $path): string {
+        return rtrim($dashboard_url, '/') . $path;
     }
 
     private function options(): array {

@@ -34,7 +34,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   const days = dashboardDaysFromParams(params);
   const siteId = firstParam(params.site);
   const dashboard = await getSiteAnalyticsDashboardData({ days, siteId });
-  const configuredSites = getPublicSiteAnalyticsSites();
+  const configuredSites = await getPublicSiteAnalyticsSites();
   const siteTabs = configuredSites.length > 0 ? configuredSites : dashboard.sites;
 
   return (
@@ -46,6 +46,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <h1>Performance des sites</h1>
           </div>
           <div className="header-meta">
+            <a className="header-meta-link" href="/api/site-analytics/plugin" download>
+              Plugin WordPress
+            </a>
             <span className={`source-badge source-badge--${dashboard.source.mode}`}>
               {dashboard.source.mode === "live" ? "Sites connectes" : "Demo-data"}
             </span>

@@ -2,21 +2,44 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getConfiguredSiteAnalyticsSites,
+  getPublicSiteAnalyticsSites,
   getSiteAnalyticsDashboardData,
+  registerSiteAnalyticsSite,
   recordSiteAnalyticsEvent,
   verifySiteAnalyticsToken
 } from "../src/siteAnalytics.js";
 
 test("site analytics reads configured sites and validates tokens", async () => {
-  await withSiteAnalyticsEnv("token-check", "secret-token", () => {
+  await withSiteAnalyticsEnv("token-check", "secret-token", async () => {
     const sites = getConfiguredSiteAnalyticsSites();
 
     assert.equal(sites.length, 1);
     assert.equal(sites[0].id, "token-check");
     assert.equal(sites[0].name, "Token Check");
-    assert.equal(verifySiteAnalyticsToken("token-check", "secret-token"), true);
-    assert.equal(verifySiteAnalyticsToken("token-check", "wrong-token"), false);
-    assert.equal(verifySiteAnalyticsToken("unknown", "secret-token"), false);
+    assert.equal(await verifySiteAnalyticsToken("token-check", "secret-token"), true);
+    assert.equal(await verifySiteAnalyticsToken("token-check", "wrong-token"), false);
+    assert.equal(await verifySiteAnalyticsToken("unknown", "secret-token"), false);
+  });
+});
+
+test("site analytics auto-registers sites and validates generated tokens", async () => {
+  await withSiteAnalyticsMemory(async () => {
+    const unique = Date.now();
+    const registration = await registerSiteAnalyticsSite(
+      {
+        site_url: `https://client-${unique}.example`,
+        site_name: "Client Auto",
+        installation_id: `install-${unique}`
+      },
+      { now: new Date("2026-01-01T10:00:00.000Z") }
+    );
+    const sites = await getPublicSiteAnalyticsSites();
+
+    assert.equal(registration.site.name, "Client Auto");
+    assert.match(registration.site.id, /^client-[0-9]+-example-[a-f0-9]{10}$/);
+    assert.equal(sites.some((site) => site.id === registration.site.id), true);
+    assert.equal(await verifySiteAnalyticsToken(registration.site.id, registration.siteToken), true);
+    assert.equal(await verifySiteAnalyticsToken(registration.site.id, "wrong-token"), false);
   });
 });
 
@@ -92,6 +115,57 @@ async function withSiteAnalyticsEnv<T>(siteId: string, token: string, callback: 
       process.env.SITE_ANALYTICS_SITES = previousSites;
     }
 
+    if (previousCacheStore === undefined) {
+      delete process.env.JSON_CACHE_STORE;
+    } else {
+      process.env.JSON_CACHE_STORE = previousCacheStore;
+    }
+  }
+}
+
+async function withSiteAnalyticsMemory<T>(callback: () => T | Promise<T>): Promise<T> {
+  const previousSites = process.env.SITE_ANALYTICS_SITES;
+  const previousSingleSiteId = process.env.SITE_ANALYTICS_SITE_ID;
+  const previousSingleSiteName = process.env.SITE_ANALYTICS_SITE_NAME;
+  const previousSingleSiteUrl = process.env.SITE_ANALYTICS_SITE_URL;
+  const previousSingleSiteToken = process.env.SITE_ANALYTICS_SITE_TOKEN;
+  const previousCacheStore = process.env.JSON_CACHE_STORE;
+
+  process.env.JSON_CACHE_STORE = "memory";
+  delete process.env.SITE_ANALYTICS_SITES;
+  delete process.env.SITE_ANALYTICS_SITE_ID;
+  delete process.env.SITE_ANALYTICS_SITE_NAME;
+  delete process.env.SITE_ANALYTICS_SITE_URL;
+  delete process.env.SITE_ANALYTICS_SITE_TOKEN;
+
+  try {
+    return await callback();
+  } finally {
+    if (previousSites === undefined) {
+      delete process.env.SITE_ANALYTICS_SITES;
+    } else {
+      process.env.SITE_ANALYTICS_SITES = previousSites;
+    }
+    if (previousSingleSiteId === undefined) {
+      delete process.env.SITE_ANALYTICS_SITE_ID;
+    } else {
+      process.env.SITE_ANALYTICS_SITE_ID = previousSingleSiteId;
+    }
+    if (previousSingleSiteName === undefined) {
+      delete process.env.SITE_ANALYTICS_SITE_NAME;
+    } else {
+      process.env.SITE_ANALYTICS_SITE_NAME = previousSingleSiteName;
+    }
+    if (previousSingleSiteUrl === undefined) {
+      delete process.env.SITE_ANALYTICS_SITE_URL;
+    } else {
+      process.env.SITE_ANALYTICS_SITE_URL = previousSingleSiteUrl;
+    }
+    if (previousSingleSiteToken === undefined) {
+      delete process.env.SITE_ANALYTICS_SITE_TOKEN;
+    } else {
+      process.env.SITE_ANALYTICS_SITE_TOKEN = previousSingleSiteToken;
+    }
     if (previousCacheStore === undefined) {
       delete process.env.JSON_CACHE_STORE;
     } else {
