@@ -5,6 +5,10 @@
   if (!config.restUrl || !config.publicKey || !window.fetch) {
     return;
   }
+  if (window.__grippSiteAnalyticsLoaded) {
+    return;
+  }
+  window.__grippSiteAnalyticsLoaded = true;
 
   var visitorId = storedId("localStorage", "gripp_site_analytics_visitor_id");
   var sessionId = currentSessionId();

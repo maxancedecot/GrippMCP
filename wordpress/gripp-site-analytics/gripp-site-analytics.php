@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Gripp Site Analytics
  * Description: Collecte les performances d'un site WordPress et les envoie vers le dashboard central.
- * Version: 0.2.1
+ * Version: 0.2.2
  * Author: Gripp MCP
  * License: GPL-2.0-or-later
  */
@@ -12,12 +12,13 @@ if (!defined('ABSPATH')) {
 }
 
 final class Gripp_Site_Analytics_Plugin {
-    private const VERSION = '0.2.1';
+    private const VERSION = '0.2.2';
     private const OPTION_NAME = 'gripp_site_analytics_options';
     private const REST_NAMESPACE = 'gripp-site-analytics/v1';
     private const REST_ROUTE = '/event';
     private const COLLECT_PATH = '/api/site-analytics/collect';
     private const REGISTER_PATH = '/api/site-analytics/register';
+    private const PING_PATH = '/api/site-analytics/ping';
     private const DEFAULT_DASHBOARD_URL = '';
     private const REGISTRATION_TOKEN = '';
     private const SCRIPT_HANDLE = 'gripp-site-analytics';
@@ -41,8 +42,10 @@ final class Gripp_Site_Analytics_Plugin {
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_init', [$this, 'maybe_auto_register_site'], 20);
         add_action('admin_post_gripp_site_analytics_register', [$this, 'handle_manual_register']);
+        add_action('admin_post_gripp_site_analytics_ping', [$this, 'handle_dashboard_ping']);
         add_action('rest_api_init', [$this, 'register_rest_routes']);
         add_action('wp_enqueue_scripts', [$this, 'enqueue_tracker']);
+        add_action('wp_footer', [$this, 'render_tracker_fallback'], 99);
     }
 
     public function register_admin_page(): void {
@@ -100,7 +103,9 @@ final class Gripp_Site_Analytics_Plugin {
             'track_logged_in' => !empty($input['track_logged_in']) ? '1' : '',
             'public_key' => sanitize_text_field($existing['public_key'] ?? wp_generate_password(32, false, false)),
             'registration_attempted_at' => $reset_connection ? 0 : absint($existing['registration_attempted_at'] ?? 0),
-            'registration_error' => $reset_connection ? '' : sanitize_text_field($existing['registration_error'] ?? '')
+            'registration_error' => $reset_connection ? '' : sanitize_text_field($existing['registration_error'] ?? ''),
+            'last_ping_at' => $reset_connection ? 0 : absint($existing['last_ping_at'] ?? 0),
+            'ping_error' => $reset_connection ? '' : sanitize_text_field($existing['ping_error'] ?? '')
         ];
     }
 
@@ -123,6 +128,7 @@ final class Gripp_Site_Analytics_Plugin {
                 ?>
             </form>
             <?php $this->render_manual_register_form($options); ?>
+            <?php $this->render_dashboard_ping_form($options); ?>
         </div>
         <?php
     }
@@ -172,6 +178,16 @@ final class Gripp_Site_Analytics_Plugin {
                 <p>
                     <?php echo esc_html('Connecte au dashboard. Site ID: ' . (string) $options['site_id']); ?>
                 </p>
+                <?php if (!empty($options['last_ping_at'])) { ?>
+                    <p>
+                        <?php echo esc_html('Dernier test dashboard OK: ' . date_i18n(get_option('date_format') . ' ' . get_option('time_format'), absint($options['last_ping_at']))); ?>
+                    </p>
+                <?php } ?>
+                <?php if (!empty($options['ping_error'])) { ?>
+                    <p>
+                        <?php echo esc_html('Dernier test dashboard echoue: ' . (string) $options['ping_error']); ?>
+                    </p>
+                <?php } ?>
             </div>
             <?php
             return;
@@ -222,6 +238,19 @@ final class Gripp_Site_Analytics_Plugin {
             <input type="hidden" name="action" value="gripp_site_analytics_register" />
             <?php wp_nonce_field('gripp_site_analytics_register'); ?>
             <?php submit_button('Connecter maintenant', 'secondary', 'submit', false); ?>
+        </form>
+        <?php
+    }
+
+    public function render_dashboard_ping_form(array $options): void {
+        if (!$this->is_configured($options)) {
+            return;
+        }
+        ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 12px;">
+            <input type="hidden" name="action" value="gripp_site_analytics_ping" />
+            <?php wp_nonce_field('gripp_site_analytics_ping'); ?>
+            <?php submit_button('Tester la connexion dashboard', 'secondary', 'submit', false); ?>
         </form>
         <?php
     }
@@ -283,6 +312,24 @@ final class Gripp_Site_Analytics_Plugin {
         exit;
     }
 
+    public function handle_dashboard_ping(): void {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('Acces refuse.', 'gripp-site-analytics'));
+        }
+
+        check_admin_referer('gripp_site_analytics_ping');
+
+        $options = $this->options();
+        if ($this->is_configured($options)) {
+            $this->ping_dashboard($options);
+        } else {
+            $this->store_ping_error($options, 'Plugin non connecte.');
+        }
+
+        wp_safe_redirect(admin_url('options-general.php?page=gripp-site-analytics'));
+        exit;
+    }
+
     private function register_site_with_dashboard(array $options, string $dashboard_url): bool {
         $options['registration_attempted_at'] = time();
         $options['registration_error'] = '';
@@ -317,7 +364,7 @@ final class Gripp_Site_Analytics_Plugin {
         $raw_body = (string) wp_remote_retrieve_body($response);
         $body = json_decode($raw_body, true);
         if ($status < 200 || $status >= 300 || !is_array($body)) {
-            $this->store_registration_error($options, $this->format_registration_http_error($response, $body, $raw_body));
+            $this->store_registration_error($options, $this->format_dashboard_http_error($response, $body, $raw_body));
             return false;
         }
 
@@ -334,6 +381,51 @@ final class Gripp_Site_Analytics_Plugin {
         $options['site_id'] = $site_id;
         $options['site_token'] = $site_token;
         $options['registration_error'] = '';
+        $options['ping_error'] = '';
+        update_option(self::OPTION_NAME, $options, false);
+
+        return true;
+    }
+
+    private function ping_dashboard(array $options): bool {
+        $dashboard_url = self::dashboard_url_from_options($options);
+        $site_id = sanitize_key($options['site_id'] ?? '');
+        $site_token = sanitize_text_field($options['site_token'] ?? '');
+        if (!$dashboard_url || !$site_id || !$site_token) {
+            $this->store_ping_error($options, 'Configuration dashboard incomplete.');
+            return false;
+        }
+
+        $response = wp_remote_post(self::build_dashboard_endpoint_url($dashboard_url, self::PING_PATH), [
+            'timeout' => 8,
+            'redirection' => 0,
+            'headers' => [
+                'Accept' => 'application/json',
+                'Authorization' => 'Bearer ' . $site_token,
+                'Content-Type' => 'application/json'
+            ],
+            'body' => wp_json_encode([
+                'site_id' => $site_id,
+                'site_url' => home_url('/'),
+                'plugin_version' => self::VERSION
+            ])
+        ]);
+
+        if (is_wp_error($response)) {
+            $this->store_ping_error($options, $response->get_error_message());
+            return false;
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        $raw_body = (string) wp_remote_retrieve_body($response);
+        $body = json_decode($raw_body, true);
+        if ($status < 200 || $status >= 300 || !is_array($body) || empty($body['ok'])) {
+            $this->store_ping_error($options, $this->format_dashboard_http_error($response, $body, $raw_body));
+            return false;
+        }
+
+        $options['last_ping_at'] = time();
+        $options['ping_error'] = '';
         update_option(self::OPTION_NAME, $options, false);
 
         return true;
@@ -344,7 +436,12 @@ final class Gripp_Site_Analytics_Plugin {
         update_option(self::OPTION_NAME, $options, false);
     }
 
-    private function format_registration_http_error($response, $body, string $raw_body): string {
+    private function store_ping_error(array $options, string $message): void {
+        $options['ping_error'] = sanitize_text_field($message);
+        update_option(self::OPTION_NAME, $options, false);
+    }
+
+    private function format_dashboard_http_error($response, $body, string $raw_body): string {
         $status = (int) wp_remote_retrieve_response_code($response);
         $message = (string) wp_remote_retrieve_response_message($response);
         if (is_array($body) && !empty($body['error'])) {
@@ -366,13 +463,7 @@ final class Gripp_Site_Analytics_Plugin {
 
     public function enqueue_tracker(): void {
         $options = $this->options();
-        if (is_admin() || is_feed() || is_robots()) {
-            return;
-        }
-        if (is_user_logged_in() && empty($options['track_logged_in'])) {
-            return;
-        }
-        if (!$this->is_configured($options)) {
+        if (!$this->should_track_current_request($options)) {
             return;
         }
 
@@ -383,10 +474,28 @@ final class Gripp_Site_Analytics_Plugin {
             self::VERSION,
             true
         );
-        wp_localize_script(self::SCRIPT_HANDLE, 'grippSiteAnalytics', [
-            'restUrl' => esc_url_raw(rest_url(self::REST_NAMESPACE . self::REST_ROUTE)),
-            'publicKey' => (string) $options['public_key']
-        ]);
+        wp_add_inline_script(self::SCRIPT_HANDLE, $this->tracker_config_script($options), 'before');
+    }
+
+    public function render_tracker_fallback(): void {
+        $options = $this->options();
+        if (!$this->should_track_current_request($options)) {
+            return;
+        }
+
+        $script_src = plugin_dir_url(__FILE__) . 'assets/tracker.js?ver=' . rawurlencode(self::VERSION);
+        ?>
+        <script id="gripp-site-analytics-fallback">
+        <?php echo $this->tracker_config_script($options); ?>
+        if (!window.__grippSiteAnalyticsLoaded) {
+          var grippSiteAnalyticsScript = document.createElement('script');
+          grippSiteAnalyticsScript.src = <?php echo wp_json_encode($script_src); ?>;
+          grippSiteAnalyticsScript.async = true;
+          grippSiteAnalyticsScript.setAttribute('data-gripp-site-analytics', 'fallback');
+          document.head.appendChild(grippSiteAnalyticsScript);
+        }
+        </script>
+        <?php
     }
 
     public function handle_event(WP_REST_Request $request) {
@@ -458,6 +567,33 @@ final class Gripp_Site_Analytics_Plugin {
 
     private function is_configured(array $options): bool {
         return !empty($options['endpoint_url']) && !empty($options['site_id']) && !empty($options['site_token']) && !empty($options['public_key']);
+    }
+
+    private function should_track_current_request(array $options): bool {
+        if (is_admin() || is_feed() || is_robots()) {
+            return false;
+        }
+        if (is_user_logged_in() && empty($options['track_logged_in'])) {
+            return false;
+        }
+
+        return $this->is_configured($options);
+    }
+
+    private function tracker_config(array $options): array {
+        return [
+            'restUrl' => esc_url_raw(rest_url(self::REST_NAMESPACE . self::REST_ROUTE)),
+            'publicKey' => (string) $options['public_key']
+        ];
+    }
+
+    private function tracker_config_script(array $options): string {
+        $config = wp_json_encode($this->tracker_config($options));
+        if (!is_string($config)) {
+            $config = '{}';
+        }
+
+        return 'window.grippSiteAnalytics = ' . $config . ';';
     }
 
     private static function apply_default_dashboard_options(array $options): array {

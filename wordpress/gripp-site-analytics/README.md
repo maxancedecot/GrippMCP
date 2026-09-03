@@ -8,6 +8,8 @@ Plugin WordPress qui collecte les performances d'un site et les envoie vers le d
 2. Activer `Gripp Site Analytics` dans WordPress.
 3. Ouvrir `Reglages > Gripp Analytics`.
 4. Si l'URL du dashboard n'est pas deja preconfiguree dans le ZIP, renseigner uniquement l'URL du dashboard, par exemple `https://votre-domaine.vercel.app`.
+5. Cliquer sur `Tester la connexion dashboard` quand le statut est connecte.
+6. Vider le cache WordPress/hebergeur/CDN apres installation ou mise a jour du plugin.
 
 Le plugin s'enregistre ensuite automatiquement. Le dashboard genere le Site ID et le token, puis le plugin les stocke dans WordPress.
 
