@@ -37,7 +37,6 @@ const conversionRateFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1
 });
-const likelyThankYouMarkers = ["thankyou", "thank-you", "thank_you", "thanks", "bedankt", "dankjewel", "dank-je", "dank-u", "danku", "merci"];
 
 export function CvrMappingBoard({
   sites,
@@ -81,8 +80,14 @@ export function CvrMappingBoard({
   const activeLinks = useMemo(() => links.filter((link) => link.siteId === activeSiteId), [activeSiteId, links]);
   const sourceLinkedPaths = useMemo(() => new Set(activeLinks.map((link) => link.sourcePath)), [activeLinks]);
   const targetLinkedPaths = useMemo(() => new Set(activeLinks.map((link) => link.targetPath)), [activeLinks]);
-  const sourcePages = useMemo(() => sortSourcePages(activePages, sourceLinkedPaths), [activePages, sourceLinkedPaths]);
-  const targetPages = useMemo(() => sortTargetPages(activePages, targetLinkedPaths), [activePages, targetLinkedPaths]);
+  const sourcePages = useMemo(
+    () => sortSourcePages(activePages.filter((page) => !isThankYouPage(page) || sourceLinkedPaths.has(page.path)), sourceLinkedPaths),
+    [activePages, sourceLinkedPaths]
+  );
+  const targetPages = useMemo(
+    () => sortTargetPages(activePages.filter((page) => isThankYouPage(page) || targetLinkedPaths.has(page.path)), targetLinkedPaths),
+    [activePages, targetLinkedPaths]
+  );
   const selectedLinkExists = activeLinks.some((link) => link.sourcePath === selectedSourcePath && link.targetPath === selectedTargetPath);
   const samePathSelected = Boolean(selectedSourcePath && selectedTargetPath && selectedSourcePath === selectedTargetPath);
   const canCreate = Boolean(activeSiteId && selectedSourcePath && selectedTargetPath && !selectedLinkExists && !samePathSelected);
@@ -214,7 +219,7 @@ export function CvrMappingBoard({
           selectedPath={selectedTargetPath}
           linkedPaths={targetLinkedPaths}
           otherSelectedPath={selectedSourcePath}
-          emptyLabel="Geen thank-you pagina's gemeten."
+          emptyLabel="Geen thank-you of bedankt pagina's gemeten."
           refMap={targetRefs}
           onSelect={setSelectedTargetPath}
         />
@@ -364,7 +369,6 @@ function sortSourcePages(pages: SiteAnalyticsCvrPageCandidate[], linkedPaths: Se
   return [...pages].sort((left, right) => {
     return (
       Number(linkedPaths.has(right.path)) - Number(linkedPaths.has(left.path)) ||
-      Number(isLikelyThankYouPath(left.path)) - Number(isLikelyThankYouPath(right.path)) ||
       right.uniqueVisitors - left.uniqueVisitors ||
       right.pageViews - left.pageViews ||
       left.path.localeCompare(right.path)
@@ -376,7 +380,6 @@ function sortTargetPages(pages: SiteAnalyticsCvrPageCandidate[], linkedPaths: Se
   return [...pages].sort((left, right) => {
     return (
       Number(linkedPaths.has(right.path)) - Number(linkedPaths.has(left.path)) ||
-      Number(isLikelyThankYouPath(right.path)) - Number(isLikelyThankYouPath(left.path)) ||
       right.uniqueVisitors - left.uniqueVisitors ||
       right.pageViews - left.pageViews ||
       left.path.localeCompare(right.path)
@@ -384,9 +387,14 @@ function sortTargetPages(pages: SiteAnalyticsCvrPageCandidate[], linkedPaths: Se
   });
 }
 
-function isLikelyThankYouPath(path: string) {
+function isThankYouPage(page: SiteAnalyticsCvrPageCandidate) {
+  return isThankYouPath(page.path);
+}
+
+function isThankYouPath(path: string) {
   const normalized = path.toLowerCase();
-  return likelyThankYouMarkers.some((marker) => normalized.includes(marker));
+  const spaced = normalized.replace(/%20|[_-]+/g, " ");
+  return normalized.includes("thankyou") || spaced.includes("thank you") || normalized.includes("bedankt");
 }
 
 function refForPath(refMap: MutableRefObject<Map<string, HTMLButtonElement>>, path: string) {

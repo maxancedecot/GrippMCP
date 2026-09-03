@@ -133,6 +133,14 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
     assert.equal(siteBeforeLink?.cvrSourceVisitors, 0);
     assert.equal(siteBeforeLink?.cvrConversionVisitors, 0);
     assert.equal(siteBeforeLink?.conversionRatePercent, 0);
+    await assert.rejects(
+      upsertSiteAnalyticsCvrLink({
+        site_id: siteId,
+        source_path: "/projectnaam1",
+        target_path: "/gewone-confirmatie"
+      }),
+      /doelpagina moet thankyou/
+    );
 
     const link = await upsertSiteAnalyticsCvrLink(
       {

@@ -657,7 +657,7 @@ function cvrLinkFromRecord(value: unknown): SiteAnalyticsCvrLink | null {
   const sourcePath = normalizePagePath(stringFrom(record.sourcePath ?? record.source_path));
   const targetPath = normalizePagePath(stringFrom(record.targetPath ?? record.target_path));
   const id = normalizeString(record.id, 80) || cvrLinkId(siteId, sourcePath, targetPath);
-  if (!siteId || !sourcePath || !targetPath || sourcePath === targetPath) {
+  if (!siteId || !sourcePath || !targetPath || sourcePath === targetPath || !isCvrThankYouPath(targetPath)) {
     return null;
   }
 
@@ -708,6 +708,9 @@ function normalizeSiteAnalyticsCvrLink(payload: unknown) {
   }
   if (sourcePath === targetPath) {
     throw new Error("Bron- en doelpagina moeten verschillend zijn.");
+  }
+  if (!isCvrThankYouPath(targetPath)) {
+    throw new Error("De doelpagina moet thankyou, thank-you, thank you of bedankt in het pad bevatten.");
   }
 
   return {
@@ -1123,7 +1126,7 @@ function createDemoSiteAnalyticsDashboardData(
     { siteId: "shop", siteName: "WordPress-shop", path: "/project-shop", title: "Project shop", uniqueVisitors: 530, pageViews: 790 },
     { siteId: "shop", siteName: "WordPress-shop", path: "/thankyou-offerte", title: "Thankyou offerte", uniqueVisitors: 63, pageViews: 84 },
     { siteId: "blog", siteName: "Contentblog", path: "/project-content", title: "Project content", uniqueVisitors: 412, pageViews: 590 },
-    { siteId: "blog", siteName: "Contentblog", path: "/merci", title: "Merci", uniqueVisitors: 74, pageViews: 96 }
+    { siteId: "blog", siteName: "Contentblog", path: "/bedankt-content", title: "Bedankt content", uniqueVisitors: 74, pageViews: 96 }
   ].filter((row) => !selectedSiteId || row.siteId === selectedSiteId);
   const cvrLinks: SiteAnalyticsCvrLinkRow[] = [
     {
@@ -1159,15 +1162,15 @@ function createDemoSiteAnalyticsDashboardData(
       updatedAt: now.toISOString()
     },
     {
-      id: "demo-blog-content-merci",
+      id: "demo-blog-content-bedankt",
       siteId: "blog",
       siteName: "Contentblog",
       sourcePath: "/project-content",
       sourceTitle: "Project content",
       sourceVisitors: 412,
       sourcePageViews: 590,
-      targetPath: "/merci",
-      targetTitle: "Merci",
+      targetPath: "/bedankt-content",
+      targetTitle: "Bedankt content",
       targetVisitors: 74,
       targetPageViews: 96,
       conversionRatePercent: conversionRatePercent(74, 412),
@@ -1374,6 +1377,12 @@ function pageAccumulatorKey(siteId: string, path: string) {
 
 function cvrLinkId(siteId: string, sourcePath: string, targetPath: string) {
   return createHash("sha256").update(`${siteId}:${sourcePath}:${targetPath}`).digest("hex").slice(0, 24);
+}
+
+function isCvrThankYouPath(path: string) {
+  const normalized = normalizePagePath(path).toLowerCase();
+  const spaced = normalized.replace(/%20|[_-]+/g, " ");
+  return normalized.includes("thankyou") || spaced.includes("thank you") || normalized.includes("bedankt");
 }
 
 function conversionRatePercent(conversions: number, sources: number) {
