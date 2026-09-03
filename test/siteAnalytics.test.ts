@@ -93,6 +93,7 @@ test("site analytics records page views, sessions, referrers, time, and scroll",
     assert.equal(page?.uniqueVisitors, 1);
     assert.equal(Math.round(page?.avgTimeOnPageSeconds ?? 0), 42);
     assert.equal(Math.round(page?.avgScrollPercent ?? 0), 80);
+    assert.equal(page?.path, "/about");
     assert.equal(referrer?.pageViews, 1);
     assert.equal(referrer?.sessions, 1);
   });
@@ -119,12 +120,22 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
         event_type: "page_view",
         visitor_id: visitor,
         session_id: `session-${visitor}`,
-        page_view_id: `page-view-bedankt-${visitor}`,
-        page_url: "https://example.com/andere-bedankt-slug",
-        path: "/andere-bedankt-slug",
+        page_view_id: `page-view-bedankt-crollet-${visitor}`,
+        page_url: "https://example.com/bedankt-afspraak/?p_slug=crollet",
+        path: "/bedankt-afspraak/",
         page_title: "Bedankt project"
       });
     }
+    await recordSiteAnalyticsEvent({
+      site_id: siteId,
+      event_type: "page_view",
+      visitor_id: "visitor-project-3",
+      session_id: "session-visitor-project-3",
+      page_view_id: "page-view-bedankt-andere",
+      page_url: "https://example.com/bedankt-afspraak/?p_slug=ander-project",
+      path: "/bedankt-afspraak/",
+      page_title: "Bedankt ander project"
+    });
 
     const dashboardBeforeLink = await getSiteAnalyticsDashboardData({ days: 7, siteId });
     const siteBeforeLink = dashboardBeforeLink.sites.find((row) => row.id === siteId);
@@ -137,7 +148,7 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
       upsertSiteAnalyticsCvrLink({
         site_id: siteId,
         source_path: "/projectnaam1",
-        target_path: "/gewone-confirmatie"
+        target_path: "/gewone-confirmatie?p_slug=crollet"
       }),
       /doelpagina moet thankyou/
     );
@@ -146,7 +157,7 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
       {
         site_id: siteId,
         source_path: "/projectnaam1",
-        target_path: "/andere-bedankt-slug"
+        target_path: "https://example.com/bedankt-afspraak/?p_slug=crollet"
       },
       { now: new Date("2026-01-01T10:00:00.000Z") }
     );
@@ -162,7 +173,8 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
     assert.equal(cvrLink?.targetVisitors, 2);
     assert.equal(Math.round((cvrLink?.conversionRatePercent ?? 0) * 10) / 10, 66.7);
     assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/projectnaam1"), true);
-    assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/andere-bedankt-slug"), true);
+    assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/bedankt-afspraak/?p_slug=crollet"), true);
+    assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/bedankt-afspraak/?p_slug=ander-project"), true);
     assert.equal(await deleteSiteAnalyticsCvrLink(link.id), true);
   });
 });

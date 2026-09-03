@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Gripp Site Analytics
  * Description: Collecte les performances d'un site WordPress et les envoie vers le dashboard central.
- * Version: 0.2.3
+ * Version: 0.2.4
  * Author: Gripp MCP
  * License: GPL-2.0-or-later
  */
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class Gripp_Site_Analytics_Plugin {
-    private const VERSION = '0.2.3';
+    private const VERSION = '0.2.4';
     private const OPTION_NAME = 'gripp_site_analytics_options';
     private const REST_NAMESPACE = 'gripp-site-analytics/v1';
     private const REST_ROUTE = '/event';

@@ -83,7 +83,7 @@
       session_id: sessionId,
       page_view_id: pageViewId,
       page_url: window.location.href,
-      path: window.location.pathname || "/",
+      path: currentPagePath(),
       page_title: document.title || "",
       referrer: document.referrer || "",
       source: traffic.source,
@@ -110,6 +110,10 @@
       },
       body: body
     }).catch(function () {});
+  }
+
+  function currentPagePath() {
+    return (window.location.pathname || "/") + (window.location.search || "");
   }
 
   function trafficSource() {

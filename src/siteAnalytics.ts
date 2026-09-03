@@ -232,6 +232,27 @@ const MAX_DASHBOARD_DAYS = 90;
 const MAX_STRING_LENGTH = 300;
 const MAX_TITLE_LENGTH = 180;
 const MAX_ENGAGEMENT_DELTA_MS = 60 * 60 * 1000;
+const IGNORED_PAGE_QUERY_PARAMS = new Set([
+  "_ga",
+  "_gl",
+  "fbclid",
+  "gbraid",
+  "gclid",
+  "li_fat_id",
+  "mc_cid",
+  "mc_eid",
+  "msclkid",
+  "ttclid",
+  "utm_campaign",
+  "utm_content",
+  "utm_creative_format",
+  "utm_id",
+  "utm_marketing_tactic",
+  "utm_medium",
+  "utm_source",
+  "utm_term",
+  "wbraid"
+]);
 
 const dateFormatter = new Intl.DateTimeFormat("nl-BE", {
   day: "2-digit",
@@ -733,7 +754,7 @@ function normalizeSiteAnalyticsEvent(payload: unknown): NormalizedSiteAnalyticsE
   const sessionId = normalizeString(record.session_id ?? record.sessionId, 200);
   const pageViewId = normalizeString(record.page_view_id ?? record.pageViewId, 200);
   const pageUrl = normalizeString(record.page_url ?? record.pageUrl, 800);
-  const pageKey = normalizePagePath(stringFrom(record.path) || pageUrl);
+  const pageKey = normalizeEventPagePath(stringFrom(record.path), pageUrl);
 
   if (!siteId || !type || !visitorId || !sessionId || !pageViewId || !pageKey) {
     throw new Error("Payload analytique incomplet.");
@@ -1325,6 +1346,15 @@ function publicSiteFromConfiguredSite(site: SiteAnalyticsConfiguredSite): SiteAn
   return publicSite;
 }
 
+function normalizeEventPagePath(path: string | undefined, pageUrl: string) {
+  const normalizedPageUrl = normalizePagePath(pageUrl);
+  if (normalizedPageUrl) {
+    return normalizedPageUrl;
+  }
+
+  return normalizePagePath(path);
+}
+
 function normalizePagePath(value: string | undefined) {
   const raw = normalizeString(value, 800);
   if (!raw) {
@@ -1332,14 +1362,40 @@ function normalizePagePath(value: string | undefined) {
   }
 
   try {
-    const url = new URL(raw);
-    return url.pathname || "/";
+    const url = new URL(raw, "https://site-analytics.local");
+    const pathname = (url.pathname || "/").replace(/\/{2,}/g, "/");
+    const query = normalizedPageQuery(url.searchParams);
+    return query ? `${pathname}?${query}` : pathname;
   } catch {
-    const withoutHash = raw.split("#")[0] ?? "";
-    const withoutQuery = withoutHash.split("?")[0] ?? "";
-    const path = withoutQuery.startsWith("/") ? withoutQuery : `/${withoutQuery}`;
-    return path.replace(/\/{2,}/g, "/") || "/";
+    return "";
   }
+}
+
+function normalizedPageQuery(params: URLSearchParams) {
+  const entries: Array<[string, string]> = [];
+
+  params.forEach((value, key) => {
+    const normalizedKey = normalizeString(key, 80);
+    if (!normalizedKey || IGNORED_PAGE_QUERY_PARAMS.has(normalizedKey.toLowerCase())) {
+      return;
+    }
+
+    const normalizedValue = normalizeString(value, 240);
+    if (!normalizedValue) {
+      return;
+    }
+
+    entries.push([normalizedKey, normalizedValue]);
+  });
+
+  entries.sort((left, right) => left[0].localeCompare(right[0]) || left[1].localeCompare(right[1]));
+
+  const query = new URLSearchParams();
+  for (const [key, value] of entries) {
+    query.append(key, value);
+  }
+
+  return query.toString();
 }
 
 function normalizeReferrerSource(source: string | undefined, medium: string | undefined, referrer: string | undefined, pageUrl: string) {
