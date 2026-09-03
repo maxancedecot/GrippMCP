@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation.js";
 import {
+  deleteSiteAnalyticsCvrLink,
   getPublicSiteAnalyticsSites,
   getSiteAnalyticsDashboardData,
+  upsertSiteAnalyticsCvrLink,
   type SiteAnalyticsDailyRow,
   type SiteAnalyticsMetricSummary,
   type SiteAnalyticsPageRow,
@@ -11,6 +15,7 @@ import {
 } from "../../src/siteAnalytics.js";
 import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.js";
 import { DashboardFrame } from "../dashboard-frame.js";
+import { CvrMappingBoard } from "./cvr-mapping-board.js";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +25,7 @@ export const metadata: Metadata = {
 };
 
 type DashboardSearchParams = Record<string, string | string[] | undefined>;
+type DashboardFormValue = FormDataEntryValue | null;
 
 const periodOptions = [7, 30, 90];
 
@@ -32,6 +38,28 @@ const conversionRateFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1
 });
+
+async function createCvrLinkAction(formData: FormData) {
+  "use server";
+
+  const returnTo = dashboardReturnPathFromForm(formData.get("return_to"));
+  await upsertSiteAnalyticsCvrLink({
+    site_id: stringFromFormValue(formData.get("site_id")),
+    source_path: stringFromFormValue(formData.get("source_path")),
+    target_path: stringFromFormValue(formData.get("target_path"))
+  });
+  revalidatePath("/dashboard");
+  redirect(returnTo);
+}
+
+async function deleteCvrLinkAction(formData: FormData) {
+  "use server";
+
+  const returnTo = dashboardReturnPathFromForm(formData.get("return_to"));
+  await deleteSiteAnalyticsCvrLink(stringFromFormValue(formData.get("link_id")));
+  revalidatePath("/dashboard");
+  redirect(returnTo);
+}
 
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
@@ -127,6 +155,16 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           </div>
           <SiteSummaryTable rows={dashboard.sites} />
         </section>
+
+        <CvrMappingBoard
+          sites={siteTabs}
+          pages={dashboard.cvrPageCandidates}
+          links={dashboard.cvrLinks}
+          selectedSiteId={dashboard.selectedSiteId}
+          returnTo={dashboardHref({ params, days: dashboard.period.days, siteId: dashboard.selectedSiteId })}
+          createAction={createCvrLinkAction}
+          deleteAction={deleteCvrLinkAction}
+        />
 
         <section className="site-analytics-detail-grid">
           <article className="panel">
@@ -270,8 +308,17 @@ function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
               <td>{formatNumber(site.uniqueVisitors)}</td>
               <td>{formatNumber(site.sessions)}</td>
               <td>
-                <span className="row-title">{formatConversionRate(site.conversionRatePercent)}%</span>
-                <span className="cell-muted">{formatNumber(site.thankYouVisitors)} conversies / {formatNumber(site.homepageVisitors)} home</span>
+                {site.cvrLinkCount > 0 ? (
+                  <>
+                    <span className="row-title">{formatConversionRate(site.conversionRatePercent)}%</span>
+                    <span className="cell-muted">{formatNumber(site.cvrConversionVisitors)} conversies / {formatNumber(site.cvrSourceVisitors)} projectbezoekers</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="row-title">-</span>
+                    <span className="cell-muted">Geen CVR-koppeling</span>
+                  </>
+                )}
               </td>
               <td>{formatDuration(site.avgTimeOnPageSeconds)}</td>
               <td>
@@ -402,6 +449,24 @@ function paramValues(value: string | string[] | undefined) {
   }
 
   return value ? [value] : [];
+}
+
+function stringFromFormValue(value: DashboardFormValue) {
+  return typeof value === "string" ? value : "";
+}
+
+function dashboardReturnPathFromForm(value: DashboardFormValue) {
+  const raw = stringFromFormValue(value);
+  if (!raw.startsWith("/dashboard")) {
+    return "/dashboard";
+  }
+
+  try {
+    const url = new URL(raw, "https://dashboard.local");
+    return url.pathname === "/dashboard" ? `${url.pathname}${url.search}` : "/dashboard";
+  } catch {
+    return "/dashboard";
+  }
 }
 
 function formatNumber(value: number) {

@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   deleteRegisteredSiteAnalyticsSite,
+  deleteSiteAnalyticsCvrLink,
   getConfiguredSiteAnalyticsSites,
   getPublicSiteAnalyticsSites,
   getSiteAnalyticsDashboardData,
   registerSiteAnalyticsSite,
   recordSiteAnalyticsEvent,
+  upsertSiteAnalyticsCvrLink,
   verifySiteAnalyticsToken
 } from "../src/siteAnalytics.js";
 
@@ -96,66 +98,64 @@ test("site analytics records page views, sessions, referrers, time, and scroll",
   });
 });
 
-test("site analytics calculates site CVR from thank-you visitors over homepage visitors", async () => {
+test("site analytics calculates CVR from linked project and thank-you pages", async () => {
   const siteId = `site-analytics-cvr-${Date.now()}`;
   await withSiteAnalyticsEnv(siteId, "event-token", async () => {
-    await recordSiteAnalyticsEvent({
-      site_id: siteId,
-      event_type: "page_view",
-      visitor_id: "visitor-home-1",
-      session_id: "session-home-1",
-      page_view_id: "page-view-home-1",
-      page_url: "https://example.com/",
-      path: "/",
-      page_title: "Home"
-    });
-    await recordSiteAnalyticsEvent({
-      site_id: siteId,
-      event_type: "page_view",
-      visitor_id: "visitor-home-2",
-      session_id: "session-home-2",
-      page_view_id: "page-view-home-2",
-      page_url: "https://example.com/",
-      path: "/",
-      page_title: "Home"
-    });
-    await recordSiteAnalyticsEvent({
-      site_id: siteId,
-      event_type: "page_view",
-      visitor_id: "visitor-home-3",
-      session_id: "session-home-3",
-      page_view_id: "page-view-home-3",
-      page_url: "https://example.com/",
-      path: "/",
-      page_title: "Home"
-    });
-    await recordSiteAnalyticsEvent({
-      site_id: siteId,
-      event_type: "page_view",
-      visitor_id: "visitor-home-1",
-      session_id: "session-home-1",
-      page_view_id: "page-view-thankyou-1",
-      page_url: "https://example.com/thankyou",
-      path: "/thankyou",
-      page_title: "Thank you"
-    });
-    await recordSiteAnalyticsEvent({
-      site_id: siteId,
-      event_type: "page_view",
-      visitor_id: "visitor-home-2",
-      session_id: "session-home-2",
-      page_view_id: "page-view-bedankt-1",
-      page_url: "https://example.com/bedankt-aanvraag",
-      path: "/bedankt-aanvraag",
-      page_title: "Bedankt"
-    });
+    for (const visitor of ["visitor-project-1", "visitor-project-2", "visitor-project-3"]) {
+      await recordSiteAnalyticsEvent({
+        site_id: siteId,
+        event_type: "page_view",
+        visitor_id: visitor,
+        session_id: `session-${visitor}`,
+        page_view_id: `page-view-${visitor}`,
+        page_url: "https://example.com/projectnaam1",
+        path: "/projectnaam1",
+        page_title: "Projectnaam 1"
+      });
+    }
+    for (const visitor of ["visitor-project-1", "visitor-project-2"]) {
+      await recordSiteAnalyticsEvent({
+        site_id: siteId,
+        event_type: "page_view",
+        visitor_id: visitor,
+        session_id: `session-${visitor}`,
+        page_view_id: `page-view-bedankt-${visitor}`,
+        page_url: "https://example.com/andere-bedankt-slug",
+        path: "/andere-bedankt-slug",
+        page_title: "Bedankt project"
+      });
+    }
 
+    const dashboardBeforeLink = await getSiteAnalyticsDashboardData({ days: 7, siteId });
+    const siteBeforeLink = dashboardBeforeLink.sites.find((row) => row.id === siteId);
+
+    assert.equal(siteBeforeLink?.cvrLinkCount, 0);
+    assert.equal(siteBeforeLink?.cvrSourceVisitors, 0);
+    assert.equal(siteBeforeLink?.cvrConversionVisitors, 0);
+    assert.equal(siteBeforeLink?.conversionRatePercent, 0);
+
+    const link = await upsertSiteAnalyticsCvrLink(
+      {
+        site_id: siteId,
+        source_path: "/projectnaam1",
+        target_path: "/andere-bedankt-slug"
+      },
+      { now: new Date("2026-01-01T10:00:00.000Z") }
+    );
     const dashboard = await getSiteAnalyticsDashboardData({ days: 7, siteId });
     const site = dashboard.sites.find((row) => row.id === siteId);
+    const cvrLink = dashboard.cvrLinks.find((row) => row.id === link.id);
 
-    assert.equal(site?.homepageVisitors, 3);
-    assert.equal(site?.thankYouVisitors, 2);
+    assert.equal(site?.cvrLinkCount, 1);
+    assert.equal(site?.cvrSourceVisitors, 3);
+    assert.equal(site?.cvrConversionVisitors, 2);
     assert.equal(Math.round((site?.conversionRatePercent ?? 0) * 10) / 10, 66.7);
+    assert.equal(cvrLink?.sourceVisitors, 3);
+    assert.equal(cvrLink?.targetVisitors, 2);
+    assert.equal(Math.round((cvrLink?.conversionRatePercent ?? 0) * 10) / 10, 66.7);
+    assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/projectnaam1"), true);
+    assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/andere-bedankt-slug"), true);
+    assert.equal(await deleteSiteAnalyticsCvrLink(link.id), true);
   });
 });
 
