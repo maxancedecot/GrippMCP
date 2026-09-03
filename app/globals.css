@@ -1517,6 +1517,39 @@ td .inline-bar {
   align-items: center;
 }
 
+.cvr-mapping-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: none;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cvr-mapping-toggle:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 4px;
+}
+
+.cvr-mapping-toggle-icon {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.cvr-mapping-toggle-icon--open {
+  transform: rotate(45deg);
+}
+
 .cvr-trend-toolbar {
   display: flex;
   flex-wrap: wrap;

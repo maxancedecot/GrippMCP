@@ -72,6 +72,7 @@ export function CvrMappingBoard({
   const siteOptions = useMemo(() => siteOptionsFromData(sites, pages, links), [sites, pages, links]);
   const defaultSiteId = selectedSiteId ?? siteOptions[0]?.id ?? "";
   const [activeSiteId, setActiveSiteId] = useState(defaultSiteId);
+  const [isOpen, setIsOpen] = useState(false);
   const [selectedSourcePath, setSelectedSourcePath] = useState("");
   const [selectedTargetPath, setSelectedTargetPath] = useState("");
   const [sourceInputValue, setSourceInputValue] = useState("");
@@ -212,10 +213,18 @@ export function CvrMappingBoard({
   return (
     <section className="panel cvr-mapping-panel">
       <div className="panel-heading cvr-mapping-heading">
-        <div>
-          <p className="eyebrow">CVR</p>
-          <h2>CVR-koppelingen</h2>
-        </div>
+        <button
+          type="button"
+          className="cvr-mapping-toggle"
+          onClick={() => setIsOpen((open) => !open)}
+          aria-expanded={isOpen}
+        >
+          <span className={`cvr-mapping-toggle-icon ${isOpen ? "cvr-mapping-toggle-icon--open" : ""}`} aria-hidden="true" />
+          <span>
+            <p className="eyebrow">CVR</p>
+            <h2>CVR-koppelingen</h2>
+          </span>
+        </button>
         <div className="cvr-mapping-toolbar">
           {siteOptions.length > 1 ? (
             <label className="cvr-site-field">
@@ -235,82 +244,84 @@ export function CvrMappingBoard({
         </div>
       </div>
 
-      <div className="cvr-link-board" ref={boardRef}>
-        <svg className="cvr-link-lines" width="100%" height="100%" aria-hidden="true">
-          {linePaths.map((line) => (
-            <path key={line.key} className={line.preview ? "cvr-link-line cvr-link-line--preview" : "cvr-link-line"} d={line.d} />
-          ))}
-        </svg>
+      {isOpen ? (
+        <>
+          <div className="cvr-link-board" ref={boardRef}>
+            <svg className="cvr-link-lines" width="100%" height="100%" aria-hidden="true">
+              {linePaths.map((line) => (
+                <path key={line.key} className={line.preview ? "cvr-link-line cvr-link-line--preview" : "cvr-link-line"} d={line.d} />
+              ))}
+            </svg>
 
-        <PageColumn
-          title="Projectpagina's"
-          pages={sourcePages}
-          selectedPath={selectedSourcePath}
-          linkedPaths={sourceLinkedPaths}
-          otherSelectedPath={selectedTargetPath}
-          emptyLabel="Geen projectpagina's gemeten."
-          refMap={sourceRefs}
-          onSelect={selectSourcePage}
-        />
-        <PageColumn
-          title="Thank-you pagina's"
-          pages={targetPages}
-          selectedPath={selectedTargetPath}
-          linkedPaths={targetLinkedPaths}
-          otherSelectedPath={selectedSourcePath}
-          emptyLabel="Geen thank-you of bedankt pagina's gemeten."
-          refMap={targetRefs}
-          onSelect={selectTargetPage}
-        />
-      </div>
-
-      <form action={createAction} className="cvr-action-bar">
-        <input type="hidden" name="site_id" value={activeSiteId} />
-        <input type="hidden" name="source_path" value={sourceInputValue} />
-        <input type="hidden" name="target_path" value={targetInputValue} />
-        <input type="hidden" name="source_title" value={sourceTitleValue} />
-        <input type="hidden" name="target_title" value={targetTitleValue} />
-        <input type="hidden" name="return_to" value={returnTo} />
-        <div className="cvr-manual-fields">
-          <label>
-            <span>Project-URL</span>
-            <input
-              type="text"
-              value={sourceInputValue}
-              placeholder="/projecten/crollet/"
-              onChange={(event) => {
-                setSourceInputValue(event.target.value);
-                setSelectedSourcePath(normalizeClientPagePath(event.target.value));
-              }}
+            <PageColumn
+              title="Projectpagina's"
+              pages={sourcePages}
+              selectedPath={selectedSourcePath}
+              linkedPaths={sourceLinkedPaths}
+              otherSelectedPath={selectedTargetPath}
+              emptyLabel="Geen projectpagina's gemeten."
+              refMap={sourceRefs}
+              onSelect={selectSourcePage}
             />
-          </label>
-          <label>
-            <span>Bedankpagina-URL</span>
-            <input
-              type="text"
-              value={targetInputValue}
-              placeholder="/bedankt-afspraak/?p_slug=crollet"
-              onChange={(event) => {
-                setTargetInputValue(event.target.value);
-                setSelectedTargetPath(normalizeClientPagePath(event.target.value));
-              }}
+            <PageColumn
+              title="Thank-you pagina's"
+              pages={targetPages}
+              selectedPath={selectedTargetPath}
+              linkedPaths={targetLinkedPaths}
+              otherSelectedPath={selectedSourcePath}
+              emptyLabel="Geen thank-you of bedankt pagina's gemeten."
+              refMap={targetRefs}
+              onSelect={selectTargetPage}
             />
-          </label>
-        </div>
-        <button className="cvr-save-button" type="submit" disabled={!canCreate}>
-          Koppeling opslaan
-        </button>
-      </form>
+          </div>
 
-      {samePathSelected ? <p className="cvr-form-note cvr-form-note--error">Kies twee verschillende pagina's.</p> : null}
-      {!targetLooksValid ? <p className="cvr-form-note cvr-form-note--error">Bedankpagina-URL moet thankyou of bedankt bevatten.</p> : null}
-      {selectedLinkExists ? <p className="cvr-form-note">Deze koppeling bestaat al.</p> : null}
+          <form action={createAction} className="cvr-action-bar">
+            <input type="hidden" name="site_id" value={activeSiteId} />
+            <input type="hidden" name="source_path" value={sourceInputValue} />
+            <input type="hidden" name="target_path" value={targetInputValue} />
+            <input type="hidden" name="source_title" value={sourceTitleValue} />
+            <input type="hidden" name="target_title" value={targetTitleValue} />
+            <input type="hidden" name="return_to" value={returnTo} />
+            <div className="cvr-manual-fields">
+              <label>
+                <span>Project-URL</span>
+                <input
+                  type="text"
+                  value={sourceInputValue}
+                  placeholder="/projecten/crollet/"
+                  onChange={(event) => {
+                    setSourceInputValue(event.target.value);
+                    setSelectedSourcePath(normalizeClientPagePath(event.target.value));
+                  }}
+                />
+              </label>
+              <label>
+                <span>Bedankpagina-URL</span>
+                <input
+                  type="text"
+                  value={targetInputValue}
+                  placeholder="/bedankt-afspraak/?p_slug=crollet"
+                  onChange={(event) => {
+                    setTargetInputValue(event.target.value);
+                    setSelectedTargetPath(normalizeClientPagePath(event.target.value));
+                  }}
+                />
+              </label>
+            </div>
+            <button className="cvr-save-button" type="submit" disabled={!canCreate}>
+              Koppeling opslaan
+            </button>
+          </form>
 
-      <div className="cvr-links-list">
-        {activeLinks.length === 0 ? (
-          <p className="empty-state">Geen CVR-koppelingen voor deze site.</p>
-        ) : (
-          activeLinks.map((link) => (
+          {samePathSelected ? <p className="cvr-form-note cvr-form-note--error">Kies twee verschillende pagina's.</p> : null}
+          {!targetLooksValid ? <p className="cvr-form-note cvr-form-note--error">Bedankpagina-URL moet thankyou of bedankt bevatten.</p> : null}
+          {selectedLinkExists ? <p className="cvr-form-note">Deze koppeling bestaat al.</p> : null}
+
+          <div className="cvr-links-list">
+            {activeLinks.length === 0 ? (
+              <p className="empty-state">Geen CVR-koppelingen voor deze site.</p>
+            ) : (
+              activeLinks.map((link) => (
             <div className="cvr-link-row" key={link.id}>
               <div>
                 <span className="row-title">{link.sourceTitle}</span>
@@ -333,9 +344,11 @@ export function CvrMappingBoard({
                 </button>
               </form>
             </div>
-          ))
-        )}
-      </div>
+              ))
+            )}
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
