@@ -374,7 +374,11 @@ export async function upsertSiteAnalyticsCvrLink(payload: unknown, options: { no
 
   const now = (options.now ?? new Date()).toISOString();
   const registry = await readSiteAnalyticsCvrLinkData();
-  const existingIndex = registry.links.findIndex((link) => link.id === normalizedLink.id);
+  const existingIndex = registry.links.findIndex(
+    (link) =>
+      link.id === normalizedLink.id ||
+      (link.siteId === normalizedLink.siteId && link.sourcePath === normalizedLink.sourcePath && link.targetPath === normalizedLink.targetPath)
+  );
   const existingLink = existingIndex >= 0 ? registry.links[existingIndex] : undefined;
   const link: SiteAnalyticsCvrLink = {
     id: normalizedLink.id,
@@ -576,9 +580,10 @@ async function readSiteAnalyticsRegistry(): Promise<SiteAnalyticsRegistryData> {
 async function readSiteAnalyticsCvrLinkData(): Promise<SiteAnalyticsCvrLinkData> {
   const cached = await readJsonCache<SiteAnalyticsCvrLinkData>(SITE_ANALYTICS_CVR_LINKS_CACHE_KEY);
   if (isSiteAnalyticsCvrLinkData(cached)) {
+    const links = cached.links.map(cvrLinkFromRecord).filter((link): link is SiteAnalyticsCvrLink => Boolean(link));
     return {
       version: SITE_ANALYTICS_VERSION,
-      links: cached.links.map(cvrLinkFromRecord).filter((link): link is SiteAnalyticsCvrLink => Boolean(link)),
+      links: dedupeCvrLinks(links),
       updatedAt: normalizeString(cached.updatedAt, 40) || undefined
     };
   }
@@ -587,6 +592,32 @@ async function readSiteAnalyticsCvrLinkData(): Promise<SiteAnalyticsCvrLinkData>
     version: SITE_ANALYTICS_VERSION,
     links: []
   };
+}
+
+function dedupeCvrLinks(links: SiteAnalyticsCvrLink[]): SiteAnalyticsCvrLink[] {
+  const merged = new Map<string, SiteAnalyticsCvrLink>();
+
+  for (const link of links) {
+    const key = `${link.siteId}:${link.sourcePath}:${link.targetPath}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, link);
+      continue;
+    }
+
+    merged.set(key, {
+      id: existing.updatedAt >= link.updatedAt ? existing.id : link.id,
+      siteId: link.siteId,
+      sourcePath: link.sourcePath,
+      targetPath: link.targetPath,
+      sourceTitle: existing.sourceTitle || link.sourceTitle,
+      targetTitle: existing.targetTitle || link.targetTitle,
+      createdAt: existing.createdAt < link.createdAt ? existing.createdAt : link.createdAt,
+      updatedAt: existing.updatedAt > link.updatedAt ? existing.updatedAt : link.updatedAt
+    });
+  }
+
+  return Array.from(merged.values());
 }
 
 function isSiteAnalyticsRegistryData(value: unknown): value is SiteAnalyticsRegistryData {
