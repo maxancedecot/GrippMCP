@@ -116,6 +116,8 @@ export function CvrMappingBoard({
   );
   const sourcePathValue = normalizeClientPagePath(sourceInputValue);
   const targetPathValue = normalizeClientPagePath(targetInputValue);
+  const sourceTitleValue = activePages.find((page) => page.path === sourcePathValue)?.title ?? "";
+  const targetTitleValue = activePages.find((page) => page.path === targetPathValue)?.title ?? "";
   const targetLooksValid = !targetInputValue.trim() || isThankYouPath(targetInputValue);
   const selectedLinkExists = activeLinks.some((link) => link.sourcePath === sourcePathValue && link.targetPath === targetPathValue);
   const samePathSelected = Boolean(sourcePathValue && targetPathValue && sourcePathValue === targetPathValue);
@@ -266,6 +268,8 @@ export function CvrMappingBoard({
         <input type="hidden" name="site_id" value={activeSiteId} />
         <input type="hidden" name="source_path" value={sourceInputValue} />
         <input type="hidden" name="target_path" value={targetInputValue} />
+        <input type="hidden" name="source_title" value={sourceTitleValue} />
+        <input type="hidden" name="target_title" value={targetTitleValue} />
         <input type="hidden" name="return_to" value={returnTo} />
         <div className="cvr-manual-fields">
           <label>

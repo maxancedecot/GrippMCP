@@ -45,7 +45,9 @@ async function createCvrLinkAction(formData: FormData) {
   await upsertSiteAnalyticsCvrLink({
     site_id: stringFromFormValue(formData.get("site_id")),
     source_path: stringFromFormValue(formData.get("source_path")),
-    target_path: stringFromFormValue(formData.get("target_path"))
+    target_path: stringFromFormValue(formData.get("target_path")),
+    source_title: stringFromFormValue(formData.get("source_title")),
+    target_title: stringFromFormValue(formData.get("target_title"))
   });
   revalidatePath("/dashboard");
   redirect(returnTo);
@@ -280,7 +282,7 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
 
   return (
     <div className="table-wrap">
-      <table className="site-analytics-table cvr-overview-table">
+      <table className="cvr-overview-table">
         <thead>
           <tr>
             <th>Projectpagina</th>

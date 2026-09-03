@@ -1446,17 +1446,10 @@ td .inline-bar {
   stroke: var(--blue);
 }
 
-.site-analytics-table {
-  min-width: 980px;
-}
-
-.cvr-overview-table {
-  min-width: 1120px;
-}
-
 .cvr-overview-table th:nth-child(2),
-.cvr-overview-table th:nth-child(3) {
-  width: 28%;
+.cvr-overview-table th:nth-child(3),
+.cvr-overview-table th:nth-child(4) {
+  width: 18%;
 }
 
 .path-link {
@@ -1483,10 +1476,6 @@ td .inline-bar {
   font-size: 18px;
   font-weight: 800;
   white-space: nowrap;
-}
-
-.site-analytics-page-table {
-  min-width: 840px;
 }
 
 .site-analytics-scroll-bar {

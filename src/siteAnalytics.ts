@@ -75,6 +75,8 @@ export type SiteAnalyticsCvrLink = {
   siteId: string;
   sourcePath: string;
   targetPath: string;
+  sourceTitle: string;
+  targetTitle: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -379,6 +381,8 @@ export async function upsertSiteAnalyticsCvrLink(payload: unknown, options: { no
     siteId: normalizedLink.siteId,
     sourcePath: normalizedLink.sourcePath,
     targetPath: normalizedLink.targetPath,
+    sourceTitle: normalizedLink.sourceTitle || existingLink?.sourceTitle || "",
+    targetTitle: normalizedLink.targetTitle || existingLink?.targetTitle || "",
     createdAt: existingLink?.createdAt ?? now,
     updatedAt: now
   };
@@ -679,6 +683,8 @@ function cvrLinkFromRecord(value: unknown): SiteAnalyticsCvrLink | null {
     siteId,
     sourcePath,
     targetPath,
+    sourceTitle: normalizeString(record.sourceTitle ?? record.source_title, MAX_TITLE_LENGTH),
+    targetTitle: normalizeString(record.targetTitle ?? record.target_title, MAX_TITLE_LENGTH),
     createdAt: normalizeString(record.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: normalizeString(record.updatedAt, 40) || new Date(0).toISOString()
   };
@@ -716,6 +722,8 @@ function normalizeSiteAnalyticsCvrLink(payload: unknown) {
   const siteId = normalizeIdentifier(stringFrom(record.site_id ?? record.siteId));
   const sourcePath = normalizePagePath(stringFrom(record.source_path ?? record.sourcePath));
   const targetPath = normalizePagePath(stringFrom(record.target_path ?? record.targetPath));
+  const sourceTitle = normalizeString(record.source_title ?? record.sourceTitle, MAX_TITLE_LENGTH);
+  const targetTitle = normalizeString(record.target_title ?? record.targetTitle, MAX_TITLE_LENGTH);
   if (!siteId || !sourcePath || !targetPath) {
     throw new Error("CVR-koppeling is onvolledig.");
   }
@@ -730,7 +738,9 @@ function normalizeSiteAnalyticsCvrLink(payload: unknown) {
     id: cvrLinkId(siteId, sourcePath, targetPath),
     siteId,
     sourcePath,
-    targetPath
+    targetPath,
+    sourceTitle,
+    targetTitle
   };
 }
 
@@ -998,10 +1008,10 @@ function cvrLinkRowFromLink(
   return {
     ...link,
     siteName: sitesById.get(link.siteId)?.name ?? link.siteId,
-    sourceTitle: sourcePage?.title || link.sourcePath,
+    sourceTitle: sourcePage?.title || link.sourceTitle || link.sourcePath,
     sourceVisitors,
     sourcePageViews: sourcePage?.pageViews ?? 0,
-    targetTitle: targetPage?.title || link.targetPath,
+    targetTitle: targetPage?.title || link.targetTitle || link.targetPath,
     targetVisitors,
     targetPageViews: targetPage?.pageViews ?? 0,
     conversionRatePercent: conversionRatePercent(targetVisitors, sourceVisitors)
