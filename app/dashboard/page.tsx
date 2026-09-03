@@ -25,7 +25,7 @@ export const metadata: Metadata = {
 type DashboardSearchParams = Record<string, string | string[] | undefined>;
 type DashboardFormValue = FormDataEntryValue | null;
 
-const periodOptions = [7, 30, 90];
+const periodOptions = [7, 14, 30, 90];
 
 const numberFormatter = new Intl.NumberFormat("nl-BE");
 const percentFormatter = new Intl.NumberFormat("nl-BE", {
@@ -74,6 +74,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   ]);
   const overviewCvrLinks = dashboard.cvrLinks;
   const siteTabs = configuredSites.length > 0 ? configuredSites : connectedDashboard.sites;
+  const totalCvrSourceVisitors = overviewCvrLinks.reduce((sum, link) => sum + link.sourceVisitors, 0);
+  const totalCvrConversionVisitors = overviewCvrLinks.reduce((sum, link) => sum + link.targetVisitors, 0);
+  const overallConversionRatePercent = totalCvrSourceVisitors > 0 ? (totalCvrConversionVisitors / totalCvrSourceVisitors) * 100 : 0;
 
   return (
     <DashboardFrame>
@@ -133,7 +136,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         </div>
 
         <section className="metric-grid site-analytics-metric-grid" aria-label="WordPress KPI's">
-          <MetricCard label="Weergaven" value={formatNumber(dashboard.totals.pageViews)} detail="Paginaweergaven" tone="good" />
+          <MetricCard label="CVR" value={`${formatConversionRate(overallConversionRatePercent)}%`} detail="Conversieratio" tone="good" />
           <MetricCard label="Bezoekers" value={formatNumber(dashboard.totals.uniqueVisitors)} detail="Unieke bezoekers" tone="blue" />
           <MetricCard label="Sessies" value={formatNumber(dashboard.totals.sessions)} detail="Unieke sessies" tone="neutral" />
           <MetricCard label="Gemiddelde tijd" value={formatDuration(dashboard.totals.avgTimeOnPageSeconds)} detail="Actieve tijd per weergave" tone="warning" />
