@@ -28,6 +28,10 @@ const percentFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 0
 });
+const conversionRateFormatter = new Intl.NumberFormat("nl-BE", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1
+});
 
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
@@ -250,6 +254,7 @@ function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
             <th>Weergaven</th>
             <th>Bezoekers</th>
             <th>Sessies</th>
+            <th>CVR</th>
             <th>Tijd</th>
             <th>Scroll</th>
           </tr>
@@ -264,6 +269,10 @@ function SiteSummaryTable({ rows }: { rows: SiteAnalyticsSiteSummary[] }) {
               <td>{formatNumber(site.pageViews)}</td>
               <td>{formatNumber(site.uniqueVisitors)}</td>
               <td>{formatNumber(site.sessions)}</td>
+              <td>
+                <span className="row-title">{formatConversionRate(site.conversionRatePercent)}%</span>
+                <span className="cell-muted">{formatNumber(site.thankYouVisitors)} conversies / {formatNumber(site.homepageVisitors)} home</span>
+              </td>
               <td>{formatDuration(site.avgTimeOnPageSeconds)}</td>
               <td>
                 <ScrollBar value={site.avgScrollPercent} />
@@ -401,6 +410,10 @@ function formatNumber(value: number) {
 
 function formatPercent(value: number) {
   return percentFormatter.format(Math.max(0, Math.min(100, value)));
+}
+
+function formatConversionRate(value: number) {
+  return conversionRateFormatter.format(Math.max(0, value));
 }
 
 function formatDuration(seconds: number) {

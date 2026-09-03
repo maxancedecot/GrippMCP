@@ -37,6 +37,9 @@ export type SiteAnalyticsMetricSummary = {
 
 export type SiteAnalyticsSiteSummary = SiteAnalyticsPublicSite &
   SiteAnalyticsMetricSummary & {
+    homepageVisitors: number;
+    thankYouVisitors: number;
+    conversionRatePercent: number;
     lastSeenAt?: string;
   };
 
@@ -155,6 +158,8 @@ type DashboardAccumulator = {
 
 type SiteAccumulator = DashboardAccumulator & {
   site: SiteAnalyticsPublicSite;
+  homepageVisitors: Set<string>;
+  thankYouVisitors: Set<string>;
   lastSeenAt?: string;
 };
 
@@ -187,6 +192,7 @@ const MAX_DASHBOARD_DAYS = 90;
 const MAX_STRING_LENGTH = 300;
 const MAX_TITLE_LENGTH = 180;
 const MAX_ENGAGEMENT_DELTA_MS = 60 * 60 * 1000;
+const THANK_YOU_PATH_MARKERS = ["thankyou", "thank-you", "thank_you", "thanks", "bedankt", "dankjewel", "dank-je", "dank-u", "danku", "merci"];
 
 const dateFormatter = new Intl.DateTimeFormat("nl-BE", {
   day: "2-digit",
@@ -336,10 +342,7 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
   const totals = emptyDashboardAccumulator();
 
   for (const site of siteList) {
-    siteAccumulators.set(site.id, {
-      ...emptyDashboardAccumulator(),
-      site
-    });
+    siteAccumulators.set(site.id, emptySiteAccumulator(site));
   }
 
   for (const date of dateKeys) {
@@ -663,10 +666,7 @@ function mergeDailySiteAnalyticsData(
   referrerAccumulators: Map<string, ReferrerAccumulator>,
   dailyAccumulators: Map<string, DailyAccumulator>
 ) {
-  const siteAccumulator = siteAccumulators.get(site.id) ?? {
-    ...emptyDashboardAccumulator(),
-    site
-  };
+  const siteAccumulator = siteAccumulators.get(site.id) ?? emptySiteAccumulator(site);
   const dailyAccumulator = dailyAccumulators.get(daily.date);
 
   totals.pageViews += daily.totals.pageViews;
@@ -692,6 +692,17 @@ function mergeDailySiteAnalyticsData(
   }
 
   for (const page of Object.values(daily.pages)) {
+    if (isHomepagePath(page.path)) {
+      for (const visitor of page.visitors) {
+        siteAccumulator.homepageVisitors.add(visitor);
+      }
+    }
+    if (isThankYouPagePath(page.path)) {
+      for (const visitor of page.visitors) {
+        siteAccumulator.thankYouVisitors.add(visitor);
+      }
+    }
+
     const key = `${site.id}:${page.path}`;
     const pageAccumulator = pageAccumulators.get(key) ?? {
       ...emptyDashboardAccumulator(),
@@ -747,9 +758,15 @@ function summaryFromAccumulator(accumulator: DashboardAccumulator): SiteAnalytic
 }
 
 function siteRowFromAccumulator(accumulator: SiteAccumulator): SiteAnalyticsSiteSummary {
+  const homepageVisitors = accumulator.homepageVisitors.size;
+  const thankYouVisitors = accumulator.thankYouVisitors.size;
+
   return {
     ...accumulator.site,
     ...summaryFromAccumulator(accumulator),
+    homepageVisitors,
+    thankYouVisitors,
+    conversionRatePercent: homepageVisitors > 0 ? (thankYouVisitors / homepageVisitors) * 100 : 0,
     lastSeenAt: accumulator.lastSeenAt
   };
 }
@@ -771,6 +788,15 @@ function emptyDashboardAccumulator(): DashboardAccumulator {
     sessions: new Set<string>(),
     engagementMs: 0,
     scrollSamples: []
+  };
+}
+
+function emptySiteAccumulator(site: SiteAnalyticsPublicSite): SiteAccumulator {
+  return {
+    ...emptyDashboardAccumulator(),
+    site,
+    homepageVisitors: new Set<string>(),
+    thankYouVisitors: new Set<string>()
   };
 }
 
@@ -820,6 +846,9 @@ function createDemoSiteAnalyticsDashboardData(
     sessions: Math.round(totalSessions / sites.length + index * 160),
     avgTimeOnPageSeconds: 52 + index * 9,
     avgScrollPercent: 61 + index * 7,
+    homepageVisitors: 780 + index * 90,
+    thankYouVisitors: 52 + index * 11,
+    conversionRatePercent: ((52 + index * 11) / (780 + index * 90)) * 100,
     lastSeenAt: now.toISOString()
   }));
 
@@ -982,6 +1011,20 @@ function normalizePagePath(value: string | undefined) {
     const path = withoutQuery.startsWith("/") ? withoutQuery : `/${withoutQuery}`;
     return path.replace(/\/{2,}/g, "/") || "/";
   }
+}
+
+function isHomepagePath(path: string) {
+  return canonicalAnalyticsPath(path) === "/";
+}
+
+function isThankYouPagePath(path: string) {
+  const canonicalPath = canonicalAnalyticsPath(path);
+  return THANK_YOU_PATH_MARKERS.some((marker) => canonicalPath.includes(marker));
+}
+
+function canonicalAnalyticsPath(path: string) {
+  const normalized = normalizePagePath(path).toLowerCase().replace(/\/+$/g, "");
+  return normalized || "/";
 }
 
 function normalizeReferrerSource(source: string | undefined, medium: string | undefined, referrer: string | undefined, pageUrl: string) {

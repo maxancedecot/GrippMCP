@@ -96,6 +96,69 @@ test("site analytics records page views, sessions, referrers, time, and scroll",
   });
 });
 
+test("site analytics calculates site CVR from thank-you visitors over homepage visitors", async () => {
+  const siteId = `site-analytics-cvr-${Date.now()}`;
+  await withSiteAnalyticsEnv(siteId, "event-token", async () => {
+    await recordSiteAnalyticsEvent({
+      site_id: siteId,
+      event_type: "page_view",
+      visitor_id: "visitor-home-1",
+      session_id: "session-home-1",
+      page_view_id: "page-view-home-1",
+      page_url: "https://example.com/",
+      path: "/",
+      page_title: "Home"
+    });
+    await recordSiteAnalyticsEvent({
+      site_id: siteId,
+      event_type: "page_view",
+      visitor_id: "visitor-home-2",
+      session_id: "session-home-2",
+      page_view_id: "page-view-home-2",
+      page_url: "https://example.com/",
+      path: "/",
+      page_title: "Home"
+    });
+    await recordSiteAnalyticsEvent({
+      site_id: siteId,
+      event_type: "page_view",
+      visitor_id: "visitor-home-3",
+      session_id: "session-home-3",
+      page_view_id: "page-view-home-3",
+      page_url: "https://example.com/",
+      path: "/",
+      page_title: "Home"
+    });
+    await recordSiteAnalyticsEvent({
+      site_id: siteId,
+      event_type: "page_view",
+      visitor_id: "visitor-home-1",
+      session_id: "session-home-1",
+      page_view_id: "page-view-thankyou-1",
+      page_url: "https://example.com/thankyou",
+      path: "/thankyou",
+      page_title: "Thank you"
+    });
+    await recordSiteAnalyticsEvent({
+      site_id: siteId,
+      event_type: "page_view",
+      visitor_id: "visitor-home-2",
+      session_id: "session-home-2",
+      page_view_id: "page-view-bedankt-1",
+      page_url: "https://example.com/bedankt-aanvraag",
+      path: "/bedankt-aanvraag",
+      page_title: "Bedankt"
+    });
+
+    const dashboard = await getSiteAnalyticsDashboardData({ days: 7, siteId });
+    const site = dashboard.sites.find((row) => row.id === siteId);
+
+    assert.equal(site?.homepageVisitors, 3);
+    assert.equal(site?.thankYouVisitors, 2);
+    assert.equal(Math.round((site?.conversionRatePercent ?? 0) * 10) / 10, 66.7);
+  });
+});
+
 async function withSiteAnalyticsEnv<T>(siteId: string, token: string, callback: () => T | Promise<T>): Promise<T> {
   const previousSites = process.env.SITE_ANALYTICS_SITES;
   const previousCacheStore = process.env.JSON_CACHE_STORE;
