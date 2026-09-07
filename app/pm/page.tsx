@@ -1319,10 +1319,29 @@ async function loadOptionalStripeCrmRevenue(issues: string[], period: Period) {
   try {
     return await fetchStripeCrmRevenueForPeriod(period);
   } catch (error) {
-    const issue = `CRM omzet via Stripe niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`;
+    const issue = stripeRevenueIssueMessage(error);
     issues.push(issue);
     return unavailableStripeCrmRevenue(period, undefined, issue);
   }
+}
+
+function stripeRevenueIssueMessage(error: unknown) {
+  const code = errorCode(error);
+  const message = sanitizeExternalErrorMessage(error instanceof Error ? error.message : "");
+  if (message) {
+    return `CRM omzet via Stripe niet geladen${code ? ` (${code})` : ""}: ${message}`;
+  }
+
+  return `CRM omzet via Stripe niet geladen${code ? ` (${code})` : ""}`;
+}
+
+function sanitizeExternalErrorMessage(value: string) {
+  return safeRefreshErrorMessage(
+    value
+      .replace(/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9_:-]+/g, (key) => `${key.slice(0, key.indexOf("_", key.indexOf("_") + 1) + 1)}...`)
+      .replace(/\bpk_(?:live|test)_[A-Za-z0-9_:-]+/g, (key) => `${key.slice(0, key.indexOf("_", key.indexOf("_") + 1) + 1)}...`)
+      .replace(/\bacct_[A-Za-z0-9_:-]+/g, "acct_...")
+  );
 }
 
 function liveSourceMessage(issues: string[]) {

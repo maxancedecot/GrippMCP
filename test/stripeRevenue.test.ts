@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { GrippMcpError } from "../src/errors.js";
 import { fetchStripeCrmRevenueForPeriod, summarizeStripeCrmRevenue, type StripeBalanceTransaction } from "../src/stripeRevenue.js";
 
 const period = {
@@ -134,6 +135,72 @@ test("fetchStripeCrmRevenueForPeriod returns an empty source when Stripe is not 
   assert.equal(result.ignoredCurrencyCount, 0);
   assert.deepEqual(result.availableCurrencies, []);
   assert.equal(result.source.mode, "not_configured");
+});
+
+test("fetchStripeCrmRevenueForPeriod returns unavailable for publishable Stripe keys without calling Stripe", async () => {
+  let called = false;
+  const result = await fetchStripeCrmRevenueForPeriod(period, {
+    secretKey: "pk_live_123",
+    fetchImpl: (async () => {
+      called = true;
+      return stripeListResponse({ data: [] });
+    }) as typeof fetch
+  });
+
+  assert.equal(called, false);
+  assert.equal(result.amount, 0);
+  assert.equal(result.source.mode, "unavailable");
+  assert.match(result.source.message, /publishable key/);
+});
+
+test("fetchStripeCrmRevenueForPeriod strips wrapping quotes from Stripe keys", async () => {
+  const calls: { init: RequestInit }[] = [];
+  await fetchStripeCrmRevenueForPeriod(period, {
+    secretKey: "\"sk_test_123\"",
+    fetchImpl: (async (_url: string, init: RequestInit) => {
+      calls.push({ init });
+      return stripeListResponse({ data: [] });
+    }) as typeof fetch
+  });
+
+  const headers = calls[0].init.headers as Record<string, string>;
+  assert.equal(headers.Authorization, "Bearer sk_test_123");
+});
+
+test("fetchStripeCrmRevenueForPeriod includes Stripe HTTP error details", async () => {
+  await assert.rejects(
+    fetchStripeCrmRevenueForPeriod(period, {
+      secretKey: "sk_test_bad",
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "api_key_invalid",
+              message: "Invalid API Key provided: sk_test_bad",
+              type: "invalid_request_error"
+            }
+          }),
+          {
+            status: 401,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )) as typeof fetch
+    }),
+    (error) => {
+      assert.equal(error instanceof GrippMcpError, true);
+      assert.equal((error as GrippMcpError).code, "stripe_http_error");
+      assert.equal((error as GrippMcpError).message, "Stripe API gaf HTTP 401: Invalid API Key provided: sk_test_bad");
+      assert.deepEqual((error as GrippMcpError).details, {
+        status: 401,
+        stripeErrorCode: "api_key_invalid",
+        stripeErrorMessage: "Invalid API Key provided: sk_test_bad",
+        stripeErrorType: "invalid_request_error"
+      });
+      return true;
+    }
+  );
 });
 
 function transaction(

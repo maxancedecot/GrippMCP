@@ -84,7 +84,7 @@ export async function fetchStripeCrmRevenueForPeriod(
   period: StripeCrmRevenuePeriod,
   options: StripeCrmRevenueOptions = {}
 ): Promise<StripeCrmRevenue> {
-  const secretKey = (options.secretKey ?? process.env.STRIPE_SECRET_KEY ?? "").trim();
+  const secretKey = normalizeStripeSecretKey(options.secretKey ?? process.env.STRIPE_SECRET_KEY);
   const currency = normalizeStripeCurrency(options.currency ?? process.env.PM_STRIPE_REVENUE_CURRENCY);
   if (!secretKey) {
     return emptyStripeCrmRevenue(period, {
@@ -92,6 +92,12 @@ export async function fetchStripeCrmRevenueForPeriod(
       mode: "not_configured",
       message: "Zet STRIPE_SECRET_KEY om CRM omzet via Stripe te tonen."
     });
+  }
+  if (isPublishableStripeKey(secretKey)) {
+    return unavailableStripeCrmRevenue(period, currency, "STRIPE_SECRET_KEY gebruikt een publishable key. Gebruik een Stripe secret key met prefix sk_live_ voor live omzet.");
+  }
+  if (!isSupportedStripeApiKey(secretKey)) {
+    return unavailableStripeCrmRevenue(period, currency, "STRIPE_SECRET_KEY heeft geen geldige Stripe secret key prefix. Gebruik sk_live_, sk_test_, rk_live_ of rk_test_.");
   }
 
   const headers: Record<string, string> = {
@@ -241,7 +247,13 @@ async function fetchStripeBalanceTransactionsForType({
     });
 
     if (!response.ok) {
-      throw new GrippMcpError("stripe_http_error", `Stripe API gaf HTTP ${response.status}: ${await stripeResponseMessage(response)}`);
+      const stripeError = await stripeResponseError(response);
+      throw new GrippMcpError("stripe_http_error", `Stripe API gaf HTTP ${response.status}: ${stripeError.message}`, {
+        status: response.status,
+        stripeErrorCode: stripeError.code,
+        stripeErrorMessage: stripeError.message,
+        stripeErrorType: stripeError.type
+      });
     }
 
     const payload = asRecord(await response.json());
@@ -370,6 +382,27 @@ function stripeSecretKeyMode(secretKey: string): StripeSecretKeyMode {
   return "configured";
 }
 
+function normalizeStripeSecretKey(value: string | undefined) {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === "\"" && last === "\"") || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1).trim();
+    }
+  }
+
+  return trimmed;
+}
+
+function isPublishableStripeKey(secretKey: string) {
+  return secretKey.startsWith("pk_live_") || secretKey.startsWith("pk_test_");
+}
+
+function isSupportedStripeApiKey(secretKey: string) {
+  return /^(sk|rk)_(live|test)_/.test(secretKey);
+}
+
 function monthBucketsForPeriod(period: StripeCrmRevenuePeriod): StripeCrmRevenueMonth[] {
   const start = parseDateKey(period.start);
   const end = parseDateKey(period.end);
@@ -437,15 +470,22 @@ function roundCurrency(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-async function stripeResponseMessage(response: Response) {
+async function stripeResponseError(response: Response) {
   const body = await response.text().catch(() => "");
   if (!body) {
-    return response.statusText;
+    return {
+      message: response.statusText || "Onbekende Stripe fout"
+    };
   }
 
   const parsed = safeJsonParse(body);
-  const message = stringFrom(asRecord(asRecord(parsed)?.error)?.message);
-  return message ?? body.slice(0, 180);
+  const error = asRecord(asRecord(parsed)?.error);
+  const message = stringFrom(error?.message);
+  return {
+    code: stringFrom(error?.code),
+    message: message ?? body.slice(0, 180),
+    type: stringFrom(error?.type)
+  };
 }
 
 function safeJsonParse(value: string) {
