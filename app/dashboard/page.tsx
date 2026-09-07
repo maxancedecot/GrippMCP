@@ -79,7 +79,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   const overallConversionRatePercent = totalCvrSourceVisitors > 0 ? (totalCvrConversionVisitors / totalCvrSourceVisitors) * 100 : 0;
 
   return (
-    <DashboardFrame>
+    <DashboardFrame showTopMenu={false}>
       <main className="dashboard-shell site-analytics-shell">
         <header className="dashboard-header">
           <div>
