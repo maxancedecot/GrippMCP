@@ -1468,9 +1468,7 @@ td .inline-bar {
   stroke: var(--good);
 }
 
-.cvr-overview-table th:nth-child(2),
-.cvr-overview-table th:nth-child(3),
-.cvr-overview-table th:nth-child(4) {
+.cvr-overview-table th:nth-child(n + 2) {
   width: 18%;
 }
 
@@ -1485,19 +1483,23 @@ td .inline-bar {
   text-underline-offset: 3px;
 }
 
-.cvr-overview-rate {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  border: 1px solid rgba(255, 196, 0, 0.32);
-  background: var(--good-soft);
-  clip-path: var(--clip-sm);
-  color: var(--good);
-  padding: 6px 10px;
+.cvr-overview-metric {
+  display: inline-grid;
+  gap: 2px;
+  min-width: 76px;
+}
+
+.cvr-overview-metric strong {
+  color: var(--ink);
   font-family: var(--font-display);
   font-size: 18px;
   font-weight: 800;
-  white-space: nowrap;
+}
+
+.cvr-overview-metric span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .site-analytics-scroll-bar {

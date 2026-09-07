@@ -1215,7 +1215,7 @@ function createDemoSiteAnalyticsDashboardData(
   const cvrPageCandidates = [
     { siteId: "studio", siteName: "Hoofdstudio", path: "/project-webdesign", title: "Project webdesign", uniqueVisitors: 420, pageViews: 642 },
     { siteId: "studio", siteName: "Hoofdstudio", path: "/project-seo", title: "Project SEO", uniqueVisitors: 360, pageViews: 510 },
-    { siteId: "studio", siteName: "Hoofdstudio", path: "/bedankt-aanvraag", title: "Bedankt aanvraag", uniqueVisitors: 52, pageViews: 68 },
+    { siteId: "studio", siteName: "Hoofdstudio", path: "/bedankt-afspraak", title: "Bedankt afspraak", uniqueVisitors: 52, pageViews: 68 },
     { siteId: "studio", siteName: "Hoofdstudio", path: "/thankyou-brochure", title: "Thankyou brochure", uniqueVisitors: 26, pageViews: 34 },
     { siteId: "shop", siteName: "WordPress-shop", path: "/project-shop", title: "Project shop", uniqueVisitors: 530, pageViews: 790 },
     { siteId: "shop", siteName: "WordPress-shop", path: "/thankyou-offerte", title: "Thankyou offerte", uniqueVisitors: 63, pageViews: 84 },
@@ -1224,15 +1224,15 @@ function createDemoSiteAnalyticsDashboardData(
   ].filter((row) => !selectedSiteId || row.siteId === selectedSiteId);
   const cvrLinks: SiteAnalyticsCvrLinkRow[] = [
     {
-      id: "demo-studio-webdesign-bedankt",
+      id: "demo-studio-webdesign-afspraak",
       siteId: "studio",
       siteName: "Hoofdstudio",
       sourcePath: "/project-webdesign",
       sourceTitle: "Project webdesign",
       sourceVisitors: 420,
       sourcePageViews: 642,
-      targetPath: "/bedankt-aanvraag",
-      targetTitle: "Bedankt aanvraag",
+      targetPath: "/bedankt-afspraak",
+      targetTitle: "Bedankt afspraak",
       targetVisitors: 52,
       targetPageViews: 68,
       conversionRatePercent: conversionRatePercent(52, 420),

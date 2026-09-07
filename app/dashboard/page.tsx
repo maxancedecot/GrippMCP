@@ -24,6 +24,21 @@ export const metadata: Metadata = {
 
 type DashboardSearchParams = Record<string, string | string[] | undefined>;
 type DashboardFormValue = FormDataEntryValue | null;
+type CvrOverviewColumn = "brochure" | "appointment";
+
+type CvrOverviewMetric = {
+  visitors: number;
+};
+
+type CvrOverviewRow = {
+  key: string;
+  siteName: string;
+  sourcePath: string;
+  sourceTitle: string;
+  sourceVisitors: number;
+  brochure: CvrOverviewMetric;
+  appointment: CvrOverviewMetric;
+};
 
 const periodOptions = [7, 14, 30, 90];
 
@@ -211,7 +226,9 @@ function MetricCard({
 }
 
 function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
-  if (rows.length === 0) {
+  const projectRows = cvrOverviewRowsFromLinks(rows);
+
+  if (projectRows.length === 0) {
     return <p className="empty-state">Geen projectpagina's gekoppeld aan bedankingspagina's.</p>;
   }
 
@@ -222,25 +239,26 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
           <tr>
             <th>Projectpagina</th>
             <th>Bezoekers</th>
-            <th>Conversion</th>
-            <th>CVR</th>
+            <th>Brochure</th>
+            <th>Afspraak</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((link) => {
+          {projectRows.map((row) => {
             return (
-              <tr key={link.id}>
+              <tr key={row.key}>
                 <td>
-                  <span className="row-title">{link.sourceTitle}</span>
+                  <span className="row-title">{row.sourceTitle}</span>
+                  <span className="cell-muted">{row.sourcePath}</span>
                 </td>
                 <td>
-                  <span className="row-title">{formatNumber(link.sourceVisitors)}</span>
+                  <span className="row-title">{formatNumber(row.sourceVisitors)}</span>
                 </td>
                 <td>
-                  <span className="row-title">{formatNumber(link.targetVisitors)}</span>
+                  <CvrOverviewMetricCell metric={row.brochure} sourceVisitors={row.sourceVisitors} />
                 </td>
                 <td>
-                  <span className="cvr-overview-rate">{formatConversionRate(link.conversionRatePercent)}%</span>
+                  <CvrOverviewMetricCell metric={row.appointment} sourceVisitors={row.sourceVisitors} />
                 </td>
               </tr>
             );
@@ -249,6 +267,66 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
       </table>
     </div>
   );
+}
+
+function CvrOverviewMetricCell({ metric, sourceVisitors }: { metric: CvrOverviewMetric; sourceVisitors: number }) {
+  const conversionRate = sourceVisitors > 0 ? (metric.visitors / sourceVisitors) * 100 : 0;
+
+  return (
+    <span className="cvr-overview-metric">
+      <strong>{formatNumber(metric.visitors)}</strong>
+      <span>{formatConversionRate(conversionRate)}%</span>
+    </span>
+  );
+}
+
+function cvrOverviewRowsFromLinks(links: SiteAnalyticsCvrLinkRow[]) {
+  const rowsBySource = new Map<string, CvrOverviewRow>();
+
+  for (const link of links) {
+    const key = `${link.siteId}:${link.sourcePath}`;
+    const row = rowsBySource.get(key) ?? {
+      key,
+      siteName: link.siteName,
+      sourcePath: link.sourcePath,
+      sourceTitle: link.sourceTitle,
+      sourceVisitors: 0,
+      brochure: emptyCvrOverviewMetric(),
+      appointment: emptyCvrOverviewMetric()
+    };
+    const column = cvrOverviewColumnFromLink(link);
+
+    row.sourceVisitors = Math.max(row.sourceVisitors, link.sourceVisitors);
+    row[column].visitors += link.targetVisitors;
+    rowsBySource.set(key, row);
+  }
+
+  return Array.from(rowsBySource.values()).sort((left, right) => {
+    return (
+      left.siteName.localeCompare(right.siteName) ||
+      right.sourceVisitors - left.sourceVisitors ||
+      left.sourceTitle.localeCompare(right.sourceTitle) ||
+      left.sourcePath.localeCompare(right.sourcePath)
+    );
+  });
+}
+
+function cvrOverviewColumnFromLink(link: SiteAnalyticsCvrLinkRow): CvrOverviewColumn {
+  const target = normalizeCvrTargetText(`${link.targetPath} ${link.targetTitle}`);
+  return target.includes("brochure") ? "brochure" : "appointment";
+}
+
+function emptyCvrOverviewMetric(): CvrOverviewMetric {
+  return {
+    visitors: 0
+  };
+}
+
+function normalizeCvrTargetText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }
 
 function ReferrerTable({ rows, totals }: { rows: SiteAnalyticsReferrerRow[]; totals: SiteAnalyticsMetricSummary }) {
