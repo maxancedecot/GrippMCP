@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import { GrippClient } from "../../src/grippClient.js";
 import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
+import { demoStripeCrmRevenue, fetchStripeCrmRevenueForPeriod, unavailableStripeCrmRevenue, type StripeCrmRevenue } from "../../src/stripeRevenue.js";
 import type { JsonValue } from "../../src/types.js";
 import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.js";
 import { DashboardFrame } from "../dashboard-frame.js";
@@ -132,6 +133,7 @@ type PmDashboardData = {
   employeeBillabilitySummary: BillabilitySummary;
   source: DashboardSource;
   revenue: number;
+  crmRevenue: StripeCrmRevenue;
   loggedHours: number;
   billableHours: number;
   unbillableLoggedHours: number;
@@ -177,6 +179,7 @@ const MAX_ABSENCE_REQUEST_PAGES = 80;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const INVOICE_REVENUE_SERIES_LABEL = "Verkoopfacturen";
+const CRM_REVENUE_SERIES_LABEL = "CRM omzet";
 const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
@@ -188,7 +191,7 @@ const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overure
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
-const PM_DASHBOARD_CACHE_VERSION = 4;
+const PM_DASHBOARD_CACHE_VERSION = 5;
 const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
@@ -247,10 +250,11 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
       {dashboard.source.message ? <p className={dataNoticeClassName(dashboard.source)}>{dashboard.source.message}</p> : null}
 
       <section className="metric-grid pm-metric-grid" aria-label="Kerncijfers management">
-        <MetricCard href="#pm-revenue-detail" label="Omzet dit jaar" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
+        <MetricCard href="#pm-revenue-detail" label="Omzet Gripp" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
+        <MetricCard href="#pm-revenue-detail" label="CRM omzet" value={formatCurrency(dashboard.crmRevenue.amount)} detail={crmRevenueMetricDetail(dashboard.crmRevenue)} tone="neutral" />
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
-        <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
-        <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Omzet gedeeld door billable uren" tone="warning" />
+        <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Gripp omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
+        <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Gripp omzet gedeeld door billable uren" tone="warning" />
       </section>
 
       <section className="panel pm-detail-panel" id="pm-billability-detail" tabIndex={-1}>
@@ -355,10 +359,11 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
           </div>
           <div className="panel-actions">
             <span className="panel-total panel-total--invoice">{INVOICE_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.revenue)}</span>
+            <span className="panel-total panel-total--crm">{CRM_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.crmRevenue.amount)}</span>
           </div>
         </div>
 
-        <RevenueLineChart rows={dashboard.revenueByMonth} />
+        <RevenueLineChart rows={dashboard.revenueByMonth} crmRows={dashboard.crmRevenue.byMonth} />
       </section>
 
       <section className="panel pm-detail-panel" id="pm-revenue-per-billable-hour-detail" tabIndex={-1}>
@@ -414,6 +419,17 @@ function MetricCard({
       {content}
     </article>
   );
+}
+
+function crmRevenueMetricDetail(crmRevenue: StripeCrmRevenue) {
+  if (crmRevenue.source.mode === "live") {
+    return `${crmRevenue.transactionCount} Stripe mutaties; bruto betalingen min refunds`;
+  }
+  if (crmRevenue.source.mode === "demo") {
+    return "Demo uit Stripe balance transactions";
+  }
+
+  return crmRevenue.source.message;
 }
 
 function PmDashboardRefreshForm({ params }: { params: PmSearchParams }) {
@@ -588,13 +604,15 @@ function employeeBillabilityPeriodPresetLabel(preset: PmEmployeeBillabilityPerio
   return "Jaar";
 }
 
-function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
+function RevenueLineChart({ rows, crmRows }: { rows: MonthRevenue[]; crmRows: MonthRevenue[] }) {
   const width = Math.max(720, rows.length * 112);
   const height = 300;
   const padding = { top: 26, right: 30, bottom: 48, left: 78 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const values = rows.map((row) => row.revenue);
+  const crmRevenueByMonth = new Map(crmRows.map((row) => [row.key, row.revenue]));
+  const crmValues = rows.map((row) => crmRevenueByMonth.get(row.key) ?? 0);
+  const values = rows.flatMap((row, index) => [row.revenue, crmValues[index]]);
   const rawMaximum = Math.max(0, ...values);
   const minimum = Math.min(0, ...values);
   const maximum = rawMaximum === minimum ? rawMaximum + 1 : rawMaximum;
@@ -602,7 +620,9 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
   const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
   const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
   const chartPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.revenue) }));
+  const crmChartPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(crmValues[index]) }));
   const invoiceLinePath = smoothLinePath(chartPoints);
+  const crmLinePath = smoothLinePath(crmChartPoints);
   const invoiceAreaPath = smoothAreaPath(chartPoints, yFor(0));
   const gridTicks = Array.from({ length: 5 }, (_, index) => {
     const value = maximum - (range * index) / 4;
@@ -615,11 +635,19 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
     <div className="revenue-line-chart">
       <div className="revenue-line-legend" aria-hidden="true">
         <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />{INVOICE_REVENUE_SERIES_LABEL}</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--crm" />{CRM_REVENUE_SERIES_LABEL}</span>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Omzet per maand: ${rows.map((row) => `${row.label} ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}`).join(", ")}`}
+        aria-label={`Omzet per maand: ${rows
+          .map(
+            (row, index) =>
+              `${row.label} ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)} en ${CRM_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(
+                crmValues[index]
+              )}`
+          )
+          .join(", ")}`}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" x2="0" y1={padding.top} y2={height - padding.bottom} gradientUnits="userSpaceOnUse">
@@ -639,16 +667,23 @@ function RevenueLineChart({ rows }: { rows: MonthRevenue[] }) {
         <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
         {rows.length > 1 ? <path className="revenue-line-area revenue-line-area--invoice" d={invoiceAreaPath} fill={`url(#${gradientId})`} /> : null}
         {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--invoice" d={invoiceLinePath} /> : null}
+        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--crm" d={crmLinePath} /> : null}
         {rows.map((row, index) => {
           const { x, y: invoiceY } = chartPoints[index];
+          const { y: crmY } = crmChartPoints[index];
           const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
           const valueY = invoiceY < padding.top + 24 ? invoiceY + 22 : invoiceY - 12;
+          const crmValueY = crmY < padding.top + 24 ? crmY + 22 : crmY - 12;
 
           return (
             <g key={row.key}>
-              <title>{`${row.label}: ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)}`}</title>
+              <title>{`${row.label}: ${INVOICE_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(row.revenue)} en ${CRM_REVENUE_SERIES_LABEL.toLowerCase()} ${formatCurrency(
+                crmValues[index]
+              )}`}</title>
               <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={invoiceY} r="4" />
+              <circle className="revenue-line-point revenue-line-point--crm" cx={x} cy={crmY} r="4" />
               <text className="revenue-line-value revenue-line-value--invoice" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
+              <text className="revenue-line-value revenue-line-value--crm" x={x} y={crmValueY} textAnchor={anchor}>{formatCurrency(crmValues[index])}</text>
               <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
             </g>
           );
@@ -899,9 +934,13 @@ async function loadFreshPmDashboardData(
   const dataPeriod = mergePeriods(period, employeeBillabilityPeriod);
   const client = new GrippClient();
   const issues: string[] = [];
-  const [invoices, hours] = await Promise.all([
+  const crmRevenuePromise = process.env.STRIPE_SECRET_KEY?.trim()
+    ? optionalData(issues, "CRM omzet via Stripe", unavailableStripeCrmRevenue(period), () => fetchStripeCrmRevenueForPeriod(period))
+    : fetchStripeCrmRevenueForPeriod(period);
+  const [invoices, hours, crmRevenue] = await Promise.all([
     optionalData(issues, "verkoopfacturen", [], () => fetchInvoicesForPeriod(client, period)),
-    requiredData("uren", () => fetchHoursForPeriod(client, dataPeriod))
+    requiredData("uren", () => fetchHoursForPeriod(client, dataPeriod)),
+    crmRevenuePromise
   ]);
   const [employees, fetchedAbsenceRequestLines, fetchedAbsenceRequests, calendarItems] = await Promise.all([
     optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
@@ -952,6 +991,7 @@ async function loadFreshPmDashboardData(
 
   const dashboard = buildPmDashboardData(
     invoices,
+    crmRevenue,
     yearHours,
     billabilitySources,
     {
@@ -1209,6 +1249,7 @@ function buildDemoPmDashboardData(period: Period, employeeBillabilityPeriod: Emp
 
   return buildPmDashboardData(
     createDemoInvoices(period),
+    demoStripeCrmRevenue(period),
     recordsForPeriod(scopedHours, period),
     billabilitySources,
     scopedCapacitySources,
@@ -1809,6 +1850,7 @@ function pagedGetParams(filters: JsonValue[], orderings: JsonValue[], page: numb
 
 function buildPmDashboardData(
   invoices: JsonRecord[],
+  crmRevenue: StripeCrmRevenue,
   hours: JsonRecord[],
   billabilitySources: BillabilitySources,
   capacitySources: CapacitySources,
@@ -1917,6 +1959,7 @@ function buildPmDashboardData(
     employeeBillabilitySummary,
     source,
     revenue,
+    crmRevenue,
     loggedHours,
     billableHours,
     unbillableLoggedHours: Math.max(0, loggedHours - billableHours),

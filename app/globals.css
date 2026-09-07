@@ -659,6 +659,10 @@ select {
   margin-bottom: 14px;
 }
 
+.pm-metric-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .metric-card,
 .panel {
   border: 1px solid var(--border);
@@ -842,6 +846,7 @@ select {
 }
 
 .panel-total--invoice,
+.panel-total--crm,
 .panel-total--billable,
 .panel-total--billability,
 .panel-total--goal {
@@ -851,6 +856,7 @@ select {
 }
 
 .panel-total--invoice::before,
+.panel-total--crm::before,
 .panel-total--billable::before,
 .panel-total--billability::before,
 .panel-total--goal::before {
@@ -862,6 +868,10 @@ select {
 }
 
 .panel-total--billable::before {
+  background: var(--billable);
+}
+
+.panel-total--crm::before {
   background: var(--billable);
 }
 
@@ -1114,6 +1124,10 @@ select {
   border-color: var(--blue);
 }
 
+.revenue-line-legend-dot--crm {
+  border-color: var(--billable);
+}
+
 .revenue-line-chart svg {
   display: block;
   width: 100%;
@@ -1176,6 +1190,10 @@ select {
   stroke: var(--neutral);
 }
 
+.revenue-line-path--crm {
+  stroke: var(--billable);
+}
+
 .revenue-line-area {
   pointer-events: none;
 }
@@ -1215,6 +1233,10 @@ select {
 
 .revenue-line-point--calendar-hour {
   stroke: var(--neutral);
+}
+
+.revenue-line-point--crm {
+  stroke: var(--billable);
 }
 
 .revenue-line-value {
@@ -2510,6 +2532,12 @@ td .inline-bar {
 
   .cvr-link-result {
     justify-items: start;
+  }
+}
+
+@media (max-width: 1280px) and (min-width: 981px) {
+  .pm-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

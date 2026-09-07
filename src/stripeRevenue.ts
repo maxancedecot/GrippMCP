@@ -1,0 +1,413 @@
+import { GrippMcpError } from "./errors.js";
+
+export type StripeCrmRevenuePeriod = {
+  start: string;
+  end: string;
+};
+
+export type StripeCrmRevenueMonth = {
+  key: string;
+  label: string;
+  revenue: number;
+};
+
+export type StripeCrmRevenueSourceMode = "live" | "not_configured" | "unavailable" | "demo";
+
+export type StripeCrmRevenue = {
+  amount: number;
+  transactionCount: number;
+  currency: string;
+  source: {
+    mode: StripeCrmRevenueSourceMode;
+    message: string;
+  };
+  byMonth: StripeCrmRevenueMonth[];
+};
+
+export type StripeCrmRevenueOptions = {
+  secretKey?: string;
+  accountId?: string;
+  currency?: string;
+  fetchImpl?: FetchLike;
+};
+
+type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
+
+export type StripeBalanceTransaction = {
+  id: string;
+  amount: number;
+  created: number;
+  currency: string;
+  type: string;
+  reportingCategory?: string;
+};
+
+const STRIPE_BALANCE_TRANSACTIONS_URL = "https://api.stripe.com/v1/balance_transactions";
+const STRIPE_BALANCE_TRANSACTION_LIMIT = 100;
+const STRIPE_BALANCE_TRANSACTION_MAX_PAGES_PER_TYPE = 100;
+const STRIPE_REVENUE_TRANSACTION_TYPES = [
+  "charge",
+  "payment",
+  "refund",
+  "payment_refund",
+  "payment_failure_refund",
+  "payment_reversal",
+  "refund_failure"
+] as const;
+const STRIPE_REVENUE_REVERSAL_TYPES = new Set(["payment_reversal", "refund_failure"]);
+const STRIPE_REVENUE_REPORTING_CATEGORIES = new Set(["charge", "refund", "partial_capture_reversal", "charge_failure"]);
+const DEFAULT_STRIPE_REVENUE_CURRENCY = "eur";
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  "bif",
+  "clp",
+  "djf",
+  "gnf",
+  "jpy",
+  "kmf",
+  "krw",
+  "mga",
+  "pyg",
+  "rwf",
+  "ugx",
+  "vnd",
+  "vuv",
+  "xaf",
+  "xof",
+  "xpf"
+]);
+
+export async function fetchStripeCrmRevenueForPeriod(
+  period: StripeCrmRevenuePeriod,
+  options: StripeCrmRevenueOptions = {}
+): Promise<StripeCrmRevenue> {
+  const secretKey = (options.secretKey ?? process.env.STRIPE_SECRET_KEY ?? "").trim();
+  const currency = normalizeStripeCurrency(options.currency ?? process.env.PM_STRIPE_REVENUE_CURRENCY);
+  if (!secretKey) {
+    return emptyStripeCrmRevenue(period, {
+      currency,
+      mode: "not_configured",
+      message: "Zet STRIPE_SECRET_KEY om CRM omzet via Stripe te tonen."
+    });
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${secretKey}`
+  };
+  const accountId = (options.accountId ?? process.env.PM_STRIPE_ACCOUNT_ID ?? "").trim();
+  if (accountId) {
+    headers["Stripe-Account"] = accountId;
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const transactions: StripeBalanceTransaction[] = [];
+  for (const type of STRIPE_REVENUE_TRANSACTION_TYPES) {
+    transactions.push(
+      ...(await fetchStripeBalanceTransactionsForType({
+        period,
+        currency,
+        type,
+        headers,
+        fetchImpl
+      }))
+    );
+  }
+
+  return summarizeStripeCrmRevenue(transactions, period, currency, {
+    mode: "live",
+    message: "CRM omzet geladen via Stripe balance transactions."
+  });
+}
+
+export function unavailableStripeCrmRevenue(period: StripeCrmRevenuePeriod, currency?: string): StripeCrmRevenue {
+  return emptyStripeCrmRevenue(period, {
+    currency: normalizeStripeCurrency(currency ?? process.env.PM_STRIPE_REVENUE_CURRENCY),
+    mode: "unavailable",
+    message: "CRM omzet via Stripe kon niet worden geladen."
+  });
+}
+
+export function demoStripeCrmRevenue(period: StripeCrmRevenuePeriod): StripeCrmRevenue {
+  const byMonth = monthBucketsForPeriod(period).map((bucket, index) => ({
+    ...bucket,
+    revenue: [4200, 4800, 5100, 4550, 5750, 6100][index % 6]
+  }));
+
+  return {
+    amount: roundCurrency(byMonth.reduce((total, month) => total + month.revenue, 0)),
+    transactionCount: byMonth.length,
+    currency: DEFAULT_STRIPE_REVENUE_CURRENCY,
+    source: {
+      mode: "demo",
+      message: "Demo CRM omzet via Stripe."
+    },
+    byMonth
+  };
+}
+
+export function summarizeStripeCrmRevenue(
+  transactions: StripeBalanceTransaction[],
+  period: StripeCrmRevenuePeriod,
+  currency = DEFAULT_STRIPE_REVENUE_CURRENCY,
+  source: StripeCrmRevenue["source"] = {
+    mode: "live",
+    message: "CRM omzet geladen via Stripe balance transactions."
+  }
+): StripeCrmRevenue {
+  const normalizedCurrency = normalizeStripeCurrency(currency);
+  const divisor = minorUnitDivisor(normalizedCurrency);
+  const revenueByMonth = new Map(monthBucketsForPeriod(period).map((bucket) => [bucket.key, 0]));
+  let amount = 0;
+  let transactionCount = 0;
+
+  for (const transaction of transactions) {
+    if (!isStripeRevenueTransaction(transaction) || transaction.currency !== normalizedCurrency) {
+      continue;
+    }
+
+    const date = dateKeyFromUnixSeconds(transaction.created);
+    if (!date || date < period.start || date > period.end) {
+      continue;
+    }
+
+    const monthKey = date.slice(0, 7);
+    if (!revenueByMonth.has(monthKey)) {
+      continue;
+    }
+
+    const value = transaction.amount / divisor;
+    amount += value;
+    transactionCount += 1;
+    revenueByMonth.set(monthKey, (revenueByMonth.get(monthKey) ?? 0) + value);
+  }
+
+  return {
+    amount: roundCurrency(amount),
+    transactionCount,
+    currency: normalizedCurrency,
+    source,
+    byMonth: monthBucketsForPeriod(period).map((bucket) => ({
+      ...bucket,
+      revenue: roundCurrency(revenueByMonth.get(bucket.key) ?? 0)
+    }))
+  };
+}
+
+async function fetchStripeBalanceTransactionsForType({
+  period,
+  currency,
+  type,
+  headers,
+  fetchImpl
+}: {
+  period: StripeCrmRevenuePeriod;
+  currency: string;
+  type: (typeof STRIPE_REVENUE_TRANSACTION_TYPES)[number];
+  headers: Record<string, string>;
+  fetchImpl: FetchLike;
+}) {
+  const transactions: StripeBalanceTransaction[] = [];
+  let startingAfter: string | undefined;
+
+  for (let page = 0; page < STRIPE_BALANCE_TRANSACTION_MAX_PAGES_PER_TYPE; page += 1) {
+    const response = await fetchImpl(stripeBalanceTransactionsUrl(period, currency, type, startingAfter), {
+      method: "GET",
+      headers,
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      throw new GrippMcpError("stripe_http_error", `Stripe API gaf HTTP ${response.status}: ${await stripeResponseMessage(response)}`);
+    }
+
+    const payload = asRecord(await response.json());
+    if (!payload || !Array.isArray(payload.data)) {
+      throw new GrippMcpError("stripe_invalid_response", "Stripe API gaf geen geldige balance transaction lijst terug.");
+    }
+
+    const pageTransactions = payload.data.map(toStripeBalanceTransaction).filter((transaction): transaction is StripeBalanceTransaction => Boolean(transaction));
+    transactions.push(...pageTransactions);
+
+    if (payload.has_more !== true) {
+      return transactions;
+    }
+
+    startingAfter = pageTransactions.at(-1)?.id;
+    if (!startingAfter) {
+      throw new GrippMcpError("stripe_invalid_response", "Stripe paginatie bevat geen laatste transaction id.");
+    }
+  }
+
+  throw new GrippMcpError("stripe_pagination_limit", "Stripe balance transactions overschreden de ingestelde paginatielimiet.");
+}
+
+function stripeBalanceTransactionsUrl(
+  period: StripeCrmRevenuePeriod,
+  currency: string,
+  type: (typeof STRIPE_REVENUE_TRANSACTION_TYPES)[number],
+  startingAfter?: string
+) {
+  const params = new URLSearchParams({
+    limit: String(STRIPE_BALANCE_TRANSACTION_LIMIT),
+    type,
+    currency,
+    "created[gte]": String(unixSecondsForDateStart(period.start)),
+    "created[lte]": String(unixSecondsForDateEnd(period.end))
+  });
+  if (startingAfter) {
+    params.set("starting_after", startingAfter);
+  }
+
+  return `${STRIPE_BALANCE_TRANSACTIONS_URL}?${params.toString()}`;
+}
+
+function toStripeBalanceTransaction(value: unknown): StripeBalanceTransaction | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const id = stringFrom(record.id);
+  const amount = numberFrom(record.amount);
+  const created = numberFrom(record.created);
+  const currency = normalizeStripeCurrency(stringFrom(record.currency));
+  const type = stringFrom(record.type);
+  if (!id || amount === null || created === null || !type) {
+    return null;
+  }
+
+  return {
+    id,
+    amount,
+    created,
+    currency,
+    type,
+    reportingCategory: stringFrom(record.reporting_category)
+  };
+}
+
+function emptyStripeCrmRevenue(
+  period: StripeCrmRevenuePeriod,
+  {
+    currency,
+    mode,
+    message
+  }: {
+    currency: string;
+    mode: StripeCrmRevenueSourceMode;
+    message: string;
+  }
+): StripeCrmRevenue {
+  return {
+    amount: 0,
+    transactionCount: 0,
+    currency,
+    source: { mode, message },
+    byMonth: monthBucketsForPeriod(period)
+  };
+}
+
+function isStripeRevenueTransaction(transaction: StripeBalanceTransaction) {
+  if (!transaction.reportingCategory) {
+    return true;
+  }
+
+  return STRIPE_REVENUE_REPORTING_CATEGORIES.has(transaction.reportingCategory) || STRIPE_REVENUE_REVERSAL_TYPES.has(transaction.type);
+}
+
+function monthBucketsForPeriod(period: StripeCrmRevenuePeriod): StripeCrmRevenueMonth[] {
+  const start = parseDateKey(period.start);
+  const end = parseDateKey(period.end);
+  if (!start || !end) {
+    return [];
+  }
+
+  const buckets: StripeCrmRevenueMonth[] = [];
+  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  const stop = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+
+  while (cursor <= stop) {
+    buckets.push({
+      key: monthKey(cursor),
+      label: new Intl.DateTimeFormat("nl-NL", { month: "short", year: "numeric" }).format(cursor),
+      revenue: 0
+    });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  return buckets;
+}
+
+function normalizeStripeCurrency(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  return normalized?.match(/^[a-z]{3}$/) ? normalized : DEFAULT_STRIPE_REVENUE_CURRENCY;
+}
+
+function minorUnitDivisor(currency: string) {
+  return ZERO_DECIMAL_CURRENCIES.has(currency) ? 1 : 100;
+}
+
+function unixSecondsForDateStart(value: string) {
+  return Math.floor(Date.parse(`${value}T00:00:00.000Z`) / 1000);
+}
+
+function unixSecondsForDateEnd(value: string) {
+  return Math.floor(Date.parse(`${value}T23:59:59.999Z`) / 1000);
+}
+
+function dateKeyFromUnixSeconds(value: number) {
+  const date = new Date(value * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateKey(value: string) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function monthKey(value: Date) {
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+async function stripeResponseMessage(response: Response) {
+  const body = await response.text().catch(() => "");
+  if (!body) {
+    return response.statusText;
+  }
+
+  const parsed = safeJsonParse(body);
+  const message = stringFrom(asRecord(asRecord(parsed)?.error)?.message);
+  return message ?? body.slice(0, 180);
+}
+
+function safeJsonParse(value: string) {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function numberFrom(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringFrom(value: unknown) {
+  return typeof value === "string" ? value.trim() || undefined : undefined;
+}
