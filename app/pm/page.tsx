@@ -204,6 +204,10 @@ const EMPLOYEE_COST_PER_HOUR_CUSTOM_FIELD_ID_ENV_NAMES = [
   "GRIPP_EMPLOYEE_COST_PER_HOUR_CUSTOM_FIELD_IDS"
 ];
 const EMPLOYEE_COST_PER_HOUR_FIELD_NAMES = [
+  "interne kostprijs van medewerker",
+  "interne kostprijs medewerker",
+  "internekostprijsvanmedewerker",
+  "internekostprijsmedewerker",
   "cost per medewerker per uur",
   "cost per employee per hour",
   "cost per medewerker",
@@ -337,9 +341,9 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
               <>
                 <span className="panel-total panel-total--billability">{formatPercent(dashboard.employeeBillabilitySummary.billability)}%</span>
                 <span className="panel-total">{dashboard.employeeBillabilityPeriod.label}</span>
-                <span className="panel-total panel-total--cost">Kost o.b.v. uurkost {formatCurrency(dashboard.employeeBillabilitySummary.employeeCost)}</span>
+                <span className="panel-total panel-total--cost">Kost o.b.v. interne kostprijs {formatCurrency(dashboard.employeeBillabilitySummary.employeeCost)}</span>
                 {dashboard.employeeBillabilitySummary.missingCostPerHourCount > 0 ? (
-                  <span className="panel-total panel-total--warning">Uurkost ontbreekt: {formatEmployeeCount(dashboard.employeeBillabilitySummary.missingCostPerHourCount)}</span>
+                  <span className="panel-total panel-total--warning">Interne kostprijs ontbreekt: {formatEmployeeCount(dashboard.employeeBillabilitySummary.missingCostPerHourCount)}</span>
                 ) : null}
                 <span className="panel-total">{formatEmployeeCount(dashboard.employeeBillability.length)}</span>
               </>
@@ -381,7 +385,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
                     <th scope="col">Betaalde overuren</th>
                     <th scope="col">Agenda niet geassigned</th>
                     <th scope="col">Verlof</th>
-                    <th scope="col">Uurkost</th>
+                    <th scope="col">Interne kostprijs van medewerker</th>
                     <th scope="col">Kost</th>
                     <th scope="col">Rest</th>
                   </tr>
@@ -1135,7 +1139,7 @@ async function enrichCachedPmDashboardDataWithEmployeeCosts(cached: CachedPmDash
     const missingCount = dashboard.employeeBillabilitySummary.missingCostPerHourCount;
     const dashboardWithNotice =
       missingCount > 0
-        ? dashboardWithSourceMessage(dashboard, `Uurkost ontbreekt voor ${formatEmployeeCount(missingCount)}.`, "warning")
+        ? dashboardWithSourceMessage(dashboard, `Interne kostprijs ontbreekt voor ${formatEmployeeCount(missingCount)}.`, "warning")
         : dashboard;
     const cacheWriteIssue = await safeWriteCachedPmDashboardData(cacheKey, dashboardWithNotice);
 
@@ -1149,7 +1153,7 @@ async function enrichCachedPmDashboardDataWithEmployeeCosts(cached: CachedPmDash
       ...cached,
       dashboard: dashboardWithSourceMessage(
         cached.dashboard,
-        `Uurkost niet aangevuld: medewerkers niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}.`,
+        `Interne kostprijs niet aangevuld: medewerkers niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}.`,
         "warning"
       )
     };
@@ -3880,7 +3884,7 @@ function createDemoCapacitySources(period: Period): CapacitySources {
       employeesince: `${period.year}-02-01`,
       active: true,
       role: { id: 2, searchname: "Medewerker" },
-      customfields: [{ name: "Cost per medewerker per uur", value: 64 }]
+      customfields: [{ name: "Interne kostprijs van medewerker", value: 64 }]
     },
     {
       id: 3,
@@ -3888,9 +3892,16 @@ function createDemoCapacitySources(period: Period): CapacitySources {
       employeesince: `${period.year}-01-15`,
       active: false,
       role: { id: 2, searchname: "Medewerker" },
-      uurkost: 58
+      "Interne kostprijs van medewerker": 58
     },
-    { id: 4, screenname: "Daan Smit", employeesince: `${period.year}-03-01`, active: true, role: { id: 1, searchname: "Beheerder" }, uurkost: 80 }
+    {
+      id: 4,
+      screenname: "Daan Smit",
+      employeesince: `${period.year}-03-01`,
+      active: true,
+      role: { id: 1, searchname: "Beheerder" },
+      "Interne kostprijs van medewerker": 80
+    }
   ];
   const workingHoursByEmployeeId = new Map<number, number>([
     [1, calculateDefaultContractHours(maxDateKey(period.start, `${period.year}-01-01`), period.end)],
