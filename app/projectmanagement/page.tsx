@@ -93,7 +93,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
   const timeline = createProjectTimeline(data.projects);
 
   return (
-    <DashboardFrame>
+    <DashboardFrame showTopMenu={false}>
       <main className="dashboard-shell project-shell">
         <ProjectManagementAutoRefresh />
         <header className="dashboard-header">
