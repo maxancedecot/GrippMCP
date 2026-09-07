@@ -1116,7 +1116,35 @@ function pmDashboardCacheKey(period: Period, employeeBillabilityPeriod: Employee
       ? `custom:${employeeBillabilityPeriod.start}:${employeeBillabilityPeriod.end}`
       : employeeBillabilityPeriod.preset;
 
-  return `${PM_DASHBOARD_CACHE_PREFIX}:${period.year}:employee-billability:${employeePeriodKey}`;
+  return `${PM_DASHBOARD_CACHE_PREFIX}:${period.year}:employee-billability:${employeePeriodKey}:${stripeCrmRevenueCacheKeySegment()}`;
+}
+
+function stripeCrmRevenueCacheKeySegment() {
+  const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+  if (!secretKey) {
+    return "stripe:none";
+  }
+
+  const currency = safeCacheKeySegment(process.env.PM_STRIPE_REVENUE_CURRENCY ?? "eur");
+  const accountId = process.env.PM_STRIPE_ACCOUNT_ID?.trim();
+  const accountScope = accountId ? `account:${safeCacheKeySegment(accountId)}` : "platform";
+
+  return `stripe:${stripeKeyMode(secretKey)}:${currency}:${accountScope}`;
+}
+
+function stripeKeyMode(secretKey: string) {
+  if (secretKey.startsWith("sk_live_") || secretKey.startsWith("rk_live_")) {
+    return "live";
+  }
+  if (secretKey.startsWith("sk_test_") || secretKey.startsWith("rk_test_")) {
+    return "test";
+  }
+
+  return "configured";
+}
+
+function safeCacheKeySegment(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
 }
 
 function sourceBadgeLabel(mode: DashboardSource["mode"]) {
