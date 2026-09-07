@@ -101,7 +101,6 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
         <ProjectManagementAutoRefresh />
         <header className="dashboard-header">
           <div>
-            <p className="eyebrow">Gripp opdrachten</p>
             <h1>Projectmanagement</h1>
           </div>
           <div className="header-meta">

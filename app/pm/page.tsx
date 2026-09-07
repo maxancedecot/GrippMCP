@@ -236,7 +236,6 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
       <main className="dashboard-shell pm-shell">
         <header className="dashboard-header">
           <div>
-            <p className="eyebrow">Gripp management</p>
             <h1>PM dashboard</h1>
           </div>
           <div className="header-meta">
