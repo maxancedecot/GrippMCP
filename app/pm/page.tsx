@@ -179,7 +179,7 @@ const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_REQUEST_PAGES = 80;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
-const INVOICE_REVENUE_SERIES_LABEL = "Verkoopfacturen";
+const INVOICE_REVENUE_SERIES_LABEL = "Agency Omzet";
 const CRM_REVENUE_SERIES_LABEL = "CRM omzet";
 const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
 const WORKING_HOURS_BATCH_SIZE = 25;
@@ -252,11 +252,11 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
       {dashboard.source.message ? <p className={dataNoticeClassName(dashboard.source)}>{dashboard.source.message}</p> : null}
 
       <section className="metric-grid pm-metric-grid" aria-label="Kerncijfers management">
-        <MetricCard href="#pm-revenue-detail" label="Omzet Gripp" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen min creditnota's, excl. btw netto" tone="good" />
+        <MetricCard href="#pm-revenue-detail" label="Agency Omzet" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen min creditnota's, excl. btw netto" tone="good" />
         <MetricCard href="#pm-revenue-detail" label="CRM omzet" value={formatCurrency(dashboard.crmRevenue.amount)} detail={crmRevenueMetricDetail(dashboard.crmRevenue)} tone="neutral" />
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
-        <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Gripp omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
-        <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Gripp omzet gedeeld door billable uren" tone="warning" />
+        <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Agency Omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
+        <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Agency Omzet gedeeld door billable uren" tone="warning" />
       </section>
 
       <section className="panel pm-detail-panel" id="pm-billability-detail" tabIndex={-1}>
