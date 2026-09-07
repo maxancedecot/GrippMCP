@@ -196,6 +196,7 @@ const PM_DASHBOARD_CACHE_VERSION = 8;
 const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
+const PM_DASHBOARD_TIME_ZONE = "Europe/Brussels";
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
@@ -2046,6 +2047,7 @@ function buildPmDashboardData(
     revenueByMonth: revenueByMonthRows,
     revenuePerBillableHourByMonth,
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
+      timeZone: PM_DASHBOARD_TIME_ZONE,
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -2855,7 +2857,7 @@ function samePeriod(left: Period, right: Period) {
 
 function currentDateKey() {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Brussels",
+    timeZone: PM_DASHBOARD_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit"

@@ -49,6 +49,17 @@ test("site analytics auto-registers sites and validates generated tokens", async
   });
 });
 
+test("site analytics formats dashboard timestamps in Brussels time", async () => {
+  await withSiteAnalyticsMemory(async () => {
+    const dashboard = await getSiteAnalyticsDashboardData({
+      days: 7,
+      now: new Date("2026-07-01T10:00:00.000Z")
+    });
+
+    assert.match(dashboard.lastUpdated, /12:00/);
+  });
+});
+
 test("site analytics records page views, sessions, referrers, time, and scroll", async () => {
   const siteId = `site-analytics-test-${Date.now()}`;
   await withSiteAnalyticsEnv(siteId, "event-token", async () => {

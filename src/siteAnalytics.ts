@@ -257,12 +257,16 @@ const IGNORED_PAGE_QUERY_PARAMS = new Set([
   "wbraid"
 ]);
 
+const SITE_ANALYTICS_TIME_ZONE = "Europe/Brussels";
+
 const dateFormatter = new Intl.DateTimeFormat("nl-BE", {
+  timeZone: SITE_ANALYTICS_TIME_ZONE,
   day: "2-digit",
   month: "short"
 });
 
 const dateTimeFormatter = new Intl.DateTimeFormat("nl-BE", {
+  timeZone: SITE_ANALYTICS_TIME_ZONE,
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
@@ -1541,7 +1545,7 @@ function pushUnique(values: string[], value: string) {
 
 function dateKeyForDate(date: Date) {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Brussels",
+    timeZone: SITE_ANALYTICS_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit"

@@ -68,6 +68,7 @@ const PROJECT_PAGE_SIZE = 250;
 const PROJECT_MAX_PAGES = 40;
 const TIMELINE_DAY_WIDTH = 10;
 const TIMELINE_FIXED_WIDTH = 388;
+const PROJECT_DASHBOARD_TIME_ZONE = "Europe/Brussels";
 const currencyFormatter = new Intl.NumberFormat("nl-BE", {
   style: "currency",
   currency: "EUR",
@@ -76,12 +77,14 @@ const currencyFormatter = new Intl.NumberFormat("nl-BE", {
 });
 
 const dateFormatter = new Intl.DateTimeFormat("nl-NL", {
+  timeZone: PROJECT_DASHBOARD_TIME_ZONE,
   day: "2-digit",
   month: "short",
   year: "numeric"
 });
 
 const monthFormatter = new Intl.DateTimeFormat("nl-NL", {
+  timeZone: PROJECT_DASHBOARD_TIME_ZONE,
   month: "short",
   year: "numeric"
 });
@@ -433,6 +436,7 @@ function buildProjectManagementData(projects: ProjectRow[], source: ProjectSourc
     }).length,
     totalValue: filteredProjects.reduce((total, project) => total + project.value, 0),
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
+      timeZone: PROJECT_DASHBOARD_TIME_ZONE,
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -814,7 +818,7 @@ function dateKey(date: Date) {
 
 function currentDateKey() {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Brussels",
+    timeZone: PROJECT_DASHBOARD_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
