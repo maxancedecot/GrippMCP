@@ -849,6 +849,8 @@ select {
 .panel-total--crm,
 .panel-total--billable,
 .panel-total--billability,
+.panel-total--cost,
+.panel-total--warning,
 .panel-total--goal {
   display: inline-flex;
   align-items: center;
@@ -859,6 +861,8 @@ select {
 .panel-total--crm::before,
 .panel-total--billable::before,
 .panel-total--billability::before,
+.panel-total--cost::before,
+.panel-total--warning::before,
 .panel-total--goal::before {
   content: "";
   width: 9px;
@@ -877,6 +881,14 @@ select {
 
 .panel-total--billability::before {
   background: var(--blue);
+}
+
+.panel-total--cost::before {
+  background: var(--good);
+}
+
+.panel-total--warning::before {
+  background: var(--warning);
 }
 
 .panel-total--goal::before {

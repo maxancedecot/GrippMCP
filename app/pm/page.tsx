@@ -129,6 +129,7 @@ type BillabilitySummary = {
   billableHours: number;
   availableHours: number;
   employeeCost: number;
+  missingCostPerHourCount: number;
   billability: number;
 };
 
@@ -197,6 +198,11 @@ const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overure
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
+const EMPLOYEE_COST_PER_HOUR_FIELD_NAME_ENV_NAMES = ["PM_EMPLOYEE_COST_PER_HOUR_FIELD_NAMES", "GRIPP_EMPLOYEE_COST_PER_HOUR_FIELD_NAMES"];
+const EMPLOYEE_COST_PER_HOUR_CUSTOM_FIELD_ID_ENV_NAMES = [
+  "PM_EMPLOYEE_COST_PER_HOUR_CUSTOM_FIELD_IDS",
+  "GRIPP_EMPLOYEE_COST_PER_HOUR_CUSTOM_FIELD_IDS"
+];
 const EMPLOYEE_COST_PER_HOUR_FIELD_NAMES = [
   "cost per medewerker per uur",
   "cost per employee per hour",
@@ -229,12 +235,27 @@ const EMPLOYEE_COST_PER_HOUR_FIELD_NAMES = [
 ];
 const EMPLOYEE_COST_PER_HOUR_FIELD_KEYS = new Set(EMPLOYEE_COST_PER_HOUR_FIELD_NAMES.map(normalizeComparisonValue));
 const CUSTOM_FIELD_NAME_KEYS = new Set(
-  ["name", "label", "title", "caption", "key", "code", "identifier", "customfield", "customField", "field", "fieldname", "fieldName", "searchname", "screenname"].map(
-    normalizeComparisonValue
-  )
+  [
+    "name",
+    "label",
+    "title",
+    "caption",
+    "key",
+    "code",
+    "identifier",
+    "customfield",
+    "customField",
+    "field",
+    "fieldname",
+    "fieldName",
+    "displayname",
+    "displayName",
+    "searchname",
+    "screenname"
+  ].map(normalizeComparisonValue)
 );
 const CUSTOM_FIELD_VALUE_KEYS = new Set(
-  ["value", "rawValue", "rawvalue", "displayvalue", "displayValue", "amount", "number"].map(normalizeComparisonValue)
+  ["value", "values", "rawValue", "rawvalue", "displayvalue", "displayValue", "amount", "number", "content", "data"].map(normalizeComparisonValue)
 );
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
 const PM_DASHBOARD_CACHE_VERSION = 9;
@@ -316,7 +337,10 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
               <>
                 <span className="panel-total panel-total--billability">{formatPercent(dashboard.employeeBillabilitySummary.billability)}%</span>
                 <span className="panel-total">{dashboard.employeeBillabilityPeriod.label}</span>
-                <span className="panel-total">Kost {formatCurrency(dashboard.employeeBillabilitySummary.employeeCost)}</span>
+                <span className="panel-total panel-total--cost">Kost o.b.v. uurkost {formatCurrency(dashboard.employeeBillabilitySummary.employeeCost)}</span>
+                {dashboard.employeeBillabilitySummary.missingCostPerHourCount > 0 ? (
+                  <span className="panel-total panel-total--warning">Uurkost ontbreekt: {formatEmployeeCount(dashboard.employeeBillabilitySummary.missingCostPerHourCount)}</span>
+                ) : null}
                 <span className="panel-total">{formatEmployeeCount(dashboard.employeeBillability.length)}</span>
               </>
             )}
@@ -944,7 +968,8 @@ async function getPmDashboardData(
   const cacheKey = pmDashboardCacheKey(period, employeeBillabilityPeriod);
   const cached = (await safeReadCachedPmDashboardData(cacheKey)) ?? (await safeReadLegacyCachedPmDashboardData(period, employeeBillabilityPeriod));
   if (cached) {
-    return dashboardFromCache(cached, cacheNotice, cacheError);
+    const enrichedCached = await enrichCachedPmDashboardDataWithEmployeeCosts(cached, cacheKey);
+    return dashboardFromCache(enrichedCached, cacheNotice, cacheError);
   }
 
   try {
@@ -1099,6 +1124,38 @@ async function safeReadLegacyCachedPmDashboardData(period: Period, employeeBilla
   return null;
 }
 
+async function enrichCachedPmDashboardDataWithEmployeeCosts(cached: CachedPmDashboardData, cacheKey: string): Promise<CachedPmDashboardData> {
+  if (!dashboardNeedsEmployeeCostEnrichment(cached.dashboard)) {
+    return cached;
+  }
+
+  try {
+    const employees = await fetchEmployees(new GrippClient());
+    const dashboard = dashboardWithEmployeeCostsFromEmployees(cached.dashboard, employees);
+    const missingCount = dashboard.employeeBillabilitySummary.missingCostPerHourCount;
+    const dashboardWithNotice =
+      missingCount > 0
+        ? dashboardWithSourceMessage(dashboard, `Uurkost ontbreekt voor ${formatEmployeeCount(missingCount)}.`, "warning")
+        : dashboard;
+    const cacheWriteIssue = await safeWriteCachedPmDashboardData(cacheKey, dashboardWithNotice);
+
+    return {
+      version: PM_DASHBOARD_CACHE_VERSION,
+      savedAt: new Date().toISOString(),
+      dashboard: cacheWriteIssue ? dashboardWithSourceMessage(dashboardWithNotice, cacheWriteIssue, "warning") : dashboardWithNotice
+    };
+  } catch (error) {
+    return {
+      ...cached,
+      dashboard: dashboardWithSourceMessage(
+        cached.dashboard,
+        `Uurkost niet aangevuld: medewerkers niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}.`,
+        "warning"
+      )
+    };
+  }
+}
+
 async function safeWriteCachedPmDashboardData(cacheKey: string, dashboard: PmDashboardData) {
   try {
     await writeCachedPmDashboardData(cacheKey, dashboard);
@@ -1171,7 +1228,7 @@ function cachedPmDashboardDataFromCacheValue(value: unknown): CachedPmDashboardD
   }
 
   return {
-    version: PM_DASHBOARD_CACHE_VERSION,
+    version: value.version,
     savedAt: value.savedAt,
     dashboard: dashboardWithEmployeeCostDefaults(value.dashboard)
   };
@@ -1204,8 +1261,12 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData): PmDashbo
   const employeeCost = numberFrom((dashboard as JsonRecord).employeeCost) ?? rows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
   const summary = asRecord(dashboard.employeeBillabilitySummary) ?? {};
   const employeeBillabilitySummary = {
-    ...dashboard.employeeBillabilitySummary,
-    employeeCost: numberFrom(summary.employeeCost) ?? employeeCost
+    ...summary,
+    billableHours: numberFrom(summary.billableHours) ?? 0,
+    availableHours: numberFrom(summary.availableHours) ?? 0,
+    billability: numberFrom(summary.billability) ?? 0,
+    employeeCost: numberFrom(summary.employeeCost) ?? employeeCost,
+    missingCostPerHourCount: numberFrom(summary.missingCostPerHourCount) ?? missingCostPerHourCount(rows)
   };
 
   return {
@@ -1213,6 +1274,50 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData): PmDashbo
     employeeCost,
     employeeBillability: rows,
     employeeBillabilitySummary
+  };
+}
+
+function dashboardNeedsEmployeeCostEnrichment(dashboard: PmDashboardData) {
+  return missingCostPerHourCount(dashboard.employeeBillability) > 0;
+}
+
+function dashboardWithEmployeeCostsFromEmployees(dashboard: PmDashboardData, employees: JsonRecord[]): PmDashboardData {
+  const employeesById = new Map<number, JsonRecord>();
+  for (const employee of employees) {
+    const employeeId = idFrom(readField(employee, "id"));
+    if (employeeId !== null) {
+      employeesById.set(employeeId, employee);
+    }
+  }
+
+  const rows = dashboard.employeeBillability.map((row) => {
+    if (row.costPerHour !== null) {
+      return {
+        ...row,
+        employeeCost: employeeCostFromHours(row.availableHours, row.leaveHours, row.costPerHour)
+      };
+    }
+
+    const employee = employeesById.get(row.employeeId);
+    const costPerHour = employee ? employeeCostPerHour(employee) : null;
+
+    return {
+      ...row,
+      costPerHour,
+      employeeCost: employeeCostFromHours(row.availableHours, row.leaveHours, costPerHour)
+    };
+  });
+  const employeeCost = rows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
+
+  return {
+    ...dashboard,
+    employeeCost,
+    employeeBillability: rows,
+    employeeBillabilitySummary: {
+      ...dashboard.employeeBillabilitySummary,
+      employeeCost,
+      missingCostPerHourCount: missingCostPerHourCount(rows)
+    }
   };
 }
 
@@ -2297,6 +2402,7 @@ function buildBillabilitySummary(employeeBillabilityRows: EmployeeBillabilityRow
     billableHours,
     availableHours,
     employeeCost,
+    missingCostPerHourCount: missingCostPerHourCount(employeeBillabilityRows),
     billability: percent(billableHours, availableHours)
   };
 }
@@ -2947,6 +3053,15 @@ function customFieldNumberFrom(value: unknown, matches: (field: string) => boole
   }
 
   const record = value as JsonRecord;
+  const customFieldIds = employeeCostPerHourCustomFieldIds();
+  const customFieldId = customFieldIdFromRecord(record);
+  if (customFieldId !== null && customFieldIds.has(customFieldId)) {
+    const number = customFieldValueNumber(record);
+    if (number !== null) {
+      return number;
+    }
+  }
+
   if (customFieldNames(record).some(matches)) {
     const number = customFieldValueNumber(record);
     if (number !== null) {
@@ -2955,7 +3070,8 @@ function customFieldNumberFrom(value: unknown, matches: (field: string) => boole
   }
 
   for (const [key, nestedValue] of Object.entries(record)) {
-    if (!matches(key) && !matches(lastFieldSegment(key))) {
+    const customFieldKeyId = customFieldIdFromKey(key);
+    if (!matches(key) && !matches(lastFieldSegment(key)) && (customFieldKeyId === null || !customFieldIds.has(customFieldKeyId))) {
       continue;
     }
 
@@ -3007,7 +3123,7 @@ function customFieldValueNumber(value: unknown): number | null {
       continue;
     }
 
-    const number = employeeCostNumberFrom(nestedValue);
+    const number = customFieldPrimitiveNumber(nestedValue);
     if (number !== null) {
       return number;
     }
@@ -3018,7 +3134,46 @@ function customFieldValueNumber(value: unknown): number | null {
       continue;
     }
 
-    const number = employeeCostNumberFrom(nestedValue);
+    const number = customFieldPrimitiveNumber(nestedValue);
+    if (number !== null) {
+      return number;
+    }
+  }
+
+  return null;
+}
+
+function customFieldPrimitiveNumber(value: unknown, seen = new Set<unknown>()): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "object") {
+    return employeeCostNumberFrom(value);
+  }
+
+  if (seen.has(value)) {
+    return null;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const number = customFieldPrimitiveNumber(item, seen);
+      if (number !== null) {
+        return number;
+      }
+    }
+
+    return null;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value as JsonRecord)) {
+    if (CUSTOM_FIELD_META_KEYS.has(normalizeComparisonValue(lastFieldSegment(key)))) {
+      continue;
+    }
+
+    const number = customFieldPrimitiveNumber(nestedValue, seen);
     if (number !== null) {
       return number;
     }
@@ -3044,7 +3199,7 @@ function employeeCostNumberFrom(value: unknown): number | null {
 
 function isEmployeeCostPerHourFieldName(value: string) {
   const normalizedValue = normalizeComparisonValue(lastFieldSegment(value));
-  if (EMPLOYEE_COST_PER_HOUR_FIELD_KEYS.has(normalizedValue)) {
+  if (employeeCostPerHourFieldKeys().has(normalizedValue)) {
     return true;
   }
 
@@ -3053,6 +3208,46 @@ function isEmployeeCostPerHourFieldName(value: string) {
   const hasEmployee = normalizedValue.includes("employee") || normalizedValue.includes("medewerker");
 
   return hasCost && hasHour && (hasEmployee || normalizedValue.includes("perhour") || normalizedValue.includes("peruur"));
+}
+
+function employeeCostPerHourFieldKeys() {
+  return new Set([
+    ...EMPLOYEE_COST_PER_HOUR_FIELD_KEYS,
+    ...listFromEnv(firstConfiguredEnvValue(EMPLOYEE_COST_PER_HOUR_FIELD_NAME_ENV_NAMES)).map(normalizeComparisonValue)
+  ]);
+}
+
+function employeeCostPerHourCustomFieldIds() {
+  return numberSetFromEnv(firstConfiguredEnvValue(EMPLOYEE_COST_PER_HOUR_CUSTOM_FIELD_ID_ENV_NAMES));
+}
+
+function customFieldIdFromRecord(record: JsonRecord) {
+  return (
+    idFrom(readField(record, "id")) ??
+    idFrom(readField(record, "customfield")) ??
+    idFrom(readField(record, "customfieldid")) ??
+    idFrom(readField(record, "customField")) ??
+    idFrom(readField(record, "customFieldId"))
+  );
+}
+
+function customFieldIdFromKey(key: string) {
+  const segment = lastFieldSegment(key);
+  const direct = numberFrom(segment);
+  if (direct !== null) {
+    return direct;
+  }
+
+  const match = segment.match(/\d+/g);
+  if (!match) {
+    return null;
+  }
+
+  return numberFrom(match[match.length - 1]);
+}
+
+function missingCostPerHourCount(rows: Pick<EmployeeCapacityRow, "availableHours" | "leaveHours" | "costPerHour">[]) {
+  return rows.filter((row) => row.costPerHour === null && Math.max(0, row.availableHours + row.leaveHours) > 0).length;
 }
 
 function lastFieldSegment(value: string) {
