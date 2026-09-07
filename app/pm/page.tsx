@@ -238,7 +238,7 @@ const CUSTOM_FIELD_VALUE_KEYS = new Set(
 );
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
 const PM_DASHBOARD_CACHE_VERSION = 9;
-const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
+const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [8];
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
 const PM_DASHBOARD_TIME_ZONE = "Europe/Brussels";
@@ -942,7 +942,7 @@ async function getPmDashboardData(
   }
 
   const cacheKey = pmDashboardCacheKey(period, employeeBillabilityPeriod);
-  const cached = await safeReadCachedPmDashboardData(cacheKey);
+  const cached = (await safeReadCachedPmDashboardData(cacheKey)) ?? (await safeReadLegacyCachedPmDashboardData(period, employeeBillabilityPeriod));
   if (cached) {
     return dashboardFromCache(cached, cacheNotice, cacheError);
   }
@@ -1081,11 +1081,22 @@ async function loadFreshPmDashboardData(
 
 async function safeReadCachedPmDashboardData(cacheKey: string): Promise<CachedPmDashboardData | null> {
   try {
-    const cached = await readJsonCache<CachedPmDashboardData>(cacheKey);
-    return isCachedPmDashboardData(cached) ? cached : null;
+    const cached = await readJsonCache<unknown>(cacheKey);
+    return cachedPmDashboardDataFromCacheValue(cached);
   } catch {
     return null;
   }
+}
+
+async function safeReadLegacyCachedPmDashboardData(period: Period, employeeBillabilityPeriod: EmployeeBillabilityPeriod) {
+  for (const version of LEGACY_PM_DASHBOARD_CACHE_VERSIONS) {
+    const cached = await safeReadCachedPmDashboardData(pmDashboardCacheKey(period, employeeBillabilityPeriod, version));
+    if (cached) {
+      return cached;
+    }
+  }
+
+  return null;
 }
 
 async function safeWriteCachedPmDashboardData(cacheKey: string, dashboard: PmDashboardData) {
@@ -1154,22 +1165,68 @@ function dashboardWithSourceMessage(
   };
 }
 
+function cachedPmDashboardDataFromCacheValue(value: unknown): CachedPmDashboardData | null {
+  if (!isCachedPmDashboardData(value)) {
+    return null;
+  }
+
+  return {
+    version: PM_DASHBOARD_CACHE_VERSION,
+    savedAt: value.savedAt,
+    dashboard: dashboardWithEmployeeCostDefaults(value.dashboard)
+  };
+}
+
 function isCachedPmDashboardData(value: unknown): value is CachedPmDashboardData {
   const record = asRecord(value);
   return (
-    record?.version === PM_DASHBOARD_CACHE_VERSION &&
+    typeof record?.version === "number" &&
+    (record.version === PM_DASHBOARD_CACHE_VERSION || LEGACY_PM_DASHBOARD_CACHE_VERSIONS.includes(record.version)) &&
     typeof record.savedAt === "string" &&
     asRecord(record.dashboard) !== undefined
   );
 }
 
-function pmDashboardCacheKey(period: Period, employeeBillabilityPeriod: EmployeeBillabilityPeriod) {
+function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData): PmDashboardData {
+  const rows = Array.isArray(dashboard.employeeBillability)
+    ? dashboard.employeeBillability.map((row) => {
+        const record = row as EmployeeBillabilityRow & JsonRecord;
+        const costPerHour = numberFrom(record.costPerHour) ?? null;
+        const employeeCost = numberFrom(record.employeeCost) ?? null;
+
+        return {
+          ...row,
+          costPerHour,
+          employeeCost
+        };
+      })
+    : [];
+  const employeeCost = numberFrom((dashboard as JsonRecord).employeeCost) ?? rows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
+  const summary = asRecord(dashboard.employeeBillabilitySummary) ?? {};
+  const employeeBillabilitySummary = {
+    ...dashboard.employeeBillabilitySummary,
+    employeeCost: numberFrom(summary.employeeCost) ?? employeeCost
+  };
+
+  return {
+    ...dashboard,
+    employeeCost,
+    employeeBillability: rows,
+    employeeBillabilitySummary
+  };
+}
+
+function pmDashboardCacheKey(period: Period, employeeBillabilityPeriod: EmployeeBillabilityPeriod, version = PM_DASHBOARD_CACHE_VERSION) {
   const employeePeriodKey =
     employeeBillabilityPeriod.preset === "custom"
       ? `custom:${employeeBillabilityPeriod.start}:${employeeBillabilityPeriod.end}`
       : employeeBillabilityPeriod.preset;
 
-  return `${PM_DASHBOARD_CACHE_PREFIX}:${period.year}:employee-billability:${employeePeriodKey}:${stripeCrmRevenueCacheKeySegment()}`;
+  return `${pmDashboardCachePrefix(version)}:${period.year}:employee-billability:${employeePeriodKey}:${stripeCrmRevenueCacheKeySegment()}`;
+}
+
+function pmDashboardCachePrefix(version: number) {
+  return `pm-dashboard:v${version}`;
 }
 
 function stripeCrmRevenueCacheKeySegment() {
