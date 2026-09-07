@@ -261,6 +261,7 @@ const CUSTOM_FIELD_NAME_KEYS = new Set(
 const CUSTOM_FIELD_VALUE_KEYS = new Set(
   ["value", "values", "rawValue", "rawvalue", "displayvalue", "displayValue", "amount", "number", "content", "data"].map(normalizeComparisonValue)
 );
+const CUSTOM_FIELD_RELATION_NAME_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "displayvalue", "displayValue"].map(normalizeComparisonValue));
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
 const PM_DASHBOARD_CACHE_VERSION = 9;
 const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [8];
@@ -1030,7 +1031,11 @@ async function loadFreshPmDashboardData(
     optionalData(issues, "verlofaanvragen", [], () => fetchAbsenceRequests(client)),
     optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, dataPeriod))
   ]);
-  const employeeScope = buildPmEmployeeScope(employees);
+  const baseEmployeeScope = buildPmEmployeeScope(employees);
+  const detailedEmployees = await optionalData(issues, "medewerkerdetails", baseEmployeeScope.employees, () =>
+    fetchEmployeeDetailsForEmployees(client, baseEmployeeScope.employees)
+  );
+  const employeeScope = buildPmEmployeeScope(detailedEmployees);
   const scopedHours = hoursForEmployeeScope(hours, employeeScope);
   const scopedCalendarItems = calendarItemsForEmployeeScope(calendarItems, employeeScope);
   const absenceRequestLines = mergeAbsenceRequestLines(
@@ -1134,13 +1139,22 @@ async function enrichCachedPmDashboardDataWithEmployeeCosts(cached: CachedPmDash
   }
 
   try {
-    const employees = await fetchEmployees(new GrippClient());
-    const dashboard = dashboardWithEmployeeCostsFromEmployees(cached.dashboard, employees);
+    const client = new GrippClient();
+    const employees = await fetchEmployees(client);
+    let detailsIssue = "";
+    const detailedEmployees = await fetchEmployeeDetailsForEmployees(client, employees).catch((error) => {
+      detailsIssue = `Medewerkerdetails niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}.`;
+      return employees;
+    });
+    const dashboard = dashboardWithEmployeeCostsFromEmployees(cached.dashboard, detailedEmployees);
     const missingCount = dashboard.employeeBillabilitySummary.missingCostPerHourCount;
-    const dashboardWithNotice =
+    let dashboardWithNotice =
       missingCount > 0
         ? dashboardWithSourceMessage(dashboard, `Interne kostprijs ontbreekt voor ${formatEmployeeCount(missingCount)}.`, "warning")
         : dashboard;
+    if (detailsIssue) {
+      dashboardWithNotice = dashboardWithSourceMessage(dashboardWithNotice, detailsIssue, "warning");
+    }
     const cacheWriteIssue = await safeWriteCachedPmDashboardData(cacheKey, dashboardWithNotice);
 
     return {
@@ -1814,6 +1828,88 @@ async function fetchCalendarItemsForPeriod(client: GrippClient, period: Period) 
 
 async function fetchEmployees(client: GrippClient) {
   return fetchPagedRecords(client, "employee", [], [{ field: "employee.id", direction: "asc" }], MAX_EMPLOYEE_PAGES);
+}
+
+async function fetchEmployeeDetailsForEmployees(client: GrippClient, employees: JsonRecord[]) {
+  const employeeIds = Array.from(
+    new Set(employees.map((employee) => idFrom(readField(employee, "id"))).filter((employeeId): employeeId is number => employeeId !== null))
+  ).sort((left, right) => left - right);
+  if (employeeIds.length === 0) {
+    return employees;
+  }
+
+  const detailsById = new Map<number, JsonRecord>();
+  for (let index = 0; index < employeeIds.length; index += PAGE_FETCH_BATCH_SIZE) {
+    const idChunk = employeeIds.slice(index, index + PAGE_FETCH_BATCH_SIZE);
+    const results = await fetchEmployeeDetailChunk(client, idChunk).catch(async () => {
+      const fallbackResults: Array<JsonValue | null> = [];
+      for (const employeeId of idChunk) {
+        try {
+          fallbackResults.push(await fetchEmployeeDetail(client, employeeId));
+        } catch {
+          fallbackResults.push(null);
+        }
+      }
+
+      return fallbackResults;
+    });
+
+    results.forEach((result, resultIndex) => {
+      if (result === null) {
+        return;
+      }
+
+      const detail = asRecords(result)[0];
+      if (!detail) {
+        return;
+      }
+
+      const requestedEmployeeId = idChunk[resultIndex];
+      const employeeId = idFrom(readField(detail, "id")) ?? requestedEmployeeId;
+      detailsById.set(employeeId, detail);
+    });
+  }
+
+  if (detailsById.size === 0) {
+    throw new Error("Geen medewerkerdetails ontvangen via employee.getone.");
+  }
+
+  return employees.map((employee) => {
+    const employeeId = idFrom(readField(employee, "id"));
+    const detail = employeeId === null ? undefined : detailsById.get(employeeId);
+    return detail ? mergeEmployeeDetailRecord(employee, detail) : employee;
+  });
+}
+
+async function fetchEmployeeDetailChunk(client: GrippClient, employeeIds: number[]) {
+  return client.batch(employeeIds.map((employeeId) => employeeDetailBatchItem(employeeId)));
+}
+
+async function fetchEmployeeDetail(client: GrippClient, employeeId: number) {
+  return client.call("employee.getone", employeeDetailParams(employeeId));
+}
+
+function employeeDetailBatchItem(employeeId: number) {
+  return {
+    method: "employee.getone",
+    params: employeeDetailParams(employeeId)
+  };
+}
+
+function employeeDetailParams(employeeId: number): JsonValue[] {
+  return [[{ field: "employee.id", operator: "equals", value: employeeId }]] as JsonValue[];
+}
+
+function mergeEmployeeDetailRecord(employee: JsonRecord, detail: JsonRecord): JsonRecord {
+  const merged = { ...employee };
+
+  for (const [key, value] of Object.entries(detail)) {
+    if (value !== undefined && value !== null) {
+      merged[key] = value;
+    }
+  }
+
+  return merged;
 }
 
 async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Period) {
@@ -3107,13 +3203,40 @@ function customFieldNames(record: JsonRecord) {
       continue;
     }
 
+    collectCustomFieldNames(value, names, new Set<unknown>());
+  }
+
+  return names;
+}
+
+function collectCustomFieldNames(value: unknown, names: string[], seen: Set<unknown>) {
+  if (value === null || value === undefined) {
+    return;
+  }
+
+  if (typeof value !== "object") {
     const name = stringFrom(value);
     if (name) {
       names.push(name);
     }
+    return;
   }
 
-  return names;
+  if (seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+
+  const record = asRecord(value);
+  if (!record) {
+    return;
+  }
+
+  for (const [key, nestedValue] of Object.entries(record)) {
+    if (CUSTOM_FIELD_RELATION_NAME_KEYS.has(normalizeComparisonValue(lastFieldSegment(key)))) {
+      collectCustomFieldNames(nestedValue, names, seen);
+    }
+  }
 }
 
 function customFieldValueNumber(value: unknown): number | null {
