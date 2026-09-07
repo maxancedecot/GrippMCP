@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import { GrippClient } from "../../src/grippClient.js";
+import { signedGrippInvoiceRevenueAmount } from "../../src/grippInvoiceRevenue.js";
 import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
 import { demoStripeCrmRevenue, fetchStripeCrmRevenueForPeriod, unavailableStripeCrmRevenue, type StripeCrmRevenue } from "../../src/stripeRevenue.js";
 import type { JsonValue } from "../../src/types.js";
@@ -191,7 +192,7 @@ const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overure
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
-const PM_DASHBOARD_CACHE_VERSION = 7;
+const PM_DASHBOARD_CACHE_VERSION = 8;
 const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
@@ -250,7 +251,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
       {dashboard.source.message ? <p className={dataNoticeClassName(dashboard.source)}>{dashboard.source.message}</p> : null}
 
       <section className="metric-grid pm-metric-grid" aria-label="Kerncijfers management">
-        <MetricCard href="#pm-revenue-detail" label="Omzet Gripp" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen, excl. btw netto" tone="good" />
+        <MetricCard href="#pm-revenue-detail" label="Omzet Gripp" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen min creditnota's, excl. btw netto" tone="good" />
         <MetricCard href="#pm-revenue-detail" label="CRM omzet" value={formatCurrency(dashboard.crmRevenue.amount)} detail={crmRevenueMetricDetail(dashboard.crmRevenue)} tone="neutral" />
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
         <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Gripp omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
@@ -2091,7 +2092,7 @@ function invoiceRevenueEntry(invoice: JsonRecord, period: Period) {
   }
 
   const amount = numberFrom(readField(invoice, "totalincldiscountexclvat"));
-  return amount === null ? null : { amount, monthKey };
+  return amount === null ? null : { amount: signedGrippInvoiceRevenueAmount(invoice, amount), monthKey };
 }
 
 function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: JsonRecord[], period: Period): EmployeeCapacityRow[] {
