@@ -191,7 +191,7 @@ const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overure
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
-const PM_DASHBOARD_CACHE_VERSION = 6;
+const PM_DASHBOARD_CACHE_VERSION = 7;
 const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
@@ -427,7 +427,7 @@ function crmRevenueMetricDetail(crmRevenue: StripeCrmRevenue) {
       return crmRevenue.source.message;
     }
 
-    return `${crmRevenue.transactionCount} Stripe mutaties; bruto betalingen min refunds`;
+    return `${crmRevenue.transactionCount} Stripe mutaties; excl. ${formatVatRate(crmRevenue.vatRate)}% btw`;
   }
   if (crmRevenue.source.mode === "demo") {
     return "Demo uit Stripe balance transactions";
@@ -1128,10 +1128,11 @@ function stripeCrmRevenueCacheKeySegment() {
   }
 
   const currency = safeCacheKeySegment(process.env.PM_STRIPE_REVENUE_CURRENCY ?? "eur");
+  const vatRate = safeCacheKeySegment(process.env.PM_STRIPE_REVENUE_VAT_RATE ?? "21");
   const accountId = process.env.PM_STRIPE_ACCOUNT_ID?.trim();
   const accountScope = accountId ? `account:${safeCacheKeySegment(accountId)}` : "platform";
 
-  return `stripe:${stripeKeyMode(secretKey)}:${currency}:${accountScope}`;
+  return `stripe:${stripeKeyMode(secretKey)}:${currency}:vat:${vatRate}:${accountScope}`;
 }
 
 function stripeKeyMode(secretKey: string) {
@@ -3260,6 +3261,10 @@ function formatCurrency(value: number) {
 
 function formatCurrencyPerHour(value: number) {
   return `${currencyPerHourFormatter.format(value)}/u`;
+}
+
+function formatVatRate(value: number) {
+  return Number.isInteger(value) ? String(value) : String(value).replace(".", ",");
 }
 
 function formatEmployeeCount(value: number) {

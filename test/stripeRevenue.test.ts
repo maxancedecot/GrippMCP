@@ -20,16 +20,36 @@ test("summarizeStripeCrmRevenue groups Stripe charges and refunds by month", () 
 
   const result = summarizeStripeCrmRevenue(transactions, period, "eur");
 
-  assert.equal(result.amount, 155);
+  assert.equal(result.amount, 128.1);
   assert.equal(result.transactionCount, 3);
   assert.equal(result.fetchedTransactionCount, 4);
   assert.equal(result.ignoredCurrencyCount, 1);
   assert.deepEqual(result.availableCurrencies, ["eur", "usd"]);
+  assert.equal(result.vatRate, 21);
   assert.deepEqual(
     result.byMonth.map((month) => [month.key, month.revenue]),
     [
-      ["2026-01", 80],
-      ["2026-02", 75]
+      ["2026-01", 66.12],
+      ["2026-02", 61.98]
+    ]
+  );
+});
+
+test("summarizeStripeCrmRevenue uses a configurable VAT rate", () => {
+  const transactions: StripeBalanceTransaction[] = [
+    transaction("bt_charge_jan", 12000, "2026-01-05T12:00:00.000Z", "eur", "charge", "charge"),
+    transaction("bt_refund_jan", -2400, "2026-01-12T12:00:00.000Z", "eur", "refund", "refund")
+  ];
+
+  const result = summarizeStripeCrmRevenue(transactions, period, "eur", undefined, "6");
+
+  assert.equal(result.amount, 90.57);
+  assert.equal(result.vatRate, 6);
+  assert.deepEqual(
+    result.byMonth.map((month) => [month.key, month.revenue]),
+    [
+      ["2026-01", 90.57],
+      ["2026-02", 0]
     ]
   );
 });
@@ -95,16 +115,19 @@ test("fetchStripeCrmRevenueForPeriod lists revenue transaction types with Stripe
     secretKey: "sk_test_123",
     accountId: "acct_123",
     currency: "eur",
+    vatRate: 21,
     fetchImpl
   });
 
-  assert.equal(result.amount, 170);
+  assert.equal(result.amount, 140.5);
   assert.equal(result.transactionCount, 3);
   assert.equal(result.fetchedTransactionCount, 3);
   assert.equal(result.ignoredCurrencyCount, 0);
   assert.deepEqual(result.availableCurrencies, ["eur"]);
+  assert.equal(result.vatRate, 21);
   assert.equal(result.source.mode, "live");
   assert.match(result.source.message, /Stripe verbonden met test key op connected account/);
+  assert.match(result.source.message, /excl\. 21% btw/);
   assert.equal(calls.length, 8);
 
   const firstCall = calls[0];

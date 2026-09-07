@@ -20,6 +20,7 @@ export type StripeCrmRevenue = {
   ignoredCurrencyCount: number;
   availableCurrencies: string[];
   currency: string;
+  vatRate: number;
   source: {
     mode: StripeCrmRevenueSourceMode;
     message: string;
@@ -31,6 +32,7 @@ export type StripeCrmRevenueOptions = {
   secretKey?: string;
   accountId?: string;
   currency?: string;
+  vatRate?: number | string;
   fetchImpl?: FetchLike;
 };
 
@@ -61,6 +63,7 @@ const STRIPE_REVENUE_TRANSACTION_TYPES = [
 const STRIPE_REVENUE_REVERSAL_TYPES = new Set(["payment_reversal", "refund_failure"]);
 const STRIPE_REVENUE_REPORTING_CATEGORIES = new Set(["charge", "refund", "partial_capture_reversal", "charge_failure"]);
 const DEFAULT_STRIPE_REVENUE_CURRENCY = "eur";
+const DEFAULT_STRIPE_REVENUE_VAT_RATE = 21;
 const ZERO_DECIMAL_CURRENCIES = new Set([
   "bif",
   "clp",
@@ -103,6 +106,7 @@ export async function fetchStripeCrmRevenueForPeriod(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${secretKey}`
   };
+  const vatRate = normalizeStripeVatRate(options.vatRate ?? process.env.PM_STRIPE_REVENUE_VAT_RATE);
   const accountId = (options.accountId ?? process.env.PM_STRIPE_ACCOUNT_ID ?? "").trim();
   if (accountId) {
     headers["Stripe-Account"] = accountId;
@@ -124,7 +128,7 @@ export async function fetchStripeCrmRevenueForPeriod(
   const revenue = summarizeStripeCrmRevenue(transactions, period, currency, {
     mode: "live",
     message: ""
-  });
+  }, vatRate);
 
   return {
     ...revenue,
@@ -144,9 +148,10 @@ export function unavailableStripeCrmRevenue(period: StripeCrmRevenuePeriod, curr
 }
 
 export function demoStripeCrmRevenue(period: StripeCrmRevenuePeriod): StripeCrmRevenue {
+  const vatRate = normalizeStripeVatRate(process.env.PM_STRIPE_REVENUE_VAT_RATE);
   const byMonth = monthBucketsForPeriod(period).map((bucket, index) => ({
     ...bucket,
-    revenue: [4200, 4800, 5100, 4550, 5750, 6100][index % 6]
+    revenue: roundCurrency(amountExcludingVat([4200, 4800, 5100, 4550, 5750, 6100][index % 6], vatRate))
   }));
 
   return {
@@ -156,9 +161,10 @@ export function demoStripeCrmRevenue(period: StripeCrmRevenuePeriod): StripeCrmR
     ignoredCurrencyCount: 0,
     availableCurrencies: [DEFAULT_STRIPE_REVENUE_CURRENCY],
     currency: DEFAULT_STRIPE_REVENUE_CURRENCY,
+    vatRate,
     source: {
       mode: "demo",
-      message: "Demo CRM omzet via Stripe."
+      message: `Demo CRM omzet via Stripe, excl. ${formatVatRate(vatRate)}% btw.`
     },
     byMonth
   };
@@ -171,10 +177,12 @@ export function summarizeStripeCrmRevenue(
   source: StripeCrmRevenue["source"] = {
     mode: "live",
     message: "CRM omzet geladen via Stripe balance transactions."
-  }
+  },
+  vatRate: number | string | undefined = DEFAULT_STRIPE_REVENUE_VAT_RATE
 ): StripeCrmRevenue {
   const normalizedCurrency = normalizeStripeCurrency(currency);
   const divisor = minorUnitDivisor(normalizedCurrency);
+  const normalizedVatRate = normalizeStripeVatRate(vatRate);
   const revenueByMonth = new Map(monthBucketsForPeriod(period).map((bucket) => [bucket.key, 0]));
   let amount = 0;
   let transactionCount = 0;
@@ -204,7 +212,7 @@ export function summarizeStripeCrmRevenue(
       continue;
     }
 
-    const value = transaction.amount / divisor;
+    const value = amountExcludingVat(transaction.amount / divisor, normalizedVatRate);
     amount += value;
     transactionCount += 1;
     revenueByMonth.set(monthKey, (revenueByMonth.get(monthKey) ?? 0) + value);
@@ -217,6 +225,7 @@ export function summarizeStripeCrmRevenue(
     ignoredCurrencyCount,
     availableCurrencies: Array.from(availableCurrencies).sort(),
     currency: normalizedCurrency,
+    vatRate: normalizedVatRate,
     source,
     byMonth: monthBucketsForPeriod(period).map((bucket) => ({
       ...bucket,
@@ -339,6 +348,7 @@ function emptyStripeCrmRevenue(
     ignoredCurrencyCount: 0,
     availableCurrencies: [],
     currency,
+    vatRate: normalizeStripeVatRate(process.env.PM_STRIPE_REVENUE_VAT_RATE),
     source: { mode, message },
     byMonth: monthBucketsForPeriod(period)
   };
@@ -358,7 +368,7 @@ function stripeCrmRevenueSourceMessage(revenue: StripeCrmRevenue, accountId: str
   const accountScope = accountId ? "connected account" : "platform account";
 
   if (revenue.transactionCount > 0) {
-    return `Stripe verbonden met ${keyModeLabel} op ${accountScope}; ${revenue.transactionCount} ${currency} omzetmutaties geladen.`;
+    return `Stripe verbonden met ${keyModeLabel} op ${accountScope}; ${revenue.transactionCount} ${currency} omzetmutaties geladen, excl. ${formatVatRate(revenue.vatRate)}% btw.`;
   }
 
   if (revenue.fetchedTransactionCount > 0) {
@@ -429,6 +439,25 @@ function monthBucketsForPeriod(period: StripeCrmRevenuePeriod): StripeCrmRevenue
 function normalizeStripeCurrency(value: string | undefined) {
   const normalized = value?.trim().toLowerCase();
   return normalized?.match(/^[a-z]{3}$/) ? normalized : DEFAULT_STRIPE_REVENUE_CURRENCY;
+}
+
+function normalizeStripeVatRate(value: number | string | undefined) {
+  const normalizedValue = typeof value === "string" ? value.trim().replace("%", "").replace(",", ".") : value;
+  const rawValue = normalizedValue === "" || normalizedValue === undefined ? DEFAULT_STRIPE_REVENUE_VAT_RATE : Number(normalizedValue);
+  if (!Number.isFinite(rawValue) || rawValue < 0) {
+    return DEFAULT_STRIPE_REVENUE_VAT_RATE;
+  }
+
+  const percentage = rawValue > 0 && rawValue <= 1 ? rawValue * 100 : rawValue;
+  return percentage <= 100 ? roundCurrency(percentage) : DEFAULT_STRIPE_REVENUE_VAT_RATE;
+}
+
+function amountExcludingVat(amount: number, vatRate: number) {
+  return amount / (1 + vatRate / 100);
+}
+
+function formatVatRate(vatRate: number) {
+  return Number.isInteger(vatRate) ? String(vatRate) : String(vatRate).replace(".", ",");
 }
 
 function minorUnitDivisor(currency: string) {
