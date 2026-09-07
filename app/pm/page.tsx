@@ -973,7 +973,7 @@ async function getPmDashboardData(
   const cacheKey = pmDashboardCacheKey(period, employeeBillabilityPeriod);
   const cached = (await safeReadCachedPmDashboardData(cacheKey)) ?? (await safeReadLegacyCachedPmDashboardData(period, employeeBillabilityPeriod));
   if (cached) {
-    const enrichedCached = await enrichCachedPmDashboardDataWithEmployeeCosts(cached, cacheKey);
+    const enrichedCached = cacheNotice === "refresh_failed" ? cached : await enrichCachedPmDashboardDataWithEmployeeCosts(cached, cacheKey);
     return dashboardFromCache(enrichedCached, cacheNotice, cacheError);
   }
 
@@ -2177,34 +2177,55 @@ async function fetchPagedRecords(
   maxPages: number
 ) {
   const records: JsonRecord[] = [];
+  const maxFirstResult = maxPages * PAGE_SIZE;
+  let firstResult = 0;
+  let pageSize = PAGE_SIZE;
 
-  const firstPageRecords = asRecords(await client.call(`${entity}.get`, pagedGetParams(filters, orderings, 0)));
-  records.push(...firstPageRecords);
-  if (firstPageRecords.length < PAGE_SIZE) {
-    return records;
-  }
-
-  for (let firstPage = 1; firstPage < maxPages; firstPage += PAGE_FETCH_BATCH_SIZE) {
-    const pages = Array.from(
-      { length: Math.min(PAGE_FETCH_BATCH_SIZE, maxPages - firstPage) },
-      (_, index) => firstPage + index
-    );
-    const results = await client.batch(
-      pages.map((page) => ({
-        method: `${entity}.get`,
-        params: pagedGetParams(filters, orderings, page)
-      }))
-    );
-
-    let reachedLastPage = false;
-    for (const result of results) {
-      if (reachedLastPage) {
+  while (firstResult < maxFirstResult) {
+    if (firstResult === 0) {
+      const page = await fetchPagedRecordPage(client, entity, filters, orderings, firstResult, pageSize);
+      records.push(...page.records);
+      pageSize = page.maxResults;
+      firstResult += page.maxResults;
+      if (page.records.length < page.maxResults) {
         break;
       }
+      continue;
+    }
 
+    const offsets = Array.from(
+      { length: Math.min(PAGE_FETCH_BATCH_SIZE, Math.ceil((maxFirstResult - firstResult) / pageSize)) },
+      (_, index) => firstResult + index * pageSize
+    );
+    const results = await client
+      .batch(
+        offsets.map((offset) => ({
+          method: `${entity}.get`,
+          params: pagedGetParams(filters, orderings, offset, pageSize)
+        }))
+      )
+      .catch(() => null);
+
+    if (!results) {
+      const page = await fetchPagedRecordPage(client, entity, filters, orderings, firstResult, pageSize);
+      records.push(...page.records);
+      pageSize = page.maxResults;
+      firstResult += page.maxResults;
+      if (page.records.length < page.maxResults) {
+        break;
+      }
+      continue;
+    }
+
+    let reachedLastPage = false;
+    for (const [index, result] of results.entries()) {
       const pageRecords = asRecords(result);
       records.push(...pageRecords);
-      reachedLastPage = pageRecords.length < PAGE_SIZE;
+      firstResult = offsets[index] + pageSize;
+      if (pageRecords.length < pageSize) {
+        reachedLastPage = true;
+        break;
+      }
     }
 
     if (reachedLastPage) {
@@ -2215,11 +2236,46 @@ async function fetchPagedRecords(
   return records;
 }
 
-function pagedGetParams(filters: JsonValue[], orderings: JsonValue[], page: number): JsonValue[] {
+async function fetchPagedRecordPage(
+  client: GrippClient,
+  entity: string,
+  filters: JsonValue[],
+  orderings: JsonValue[],
+  firstResult: number,
+  maxResults: number
+) {
+  let lastError: unknown;
+
+  for (const pageSize of pagedRecordPageSizes(maxResults)) {
+    try {
+      return {
+        records: asRecords(await client.call(`${entity}.get`, pagedGetParams(filters, orderings, firstResult, pageSize))),
+        maxResults: pageSize
+      };
+    } catch (error) {
+      if (!shouldRetryWithSmallerPage(error)) {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
+function pagedRecordPageSizes(maxResults: number) {
+  return Array.from(new Set([maxResults, 100, 50].filter((size) => size > 0 && size <= maxResults)));
+}
+
+function shouldRetryWithSmallerPage(error: unknown) {
+  return ["timeout", "upstream_http_error"].includes(errorCode(error));
+}
+
+function pagedGetParams(filters: JsonValue[], orderings: JsonValue[], firstResult: number, maxResults: number): JsonValue[] {
   return [
     filters,
     {
-      paging: { firstresult: page * PAGE_SIZE, maxresults: PAGE_SIZE },
+      paging: { firstresult: firstResult, maxresults: maxResults },
       orderings
     }
   ] as JsonValue[];
