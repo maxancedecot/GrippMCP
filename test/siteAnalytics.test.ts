@@ -147,6 +147,18 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
       path: "/bedankt-afspraak/",
       page_title: "Bedankt ander project"
     });
+    for (const visitor of ["visitor-project-2", "visitor-project-3"]) {
+      await recordSiteAnalyticsEvent({
+        site_id: siteId,
+        event_type: "page_view",
+        visitor_id: visitor,
+        session_id: `session-${visitor}`,
+        page_view_id: `page-view-thankyou-brochure-${visitor}`,
+        page_url: "https://example.com/thankyou-brochure/?p_slug=crollet",
+        path: "/thankyou-brochure/",
+        page_title: "Thankyou brochure"
+      });
+    }
 
     const dashboardBeforeLink = await getSiteAnalyticsDashboardData({ days: 7, siteId });
     const siteBeforeLink = dashboardBeforeLink.sites.find((row) => row.id === siteId);
@@ -172,21 +184,41 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
       },
       { now: new Date("2026-01-01T10:00:00.000Z") }
     );
+    const secondLink = await upsertSiteAnalyticsCvrLink(
+      {
+        site_id: siteId,
+        source_path: "https://example.com/projectnaam1",
+        target_path: "https://example.com/thankyou-brochure/?p_slug=crollet"
+      },
+      { now: new Date("2026-01-01T10:05:00.000Z") }
+    );
     const dashboard = await getSiteAnalyticsDashboardData({ days: 7, siteId });
     const site = dashboard.sites.find((row) => row.id === siteId);
     const cvrLink = dashboard.cvrLinks.find((row) => row.id === link.id);
+    const secondCvrLink = dashboard.cvrLinks.find((row) => row.id === secondLink.id);
+    const sourceLinks = dashboard.cvrLinks.filter((row) => row.sourcePath === "/projectnaam1");
 
-    assert.equal(site?.cvrLinkCount, 1);
+    assert.equal(site?.cvrLinkCount, 2);
     assert.equal(site?.cvrSourceVisitors, 3);
-    assert.equal(site?.cvrConversionVisitors, 2);
-    assert.equal(Math.round((site?.conversionRatePercent ?? 0) * 10) / 10, 66.7);
+    assert.equal(site?.cvrConversionVisitors, 3);
+    assert.equal(Math.round((site?.conversionRatePercent ?? 0) * 10) / 10, 100);
+    assert.equal(sourceLinks.length, 2);
+    assert.deepEqual(
+      sourceLinks.map((row) => row.targetPath).sort(),
+      ["/bedankt-afspraak/?p_slug=crollet", "/thankyou-brochure/?p_slug=crollet"]
+    );
     assert.equal(cvrLink?.sourceVisitors, 3);
     assert.equal(cvrLink?.targetVisitors, 2);
     assert.equal(Math.round((cvrLink?.conversionRatePercent ?? 0) * 10) / 10, 66.7);
+    assert.equal(secondCvrLink?.sourceVisitors, 3);
+    assert.equal(secondCvrLink?.targetVisitors, 2);
+    assert.equal(Math.round((secondCvrLink?.conversionRatePercent ?? 0) * 10) / 10, 66.7);
     assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/projectnaam1"), true);
     assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/bedankt-afspraak/?p_slug=crollet"), true);
     assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/bedankt-afspraak/?p_slug=ander-project"), true);
+    assert.equal(dashboard.cvrPageCandidates.some((page) => page.path === "/thankyou-brochure/?p_slug=crollet"), true);
     assert.equal(await deleteSiteAnalyticsCvrLink(link.id), true);
+    assert.equal(await deleteSiteAnalyticsCvrLink(secondLink.id), true);
   });
 });
 

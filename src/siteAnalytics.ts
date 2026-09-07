@@ -1195,9 +1195,9 @@ function createDemoSiteAnalyticsDashboardData(
   const totalVisitors = dailyRows.reduce((total, row) => total + row.uniqueVisitors, 0);
   const totalSessions = dailyRows.reduce((total, row) => total + row.sessions, 0);
   const cvrBySite = new Map([
-    ["studio", { sources: 780, conversions: 52, links: 2 }],
-    ["shop", { sources: 870, conversions: 63, links: 2 }],
-    ["blog", { sources: 960, conversions: 74, links: 1 }]
+    ["studio", { sources: 420, conversions: 78, links: 2 }],
+    ["shop", { sources: 530, conversions: 63, links: 1 }],
+    ["blog", { sources: 412, conversions: 74, links: 1 }]
   ]);
   const siteRows = sites.map((site, index) => ({
     ...site,
@@ -1216,6 +1216,7 @@ function createDemoSiteAnalyticsDashboardData(
     { siteId: "studio", siteName: "Hoofdstudio", path: "/project-webdesign", title: "Project webdesign", uniqueVisitors: 420, pageViews: 642 },
     { siteId: "studio", siteName: "Hoofdstudio", path: "/project-seo", title: "Project SEO", uniqueVisitors: 360, pageViews: 510 },
     { siteId: "studio", siteName: "Hoofdstudio", path: "/bedankt-aanvraag", title: "Bedankt aanvraag", uniqueVisitors: 52, pageViews: 68 },
+    { siteId: "studio", siteName: "Hoofdstudio", path: "/thankyou-brochure", title: "Thankyou brochure", uniqueVisitors: 26, pageViews: 34 },
     { siteId: "shop", siteName: "WordPress-shop", path: "/project-shop", title: "Project shop", uniqueVisitors: 530, pageViews: 790 },
     { siteId: "shop", siteName: "WordPress-shop", path: "/thankyou-offerte", title: "Thankyou offerte", uniqueVisitors: 63, pageViews: 84 },
     { siteId: "blog", siteName: "Contentblog", path: "/project-content", title: "Project content", uniqueVisitors: 412, pageViews: 590 },
@@ -1236,6 +1237,23 @@ function createDemoSiteAnalyticsDashboardData(
       targetPageViews: 68,
       conversionRatePercent: conversionRatePercent(52, 420),
       dailySeries: demoCvrDailySeries(period, 420, 52),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    },
+    {
+      id: "demo-studio-webdesign-brochure",
+      siteId: "studio",
+      siteName: "Hoofdstudio",
+      sourcePath: "/project-webdesign",
+      sourceTitle: "Project webdesign",
+      sourceVisitors: 420,
+      sourcePageViews: 642,
+      targetPath: "/thankyou-brochure",
+      targetTitle: "Thankyou brochure",
+      targetVisitors: 26,
+      targetPageViews: 34,
+      conversionRatePercent: conversionRatePercent(26, 420),
+      dailySeries: demoCvrDailySeries(period, 420, 26),
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
     },

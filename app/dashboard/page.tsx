@@ -74,8 +74,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   ]);
   const overviewCvrLinks = dashboard.cvrLinks;
   const siteTabs = configuredSites.length > 0 ? configuredSites : connectedDashboard.sites;
-  const totalCvrSourceVisitors = overviewCvrLinks.reduce((sum, link) => sum + link.sourceVisitors, 0);
-  const totalCvrConversionVisitors = overviewCvrLinks.reduce((sum, link) => sum + link.targetVisitors, 0);
+  const totalCvrSourceVisitors = dashboard.sites.reduce((sum, site) => sum + site.cvrSourceVisitors, 0);
+  const totalCvrConversionVisitors = dashboard.sites.reduce((sum, site) => sum + site.cvrConversionVisitors, 0);
   const overallConversionRatePercent = totalCvrSourceVisitors > 0 ? (totalCvrConversionVisitors / totalCvrSourceVisitors) * 100 : 0;
 
   return (

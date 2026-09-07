@@ -1766,6 +1766,17 @@ td .inline-bar {
   font-size: 12px;
 }
 
+.cvr-page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+}
+
+.cvr-page-link-count {
+  color: var(--good);
+  font-weight: 760;
+}
+
 .cvr-action-bar {
   display: flex;
   flex-wrap: wrap;

@@ -105,8 +105,10 @@ export function CvrMappingBoard({
 
   const activePages = useMemo(() => pages.filter((page) => page.siteId === activeSiteId), [activeSiteId, pages]);
   const activeLinks = useMemo(() => links.filter((link) => link.siteId === activeSiteId), [activeSiteId, links]);
-  const sourceLinkedPaths = useMemo(() => new Set(activeLinks.map((link) => link.sourcePath)), [activeLinks]);
-  const targetLinkedPaths = useMemo(() => new Set(activeLinks.map((link) => link.targetPath)), [activeLinks]);
+  const sourceLinkCounts = useMemo(() => cvrLinkCountsByPath(activeLinks, "sourcePath"), [activeLinks]);
+  const targetLinkCounts = useMemo(() => cvrLinkCountsByPath(activeLinks, "targetPath"), [activeLinks]);
+  const sourceLinkedPaths = useMemo(() => new Set(sourceLinkCounts.keys()), [sourceLinkCounts]);
+  const targetLinkedPaths = useMemo(() => new Set(targetLinkCounts.keys()), [targetLinkCounts]);
   const sourcePages = useMemo(
     () => sortSourcePages(activePages.filter((page) => !isThankYouPage(page) || sourceLinkedPaths.has(page.path)), sourceLinkedPaths),
     [activePages, sourceLinkedPaths]
@@ -123,6 +125,7 @@ export function CvrMappingBoard({
   const selectedLinkExists = activeLinks.some((link) => link.sourcePath === sourcePathValue && link.targetPath === targetPathValue);
   const samePathSelected = Boolean(sourcePathValue && targetPathValue && sourcePathValue === targetPathValue);
   const canCreate = Boolean(activeSiteId && sourcePathValue && targetPathValue && targetLooksValid && !selectedLinkExists && !samePathSelected);
+  const selectedSourceLinkCount = sourceLinkCounts.get(sourcePathValue) ?? 0;
   const linePairs = useMemo<LinePair[]>(
     () => {
       const pairs: LinePair[] = activeLinks.map((link) => ({
@@ -241,6 +244,7 @@ export function CvrMappingBoard({
             <span className="panel-total">{activeSiteName}</span>
           )}
           <span className="panel-total">{activeLinks.length} koppelingen</span>
+          <span className="panel-total">{sourceLinkedPaths.size} projectpagina's</span>
         </div>
       </div>
 
@@ -258,6 +262,9 @@ export function CvrMappingBoard({
               pages={sourcePages}
               selectedPath={selectedSourcePath}
               linkedPaths={sourceLinkedPaths}
+              linkCounts={sourceLinkCounts}
+              linkedSingularLabel="thank-you koppeling"
+              linkedPluralLabel="thank-you koppelingen"
               otherSelectedPath={selectedTargetPath}
               emptyLabel="Geen projectpagina's gemeten."
               refMap={sourceRefs}
@@ -268,6 +275,9 @@ export function CvrMappingBoard({
               pages={targetPages}
               selectedPath={selectedTargetPath}
               linkedPaths={targetLinkedPaths}
+              linkCounts={targetLinkCounts}
+              linkedSingularLabel="projectkoppeling"
+              linkedPluralLabel="projectkoppelingen"
               otherSelectedPath={selectedSourcePath}
               emptyLabel="Geen thank-you of bedankt pagina's gemeten."
               refMap={targetRefs}
@@ -309,13 +319,13 @@ export function CvrMappingBoard({
               </label>
             </div>
             <button className="cvr-save-button" type="submit" disabled={!canCreate}>
-              Koppeling opslaan
+              {selectedSourceLinkCount > 0 ? "Extra koppeling opslaan" : "Koppeling opslaan"}
             </button>
           </form>
 
           {samePathSelected ? <p className="cvr-form-note cvr-form-note--error">Kies twee verschillende pagina's.</p> : null}
-          {!targetLooksValid ? <p className="cvr-form-note cvr-form-note--error">Bedankpagina-URL moet thankyou of bedankt bevatten.</p> : null}
-          {selectedLinkExists ? <p className="cvr-form-note">Deze koppeling bestaat al.</p> : null}
+          {!targetLooksValid ? <p className="cvr-form-note cvr-form-note--error">Bedankpagina-URL moet thankyou, thank-you, thank you of bedankt bevatten.</p> : null}
+          {selectedLinkExists ? <p className="cvr-form-note">Deze specifieke koppeling bestaat al.</p> : null}
 
           <div className="cvr-links-list">
             {activeLinks.length === 0 ? (
@@ -358,6 +368,9 @@ function PageColumn({
   pages,
   selectedPath,
   linkedPaths,
+  linkCounts,
+  linkedSingularLabel,
+  linkedPluralLabel,
   otherSelectedPath,
   emptyLabel,
   refMap,
@@ -367,6 +380,9 @@ function PageColumn({
   pages: SiteAnalyticsCvrPageCandidate[];
   selectedPath: string;
   linkedPaths: Set<string>;
+  linkCounts: Map<string, number>;
+  linkedSingularLabel: string;
+  linkedPluralLabel: string;
   otherSelectedPath: string;
   emptyLabel: string;
   refMap: MutableRefObject<Map<string, HTMLButtonElement>>;
@@ -383,6 +399,7 @@ function PageColumn({
       ) : (
         pages.map((page) => {
           const selected = selectedPath === page.path;
+          const linkCount = linkCounts.get(page.path) ?? 0;
           const linked = linkedPaths.has(page.path);
           const conflicts = Boolean(otherSelectedPath && otherSelectedPath === page.path);
 
@@ -402,7 +419,14 @@ function PageColumn({
             >
               <span className="cvr-page-title">{page.title}</span>
               <span className="cvr-page-path">{page.path}</span>
-              <span className="cvr-page-meta">{formatNumber(page.uniqueVisitors)} bezoekers - {formatNumber(page.pageViews)} weergaven</span>
+              <span className="cvr-page-meta">
+                <span>{formatNumber(page.uniqueVisitors)} bezoekers - {formatNumber(page.pageViews)} weergaven</span>
+                {linkCount > 0 ? (
+                  <span className="cvr-page-link-count">
+                    {formatNumber(linkCount)} {linkCount === 1 ? linkedSingularLabel : linkedPluralLabel}
+                  </span>
+                ) : null}
+              </span>
             </button>
           );
         })
@@ -440,6 +464,17 @@ function siteOptionsFromData(
   }
 
   return Array.from(byId.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function cvrLinkCountsByPath(links: SiteAnalyticsCvrLinkRow[], pathKey: "sourcePath" | "targetPath") {
+  const counts = new Map<string, number>();
+
+  for (const link of links) {
+    const path = link[pathKey];
+    counts.set(path, (counts.get(path) ?? 0) + 1);
+  }
+
+  return counts;
 }
 
 function sortSourcePages(pages: SiteAnalyticsCvrPageCandidate[], linkedPaths: Set<string>) {
