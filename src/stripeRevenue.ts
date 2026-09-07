@@ -16,6 +16,9 @@ export type StripeCrmRevenueSourceMode = "live" | "not_configured" | "unavailabl
 export type StripeCrmRevenue = {
   amount: number;
   transactionCount: number;
+  fetchedTransactionCount: number;
+  ignoredCurrencyCount: number;
+  availableCurrencies: string[];
   currency: string;
   source: {
     mode: StripeCrmRevenueSourceMode;
@@ -32,6 +35,7 @@ export type StripeCrmRevenueOptions = {
 };
 
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
+type StripeSecretKeyMode = "live" | "test" | "configured";
 
 export type StripeBalanceTransaction = {
   id: string;
@@ -104,7 +108,6 @@ export async function fetchStripeCrmRevenueForPeriod(
     transactions.push(
       ...(await fetchStripeBalanceTransactionsForType({
         period,
-        currency,
         type,
         headers,
         fetchImpl
@@ -112,17 +115,25 @@ export async function fetchStripeCrmRevenueForPeriod(
     );
   }
 
-  return summarizeStripeCrmRevenue(transactions, period, currency, {
+  const revenue = summarizeStripeCrmRevenue(transactions, period, currency, {
     mode: "live",
-    message: "CRM omzet geladen via Stripe balance transactions."
+    message: ""
   });
+
+  return {
+    ...revenue,
+    source: {
+      ...revenue.source,
+      message: stripeCrmRevenueSourceMessage(revenue, accountId, stripeSecretKeyMode(secretKey))
+    }
+  };
 }
 
-export function unavailableStripeCrmRevenue(period: StripeCrmRevenuePeriod, currency?: string): StripeCrmRevenue {
+export function unavailableStripeCrmRevenue(period: StripeCrmRevenuePeriod, currency?: string, message?: string): StripeCrmRevenue {
   return emptyStripeCrmRevenue(period, {
     currency: normalizeStripeCurrency(currency ?? process.env.PM_STRIPE_REVENUE_CURRENCY),
     mode: "unavailable",
-    message: "CRM omzet via Stripe kon niet worden geladen."
+    message: message ?? "CRM omzet via Stripe kon niet worden geladen."
   });
 }
 
@@ -135,6 +146,9 @@ export function demoStripeCrmRevenue(period: StripeCrmRevenuePeriod): StripeCrmR
   return {
     amount: roundCurrency(byMonth.reduce((total, month) => total + month.revenue, 0)),
     transactionCount: byMonth.length,
+    fetchedTransactionCount: byMonth.length,
+    ignoredCurrencyCount: 0,
+    availableCurrencies: [DEFAULT_STRIPE_REVENUE_CURRENCY],
     currency: DEFAULT_STRIPE_REVENUE_CURRENCY,
     source: {
       mode: "demo",
@@ -158,14 +172,24 @@ export function summarizeStripeCrmRevenue(
   const revenueByMonth = new Map(monthBucketsForPeriod(period).map((bucket) => [bucket.key, 0]));
   let amount = 0;
   let transactionCount = 0;
+  let fetchedTransactionCount = 0;
+  let ignoredCurrencyCount = 0;
+  const availableCurrencies = new Set<string>();
 
   for (const transaction of transactions) {
-    if (!isStripeRevenueTransaction(transaction) || transaction.currency !== normalizedCurrency) {
+    if (!isStripeRevenueTransaction(transaction)) {
       continue;
     }
 
     const date = dateKeyFromUnixSeconds(transaction.created);
     if (!date || date < period.start || date > period.end) {
+      continue;
+    }
+
+    fetchedTransactionCount += 1;
+    availableCurrencies.add(transaction.currency);
+    if (transaction.currency !== normalizedCurrency) {
+      ignoredCurrencyCount += 1;
       continue;
     }
 
@@ -183,6 +207,9 @@ export function summarizeStripeCrmRevenue(
   return {
     amount: roundCurrency(amount),
     transactionCount,
+    fetchedTransactionCount,
+    ignoredCurrencyCount,
+    availableCurrencies: Array.from(availableCurrencies).sort(),
     currency: normalizedCurrency,
     source,
     byMonth: monthBucketsForPeriod(period).map((bucket) => ({
@@ -194,13 +221,11 @@ export function summarizeStripeCrmRevenue(
 
 async function fetchStripeBalanceTransactionsForType({
   period,
-  currency,
   type,
   headers,
   fetchImpl
 }: {
   period: StripeCrmRevenuePeriod;
-  currency: string;
   type: (typeof STRIPE_REVENUE_TRANSACTION_TYPES)[number];
   headers: Record<string, string>;
   fetchImpl: FetchLike;
@@ -209,7 +234,7 @@ async function fetchStripeBalanceTransactionsForType({
   let startingAfter: string | undefined;
 
   for (let page = 0; page < STRIPE_BALANCE_TRANSACTION_MAX_PAGES_PER_TYPE; page += 1) {
-    const response = await fetchImpl(stripeBalanceTransactionsUrl(period, currency, type, startingAfter), {
+    const response = await fetchImpl(stripeBalanceTransactionsUrl(period, type, startingAfter), {
       method: "GET",
       headers,
       cache: "no-store"
@@ -242,14 +267,12 @@ async function fetchStripeBalanceTransactionsForType({
 
 function stripeBalanceTransactionsUrl(
   period: StripeCrmRevenuePeriod,
-  currency: string,
   type: (typeof STRIPE_REVENUE_TRANSACTION_TYPES)[number],
   startingAfter?: string
 ) {
   const params = new URLSearchParams({
     limit: String(STRIPE_BALANCE_TRANSACTION_LIMIT),
     type,
-    currency,
     "created[gte]": String(unixSecondsForDateStart(period.start)),
     "created[lte]": String(unixSecondsForDateEnd(period.end))
   });
@@ -300,6 +323,9 @@ function emptyStripeCrmRevenue(
   return {
     amount: 0,
     transactionCount: 0,
+    fetchedTransactionCount: 0,
+    ignoredCurrencyCount: 0,
+    availableCurrencies: [],
     currency,
     source: { mode, message },
     byMonth: monthBucketsForPeriod(period)
@@ -312,6 +338,36 @@ function isStripeRevenueTransaction(transaction: StripeBalanceTransaction) {
   }
 
   return STRIPE_REVENUE_REPORTING_CATEGORIES.has(transaction.reportingCategory) || STRIPE_REVENUE_REVERSAL_TYPES.has(transaction.type);
+}
+
+function stripeCrmRevenueSourceMessage(revenue: StripeCrmRevenue, accountId: string, keyMode: StripeSecretKeyMode) {
+  const currency = revenue.currency.toUpperCase();
+  const keyModeLabel = keyMode === "live" ? "live key" : keyMode === "test" ? "test key" : "key";
+  const accountScope = accountId ? "connected account" : "platform account";
+
+  if (revenue.transactionCount > 0) {
+    return `Stripe verbonden met ${keyModeLabel} op ${accountScope}; ${revenue.transactionCount} ${currency} omzetmutaties geladen.`;
+  }
+
+  if (revenue.fetchedTransactionCount > 0) {
+    return `Stripe verbonden met ${keyModeLabel} op ${accountScope}; geen ${currency} omzetmutaties, wel ${revenue.fetchedTransactionCount} mutaties in ${revenue.availableCurrencies
+      .map((currencyCode) => currencyCode.toUpperCase())
+      .join(", ")}.`;
+  }
+
+  const connectHint = accountId ? "" : " Zet PM_STRIPE_ACCOUNT_ID=acct_... als CRM-betalingen op een Stripe Connect-account staan.";
+  return `Stripe verbonden met ${keyModeLabel} op ${accountScope}; geen charge/refund mutaties gevonden in deze periode.${connectHint}`;
+}
+
+function stripeSecretKeyMode(secretKey: string): StripeSecretKeyMode {
+  if (secretKey.startsWith("sk_live_") || secretKey.startsWith("rk_live_")) {
+    return "live";
+  }
+  if (secretKey.startsWith("sk_test_") || secretKey.startsWith("rk_test_")) {
+    return "test";
+  }
+
+  return "configured";
 }
 
 function monthBucketsForPeriod(period: StripeCrmRevenuePeriod): StripeCrmRevenueMonth[] {

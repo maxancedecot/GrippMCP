@@ -191,7 +191,7 @@ const DEFAULT_PAID_OVERTIME_ABSENCE_TYPE_NAMES = ["Aanwezigheid - Opbouw overure
 const PAID_OVERTIME_ABSENCE_TYPE_ID_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_IDS", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_IDS"];
 const PAID_OVERTIME_ABSENCE_TYPE_NAME_ENV_NAMES = ["PM_PAID_OVERTIME_ABSENCE_TYPE_NAMES", "GRIPP_PAID_OVERTIME_ABSENCE_TYPE_NAMES"];
 const FORCED_BILLABLE_TASK_IDS = new Set([2844]);
-const PM_DASHBOARD_CACHE_VERSION = 5;
+const PM_DASHBOARD_CACHE_VERSION = 6;
 const PM_DASHBOARD_CACHE_PREFIX = `pm-dashboard:v${PM_DASHBOARD_CACHE_VERSION}`;
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
@@ -423,6 +423,10 @@ function MetricCard({
 
 function crmRevenueMetricDetail(crmRevenue: StripeCrmRevenue) {
   if (crmRevenue.source.mode === "live") {
+    if (crmRevenue.transactionCount === 0) {
+      return crmRevenue.source.message;
+    }
+
     return `${crmRevenue.transactionCount} Stripe mutaties; bruto betalingen min refunds`;
   }
   if (crmRevenue.source.mode === "demo") {
@@ -934,9 +938,7 @@ async function loadFreshPmDashboardData(
   const dataPeriod = mergePeriods(period, employeeBillabilityPeriod);
   const client = new GrippClient();
   const issues: string[] = [];
-  const crmRevenuePromise = process.env.STRIPE_SECRET_KEY?.trim()
-    ? optionalData(issues, "CRM omzet via Stripe", unavailableStripeCrmRevenue(period), () => fetchStripeCrmRevenueForPeriod(period))
-    : fetchStripeCrmRevenueForPeriod(period);
+  const crmRevenuePromise = loadOptionalStripeCrmRevenue(issues, period);
   const [invoices, hours, crmRevenue] = await Promise.all([
     optionalData(issues, "verkoopfacturen", [], () => fetchInvoicesForPeriod(client, period)),
     requiredData("uren", () => fetchHoursForPeriod(client, dataPeriod)),
@@ -1306,6 +1308,20 @@ async function optionalData<T>(issues: string[], label: string, fallback: T, loa
   } catch (error) {
     issues.push(`${label} niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
     return fallback;
+  }
+}
+
+async function loadOptionalStripeCrmRevenue(issues: string[], period: Period) {
+  if (!process.env.STRIPE_SECRET_KEY?.trim()) {
+    return fetchStripeCrmRevenueForPeriod(period);
+  }
+
+  try {
+    return await fetchStripeCrmRevenueForPeriod(period);
+  } catch (error) {
+    const issue = `CRM omzet via Stripe niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`;
+    issues.push(issue);
+    return unavailableStripeCrmRevenue(period, undefined, issue);
   }
 }
 

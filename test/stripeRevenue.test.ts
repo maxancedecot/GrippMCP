@@ -21,6 +21,9 @@ test("summarizeStripeCrmRevenue groups Stripe charges and refunds by month", () 
 
   assert.equal(result.amount, 155);
   assert.equal(result.transactionCount, 3);
+  assert.equal(result.fetchedTransactionCount, 4);
+  assert.equal(result.ignoredCurrencyCount, 1);
+  assert.deepEqual(result.availableCurrencies, ["eur", "usd"]);
   assert.deepEqual(
     result.byMonth.map((month) => [month.key, month.revenue]),
     [
@@ -96,6 +99,11 @@ test("fetchStripeCrmRevenueForPeriod lists revenue transaction types with Stripe
 
   assert.equal(result.amount, 170);
   assert.equal(result.transactionCount, 3);
+  assert.equal(result.fetchedTransactionCount, 3);
+  assert.equal(result.ignoredCurrencyCount, 0);
+  assert.deepEqual(result.availableCurrencies, ["eur"]);
+  assert.equal(result.source.mode, "live");
+  assert.match(result.source.message, /Stripe verbonden met test key op connected account/);
   assert.equal(calls.length, 8);
 
   const firstCall = calls[0];
@@ -103,7 +111,7 @@ test("fetchStripeCrmRevenueForPeriod lists revenue transaction types with Stripe
   const firstUrl = new URL(firstCall.url);
   assert.equal(headers.Authorization, "Bearer sk_test_123");
   assert.equal(headers["Stripe-Account"], "acct_123");
-  assert.equal(firstUrl.searchParams.get("currency"), "eur");
+  assert.equal(firstUrl.searchParams.get("currency"), null);
   assert.equal(firstUrl.searchParams.get("created[gte]"), String(timestamp("2026-01-01T00:00:00.000Z")));
   assert.equal(firstUrl.searchParams.get("created[lte]"), String(timestamp("2026-02-28T23:59:59.999Z")));
   assert.equal(firstUrl.searchParams.get("limit"), "100");
@@ -122,6 +130,9 @@ test("fetchStripeCrmRevenueForPeriod returns an empty source when Stripe is not 
   assert.equal(called, false);
   assert.equal(result.amount, 0);
   assert.equal(result.transactionCount, 0);
+  assert.equal(result.fetchedTransactionCount, 0);
+  assert.equal(result.ignoredCurrencyCount, 0);
+  assert.deepEqual(result.availableCurrencies, []);
   assert.equal(result.source.mode, "not_configured");
 });
 
