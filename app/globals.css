@@ -1496,6 +1496,10 @@ td .inline-bar {
   font-weight: 800;
 }
 
+.cvr-overview-metric--total strong {
+  color: var(--good);
+}
+
 .cvr-overview-metric span {
   color: var(--muted);
   font-size: 12px;

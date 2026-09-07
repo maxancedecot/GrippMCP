@@ -241,6 +241,7 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
             <th>Bezoekers</th>
             <th>Brochure</th>
             <th>Afspraak</th>
+            <th>CVR</th>
           </tr>
         </thead>
         <tbody>
@@ -260,12 +261,27 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
                 <td>
                   <CvrOverviewMetricCell metric={row.appointment} sourceVisitors={row.sourceVisitors} />
                 </td>
+                <td>
+                  <CvrOverviewTotalCell row={row} />
+                </td>
               </tr>
             );
           })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function CvrOverviewTotalCell({ row }: { row: CvrOverviewRow }) {
+  const conversions = row.brochure.visitors + row.appointment.visitors;
+  const conversionRate = row.sourceVisitors > 0 ? (conversions / row.sourceVisitors) * 100 : 0;
+
+  return (
+    <span className="cvr-overview-metric cvr-overview-metric--total">
+      <strong>{formatConversionRate(conversionRate)}%</strong>
+      <span>{formatNumber(conversions)} conversies</span>
+    </span>
   );
 }
 
