@@ -211,7 +211,7 @@ const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const OVERHEAD_DAILY_HOURS = 8;
 const REST_TONE_MAX_HOURS = 160;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator", "facturen"];
-const EMPLOYEE_ROLE_TEXT_FIELD_KEY_MARKERS = ["role", "rechtenprofiel", "rightsprofile", "accessprofile", "permissionprofile"];
+const EMPLOYEE_ROLE_TEXT_FIELD_KEY_MARKERS = ["role", "rechtenprofiel", "rightsprofile", "accessprofile", "permissionprofile", "functie", "function"];
 const OVERHEAD_EMPLOYEE_ID = -1;
 const COUNTED_LEAVE_ABSENCE_STATUSES = new Set(["approved", "goedgekeurd", "pending", "inaanvraag", "aangevraagd"]);
 const REJECTED_ABSENCE_STATUSES = new Set(["REJECTED", "rejected", "afgewezen", "geweigerd"]);
@@ -2252,11 +2252,15 @@ function employeeDetailCandidateIds(
   absenceRequestLines: JsonRecord[],
   calendarItems: JsonRecord[]
 ) {
+  const excludedRoleIds = excludedPmRoleIds();
   const employeeIds = new Set<number>();
 
   for (const employee of employees) {
     const employeeId = idFrom(readField(employee, "id"));
-    if (employeeId !== null && booleanFrom(readField(employee, "active")) !== false) {
+    if (
+      employeeId !== null &&
+      (booleanFrom(readField(employee, "active")) !== false || employeeHasExcludedPmRole(employee, excludedRoleIds))
+    ) {
       employeeIds.add(employeeId);
     }
   }
@@ -2965,7 +2969,7 @@ function buildOverheadCapacityRows(employees: JsonRecord[], period: Period): Emp
   for (const employee of employees) {
     const employeeId = idFrom(readField(employee, "id"));
     const costPerHour = employeeCostPerHour(employee);
-    if (employeeId === null || costPerHour === null || booleanFrom(readField(employee, "active")) === false) {
+    if (employeeId === null || costPerHour === null) {
       continue;
     }
 
@@ -3084,7 +3088,7 @@ function buildEmployeeCostByMonth(
   if (overheadSources) {
     for (const employee of overheadSources.capacitySources.employees) {
       const costPerHour = employeeCostPerHour(employee);
-      if (costPerHour === null || booleanFrom(readField(employee, "active")) === false) {
+      if (costPerHour === null) {
         continue;
       }
 
