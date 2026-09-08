@@ -21,6 +21,7 @@ export const metadata: Metadata = {
 type JsonRecord = Record<string, unknown>;
 type PmSearchParams = Record<string, string | string[] | undefined>;
 type PmBillabilityView = "employees" | "monthly";
+type PmRevenueView = "revenue" | "profit";
 type PmEmployeeBillabilityPeriodPreset = "week" | "month" | "year" | "custom";
 
 type Period = {
@@ -126,6 +127,11 @@ type MonthRevenuePerBillableHour = MonthRevenue & {
   revenuePerCalendarItemHour: number;
 };
 
+type MonthRevenueCostProfit = MonthRevenue & {
+  employeeCost: number;
+  profit: number;
+};
+
 type MonthBillability = {
   key: string;
   label: string;
@@ -170,6 +176,7 @@ type PmDashboardData = {
   employeeBillabilityOverhead: EmployeeBillabilityOverheadRow | null;
   billabilityByMonth: MonthBillability[];
   revenueByMonth: MonthRevenue[];
+  agencyCostProfitByMonth: MonthRevenueCostProfit[];
   revenuePerBillableHourByMonth: MonthRevenuePerBillableHour[];
   lastUpdated: string;
 };
@@ -278,8 +285,8 @@ const CUSTOM_FIELD_VALUE_KEYS = new Set(
 );
 const CUSTOM_FIELD_RELATION_NAME_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "displayvalue", "displayValue"].map(normalizeComparisonValue));
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
-const PM_DASHBOARD_CACHE_VERSION = 13;
-const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [12, 11, 10, 9, 8];
+const PM_DASHBOARD_CACHE_VERSION = 14;
+const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [13, 12, 11, 10, 9, 8];
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
 const PM_DASHBOARD_TIME_ZONE = "Europe/Brussels";
@@ -311,6 +318,7 @@ const currencyPerHourFormatter = new Intl.NumberFormat("nl-BE", {
 export default async function PmDashboardPage({ searchParams }: { searchParams?: Promise<PmSearchParams> }) {
   const params = (await searchParams) ?? {};
   const billabilityView = getPmBillabilityView(params);
+  const revenueView = getPmRevenueView(params);
   const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
   const cacheNotice = pmCacheNoticeFromParams(params);
   const cacheError = pmCacheErrorFromParams(params);
@@ -322,6 +330,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
     : dashboard.employeeBillability;
   const employeeBillabilityTotals = buildEmployeeBillabilityTableTotals(dashboard.employeeBillability, employeeBillabilityOverhead);
   const employeeBillabilityDisplayCount = dashboard.employeeBillability.length + (employeeBillabilityOverhead?.employeeCount ?? 0);
+  const agencyCostProfitTotals = buildRevenueCostProfitTotals(dashboard.agencyCostProfitByMonth);
 
   return (
     <DashboardFrame>
@@ -505,15 +514,48 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Omzet</p>
-            <h2>Per maand</h2>
+            <h2>{revenueView === "profit" ? "Kost & winst per maand" : "Per maand"}</h2>
           </div>
           <div className="panel-actions">
-            <span className="panel-total panel-total--invoice">{INVOICE_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.revenue)}</span>
-            <span className="panel-total panel-total--crm">{CRM_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.crmRevenue.amount)}</span>
+            {revenueView === "profit" ? (
+              <>
+                <span className="panel-total panel-total--invoice">{INVOICE_REVENUE_SERIES_LABEL} {formatCurrency(agencyCostProfitTotals.revenue)}</span>
+                <span className="panel-total panel-total--cost">Kost {formatCurrency(agencyCostProfitTotals.employeeCost)}</span>
+                <span className={`panel-total ${agencyCostProfitTotals.profit < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
+                  Winst {formatCurrency(agencyCostProfitTotals.profit)}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="panel-total panel-total--invoice">{INVOICE_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.revenue)}</span>
+                <span className="panel-total panel-total--crm">{CRM_REVENUE_SERIES_LABEL} {formatCurrency(dashboard.crmRevenue.amount)}</span>
+              </>
+            )}
           </div>
         </div>
 
-        <RevenueLineChart rows={dashboard.revenueByMonth} crmRows={dashboard.crmRevenue.byMonth} />
+        <nav className="dashboard-tabs pm-panel-tabs" aria-label="Agency omzet tabs">
+          <a
+            className={`dashboard-tab ${revenueView === "revenue" ? "dashboard-tab--active" : ""}`}
+            href={pmRevenueTabHref(params, "revenue")}
+            aria-current={revenueView === "revenue" ? "page" : undefined}
+          >
+            Omzet
+          </a>
+          <a
+            className={`dashboard-tab ${revenueView === "profit" ? "dashboard-tab--active" : ""}`}
+            href={pmRevenueTabHref(params, "profit")}
+            aria-current={revenueView === "profit" ? "page" : undefined}
+          >
+            Kost & winst
+          </a>
+        </nav>
+
+        {revenueView === "profit" ? (
+          <RevenueCostProfitLineChart rows={dashboard.agencyCostProfitByMonth} />
+        ) : (
+          <RevenueLineChart rows={dashboard.revenueByMonth} crmRows={dashboard.crmRevenue.byMonth} />
+        )}
       </section>
 
       <section className="panel pm-detail-panel" id="pm-revenue-per-billable-hour-detail" tabIndex={-1}>
@@ -666,6 +708,10 @@ function getPmBillabilityView(params: PmSearchParams): PmBillabilityView {
   return firstParam(params.billabilityView) === "monthly" ? "monthly" : "employees";
 }
 
+function getPmRevenueView(params: PmSearchParams): PmRevenueView {
+  return firstParam(params.revenueView) === "profit" ? "profit" : "revenue";
+}
+
 function getEmployeeBillabilityPeriodFromParams(params: PmSearchParams): EmployeeBillabilityPeriod {
   const preset = firstParam(params.employeePeriod);
   if (preset === "week") {
@@ -701,6 +747,27 @@ function pmBillabilityTabHref(params: PmSearchParams, view: PmBillabilityView) {
 
   const query = search.toString();
   return query ? `/pm?${query}#pm-billability-detail` : "/pm#pm-billability-detail";
+}
+
+function pmRevenueTabHref(params: PmSearchParams, view: PmRevenueView) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (["revenueView", PM_CACHE_NOTICE_PARAM, PM_CACHE_ERROR_PARAM].includes(key)) {
+      continue;
+    }
+
+    for (const item of paramValues(value)) {
+      search.append(key, item);
+    }
+  }
+
+  if (view === "profit") {
+    search.set("revenueView", "profit");
+  }
+
+  const query = search.toString();
+  return query ? `/pm?${query}#pm-revenue-detail` : "/pm#pm-revenue-detail";
 }
 
 function pmEmployeeBillabilityPeriodHref(params: PmSearchParams, preset: PmEmployeeBillabilityPeriodPreset) {
@@ -838,6 +905,106 @@ function RevenueLineChart({ rows, crmRows }: { rows: MonthRevenue[]; crmRows: Mo
               <circle className="revenue-line-point revenue-line-point--crm" cx={x} cy={crmY} r="4" />
               <text className="revenue-line-value revenue-line-value--invoice" x={x} y={valueY} textAnchor={anchor}>{formatCurrency(row.revenue)}</text>
               <text className="revenue-line-value revenue-line-value--crm" x={x} y={crmValueY} textAnchor={anchor}>{formatCurrency(crmValues[index])}</text>
+              <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function RevenueCostProfitLineChart({ rows }: { rows: MonthRevenueCostProfit[] }) {
+  const width = Math.max(720, rows.length * 112);
+  const height = 300;
+  const padding = { top: 26, right: 30, bottom: 48, left: 78 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const values = rows.flatMap((row) => [row.revenue, row.employeeCost, row.profit]);
+  const rawMaximum = Math.max(0, ...values);
+  const minimum = Math.min(0, ...values);
+  const maximum = rawMaximum === minimum ? rawMaximum + 1 : rawMaximum > 0 ? rawMaximum * 1.08 : rawMaximum;
+  const range = Math.max(1, maximum - minimum);
+  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
+  const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
+  const revenuePoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.revenue) }));
+  const costPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.employeeCost) }));
+  const profitPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.profit) }));
+  const revenueLinePath = smoothLinePath(revenuePoints);
+  const costLinePath = smoothLinePath(costPoints);
+  const profitLinePath = smoothLinePath(profitPoints);
+  const profitAreaPath = smoothAreaPath(profitPoints, yFor(0));
+  const gridTicks = Array.from({ length: 5 }, (_, index) => {
+    const value = maximum - (range * index) / 4;
+    return { key: index, value, y: yFor(value) };
+  });
+  const zeroY = yFor(0);
+  const gradientId = "pm-revenue-profit-line-gradient";
+  const valueYFor = (y: number, offset: number) =>
+    Math.max(padding.top + 12, Math.min(height - padding.bottom - 8, y + offset));
+
+  return (
+    <div className="revenue-line-chart">
+      <div className="revenue-line-legend" aria-hidden="true">
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />{INVOICE_REVENUE_SERIES_LABEL}</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--employee-cost" />Kost</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--profit" />Winst</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Agency omzet, kost en winst per maand: ${rows
+          .map(
+            (row) =>
+              `${row.label} omzet ${formatCurrency(row.revenue)}, kost ${formatCurrency(row.employeeCost)} en winst ${formatCurrency(
+                row.profit
+              )}`
+          )
+          .join(", ")}`}
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1={padding.top} y2={height - padding.bottom} gradientUnits="userSpaceOnUse">
+            <stop className="revenue-line-gradient-start revenue-line-gradient-start--profit" offset="0%" />
+            <stop className="revenue-line-gradient-end revenue-line-gradient-end--profit" offset="100%" />
+          </linearGradient>
+        </defs>
+        <rect className="revenue-line-plot-bg" x={padding.left} y={padding.top} width={chartWidth} height={chartHeight} rx="6" />
+        {gridTicks.map((tick) => (
+          <g key={tick.key}>
+            <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={tick.y} y2={tick.y} />
+            <text className="revenue-line-y-label" x={padding.left - 12} y={tick.y + 4} textAnchor="end">
+              {formatCurrency(tick.value)}
+            </text>
+          </g>
+        ))}
+        <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
+        {rows.length > 1 ? <path className="revenue-line-area revenue-line-area--profit" d={profitAreaPath} fill={`url(#${gradientId})`} /> : null}
+        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--invoice" d={revenueLinePath} /> : null}
+        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--employee-cost" d={costLinePath} /> : null}
+        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--profit" d={profitLinePath} /> : null}
+        {rows.map((row, index) => {
+          const { x, y: revenueY } = revenuePoints[index];
+          const { y: costY } = costPoints[index];
+          const { y: profitY } = profitPoints[index];
+          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+
+          return (
+            <g key={row.key}>
+              <title>{`${row.label}: omzet ${formatCurrency(row.revenue)}, kost ${formatCurrency(row.employeeCost)} en winst ${formatCurrency(
+                row.profit
+              )}`}</title>
+              <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={revenueY} r="4" />
+              <circle className="revenue-line-point revenue-line-point--employee-cost" cx={x} cy={costY} r="4" />
+              <circle className="revenue-line-point revenue-line-point--profit" cx={x} cy={profitY} r="4" />
+              <text className="revenue-line-value revenue-line-value--invoice" x={x} y={valueYFor(revenueY, -12)} textAnchor={anchor}>
+                {formatCurrency(row.revenue)}
+              </text>
+              <text className="revenue-line-value revenue-line-value--employee-cost" x={x} y={valueYFor(costY, 22)} textAnchor={anchor}>
+                {formatCurrency(row.employeeCost)}
+              </text>
+              <text className="revenue-line-value revenue-line-value--profit" x={x} y={valueYFor(profitY, -12)} textAnchor={anchor}>
+                {formatCurrency(row.profit)}
+              </text>
               <text className="revenue-line-label" x={x} y={height - 22} textAnchor={anchor}>{row.label}</text>
             </g>
           );
@@ -1363,13 +1530,22 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData, cacheVers
     ...summary,
     ...buildBillabilitySummary(rows, employeeBillabilityOverhead ? [employeeBillabilityOverhead] : [])
   };
+  const revenueByMonthRows = Array.isArray(dashboard.revenueByMonth) ? dashboard.revenueByMonth : [];
+  const agencyCostProfitByMonth = agencyCostProfitByMonthFromValue(
+    (dashboard as JsonRecord).agencyCostProfitByMonth,
+    revenueByMonthRows,
+    dashboard.period,
+    employeeCost + (employeeBillabilityOverhead?.employeeCost ?? 0)
+  );
 
   return {
     ...dashboard,
     employeeCost,
     employeeBillability: rows,
     employeeBillabilityOverhead,
-    employeeBillabilitySummary
+    employeeBillabilitySummary,
+    revenueByMonth: revenueByMonthRows,
+    agencyCostProfitByMonth
   };
 }
 
@@ -1435,6 +1611,75 @@ function normalizeCachedEmployeeBillabilityOverhead(
     calendarItemHours: 0,
     planningWithoutTaskHours: 0,
     billability: 0
+  };
+}
+
+function agencyCostProfitByMonthFromValue(
+  value: unknown,
+  revenueRows: MonthRevenue[],
+  period: Period,
+  fallbackTotalCost: number
+): MonthRevenueCostProfit[] {
+  const recordsByKey = new Map<string, JsonRecord>();
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const record = asRecord(item);
+      const key = stringFrom(record?.key);
+      if (record && key) {
+        recordsByKey.set(key, record);
+      }
+    }
+  }
+
+  const fallbackCostsByMonth =
+    recordsByKey.size === 0 ? distributeTotalCostByMonth(revenueRows, period, fallbackTotalCost) : new Map<string, number>();
+
+  return revenueRows.map((row) => {
+    const record = recordsByKey.get(row.key);
+    const revenue = numberFrom(record?.revenue) ?? row.revenue;
+    const employeeCost = numberFrom(record?.employeeCost) ?? fallbackCostsByMonth.get(row.key) ?? 0;
+
+    return {
+      ...row,
+      revenue,
+      employeeCost,
+      profit: numberFrom(record?.profit) ?? revenue - employeeCost
+    };
+  });
+}
+
+function distributeTotalCostByMonth(revenueRows: MonthRevenue[], period: Period, fallbackTotalCost: number) {
+  const costsByMonth = new Map(revenueRows.map((row) => [row.key, 0]));
+  const totalCost = Math.max(0, fallbackTotalCost);
+  if (totalCost === 0 || revenueRows.length === 0 || !isDateKey(period.start) || !isDateKey(period.end) || period.start > period.end) {
+    return costsByMonth;
+  }
+
+  const weights = revenueRows.map((row) => {
+    const monthStart = maxDateKey(period.start, `${row.key}-01`);
+    const monthEnd = minDateKey(period.end, monthEndDateKey(row.key));
+    return monthStart > monthEnd ? 0 : calculateDefaultContractHours(monthStart, monthEnd);
+  });
+  const totalWeight = weights.reduce((total, value) => total + value, 0);
+  if (totalWeight <= 0) {
+    return costsByMonth;
+  }
+
+  revenueRows.forEach((row, index) => {
+    costsByMonth.set(row.key, totalCost * (weights[index] / totalWeight));
+  });
+
+  return costsByMonth;
+}
+
+function buildRevenueCostProfitTotals(rows: MonthRevenueCostProfit[]) {
+  const revenue = rows.reduce((total, row) => total + row.revenue, 0);
+  const employeeCost = rows.reduce((total, row) => total + row.employeeCost, 0);
+
+  return {
+    revenue,
+    employeeCost,
+    profit: revenue - employeeCost
   };
 }
 
@@ -2532,11 +2777,21 @@ function buildPmDashboardData(
   const calendarItemHours = yearEmployeeBillability.reduce((total, row) => total + row.calendarItemHours, 0);
   const monthBuckets = makeMonthBuckets(period);
   const availableHoursByMonth = buildAvailableHoursByMonth(capacitySources, hours, period, monthBuckets);
+  const employeeCostByMonth = buildEmployeeCostByMonth(capacitySources, hours, period, monthBuckets, employeeBillabilityOverheadSources);
   const calendarItemHoursByMonth = buildCalendarItemHoursByMonth(calendarItems, period);
   const revenueByMonthRows = monthBuckets.map((bucket) => ({
     ...bucket,
     revenue: revenueByMonth.get(bucket.key) ?? 0
   }));
+  const agencyCostProfitByMonth = revenueByMonthRows.map((row) => {
+    const employeeCost = employeeCostByMonth.get(row.key) ?? 0;
+
+    return {
+      ...row,
+      employeeCost,
+      profit: row.revenue - employeeCost
+    };
+  });
   const billabilityByMonth = monthBuckets.map((bucket) => {
     const monthlyBillableHours = billableHoursByMonth.get(bucket.key) ?? 0;
     const monthlyAvailableHours = availableHoursByMonth.get(bucket.key) ?? 0;
@@ -2592,6 +2847,7 @@ function buildPmDashboardData(
     employeeBillabilityOverhead,
     billabilityByMonth,
     revenueByMonth: revenueByMonthRows,
+    agencyCostProfitByMonth,
     revenuePerBillableHourByMonth,
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       timeZone: PM_DASHBOARD_TIME_ZONE,
@@ -2853,6 +3109,99 @@ function buildEmployeeBillabilityTableTotals(
 
 function averageNumber(values: number[]) {
   return values.length === 0 ? null : values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function buildEmployeeCostByMonth(
+  capacitySources: CapacitySources,
+  hours: JsonRecord[],
+  period: Period,
+  monthBuckets: MonthRevenue[],
+  overheadSources: EmployeeBillabilityOverheadSources | null = null
+) {
+  const employeeCostByMonth = new Map(monthBuckets.map((bucket) => [bucket.key, 0]));
+  const employeesById = new Map<number, JsonRecord>();
+
+  for (const employee of capacitySources.employees) {
+    const employeeId = idFrom(readField(employee, "id"));
+    if (employeeId !== null) {
+      employeesById.set(employeeId, employee);
+    }
+  }
+
+  const leaveByEmployeeId = buildLeaveByEmployeeId(capacitySources.absenceRequestLines, capacitySources.absenceRequestsById, period);
+  const referencedEmployeeIds = new Set<number>([
+    ...Array.from(capacitySources.workingHoursByEmployeeId.keys()),
+    ...Array.from(capacitySources.paidOvertimeHoursByEmployeeId.keys()),
+    ...Array.from(leaveByEmployeeId.keys()),
+    ...hours.map((hour) => relationId(hour, "employee")).filter((employeeId): employeeId is number => employeeId !== null)
+  ]);
+
+  for (const employeeId of referencedEmployeeIds) {
+    if (!employeesById.has(employeeId)) {
+      employeesById.set(employeeId, { id: employeeId, active: true });
+    }
+  }
+
+  for (const [employeeId, employee] of employeesById.entries()) {
+    if (booleanFrom(readField(employee, "active")) === false && !referencedEmployeeIds.has(employeeId)) {
+      continue;
+    }
+
+    const costPerHour = employeeCostPerHour(employee);
+    if (costPerHour === null) {
+      continue;
+    }
+
+    addMonthlyEmployeeContractCost(employeeCostByMonth, monthBuckets, period, employee, costPerHour, (start, end) => {
+      const capacityStart = maxDateKey(period.start, employeeStartDate(employee));
+      const totalDefaultContractHours = calculateDefaultContractHours(capacityStart, period.end);
+      const workingHours = capacitySources.workingHoursByEmployeeId.get(employeeId);
+      const contractScale =
+        workingHours === undefined || totalDefaultContractHours <= 0 ? 1 : Math.max(0, workingHours) / totalDefaultContractHours;
+      const defaultContractHours = calculateDefaultContractHours(start, end);
+
+      return workingHours === undefined ? defaultContractHours : defaultContractHours * contractScale;
+    });
+  }
+
+  if (overheadSources) {
+    for (const employee of overheadSources.capacitySources.employees) {
+      const costPerHour = employeeCostPerHour(employee);
+      if (costPerHour === null || booleanFrom(readField(employee, "active")) === false) {
+        continue;
+      }
+
+      addMonthlyEmployeeContractCost(employeeCostByMonth, monthBuckets, period, employee, costPerHour, calculateOverheadContractHours);
+    }
+  }
+
+  return employeeCostByMonth;
+}
+
+function addMonthlyEmployeeContractCost(
+  employeeCostByMonth: Map<string, number>,
+  monthBuckets: MonthRevenue[],
+  period: Period,
+  employee: JsonRecord,
+  costPerHour: number,
+  contractHoursForRange: (start: string, end: string) => number
+) {
+  const capacityStart = maxDateKey(period.start, employeeStartDate(employee));
+  if (capacityStart > period.end) {
+    return;
+  }
+
+  for (const bucket of monthBuckets) {
+    const monthStart = maxDateKey(capacityStart, `${bucket.key}-01`);
+    const monthEnd = minDateKey(period.end, monthEndDateKey(bucket.key));
+    if (monthStart > monthEnd) {
+      continue;
+    }
+
+    const contractHours = contractHoursForRange(monthStart, monthEnd);
+    const employeeCost = employeeCostFromHours(contractHours, 0, costPerHour) ?? 0;
+    employeeCostByMonth.set(bucket.key, (employeeCostByMonth.get(bucket.key) ?? 0) + employeeCost);
+  }
 }
 
 function buildAvailableHoursByMonth(capacitySources: CapacitySources, hours: JsonRecord[], period: Period, monthBuckets: MonthRevenue[]) {

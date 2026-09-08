@@ -850,6 +850,7 @@ select {
 .panel-total--billable,
 .panel-total--billability,
 .panel-total--cost,
+.panel-total--profit,
 .panel-total--warning,
 .panel-total--goal {
   display: inline-flex;
@@ -862,6 +863,7 @@ select {
 .panel-total--billable::before,
 .panel-total--billability::before,
 .panel-total--cost::before,
+.panel-total--profit::before,
 .panel-total--warning::before,
 .panel-total--goal::before {
   content: "";
@@ -885,6 +887,10 @@ select {
 
 .panel-total--cost::before {
   background: var(--good);
+}
+
+.panel-total--profit::before {
+  background: var(--green);
 }
 
 .panel-total--warning::before {
@@ -1136,6 +1142,14 @@ select {
   border-color: var(--blue);
 }
 
+.revenue-line-legend-dot--employee-cost {
+  border-color: var(--danger);
+}
+
+.revenue-line-legend-dot--profit {
+  border-color: var(--green);
+}
+
 .revenue-line-legend-dot--crm {
   border-color: var(--billable);
 }
@@ -1171,6 +1185,11 @@ select {
   stop-color: var(--warning);
 }
 
+.revenue-line-gradient-start--profit,
+.revenue-line-gradient-end--profit {
+  stop-color: var(--green);
+}
+
 .revenue-line-grid {
   stroke: var(--border);
   stroke-width: 1;
@@ -1200,6 +1219,14 @@ select {
 
 .revenue-line-path--calendar-hour {
   stroke: var(--neutral);
+}
+
+.revenue-line-path--employee-cost {
+  stroke: var(--danger);
+}
+
+.revenue-line-path--profit {
+  stroke: var(--green);
 }
 
 .revenue-line-path--crm {
@@ -1245,6 +1272,14 @@ select {
 
 .revenue-line-point--calendar-hour {
   stroke: var(--neutral);
+}
+
+.revenue-line-point--employee-cost {
+  stroke: var(--danger);
+}
+
+.revenue-line-point--profit {
+  stroke: var(--green);
 }
 
 .revenue-line-point--crm {
