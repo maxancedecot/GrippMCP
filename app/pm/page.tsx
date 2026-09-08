@@ -514,7 +514,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Omzet</p>
-            <h2>{revenueView === "profit" ? "Kost & winst per maand" : "Per maand"}</h2>
+            <h2>{revenueView === "profit" ? "Kost & winst cumulatief" : "Per maand"}</h2>
           </div>
           <div className="panel-actions">
             {revenueView === "profit" ? (
@@ -915,21 +915,23 @@ function RevenueLineChart({ rows, crmRows }: { rows: MonthRevenue[]; crmRows: Mo
 }
 
 function RevenueCostProfitLineChart({ rows }: { rows: MonthRevenueCostProfit[] }) {
-  const width = Math.max(720, rows.length * 112);
+  const cumulativeRows = cumulativeRevenueCostProfitRows(rows);
+  const width = Math.max(720, cumulativeRows.length * 112);
   const height = 300;
   const padding = { top: 26, right: 30, bottom: 48, left: 78 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const values = rows.flatMap((row) => [row.revenue, row.employeeCost, row.profit]);
+  const values = cumulativeRows.flatMap((row) => [row.revenue, row.employeeCost, row.profit]);
   const rawMaximum = Math.max(0, ...values);
   const minimum = Math.min(0, ...values);
   const maximum = rawMaximum === minimum ? rawMaximum + 1 : rawMaximum > 0 ? rawMaximum * 1.08 : rawMaximum;
   const range = Math.max(1, maximum - minimum);
-  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
+  const xFor = (index: number) =>
+    padding.left + (cumulativeRows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (cumulativeRows.length - 1));
   const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
-  const revenuePoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.revenue) }));
-  const costPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.employeeCost) }));
-  const profitPoints: ChartPoint[] = rows.map((row, index) => ({ x: xFor(index), y: yFor(row.profit) }));
+  const revenuePoints: ChartPoint[] = cumulativeRows.map((row, index) => ({ x: xFor(index), y: yFor(row.revenue) }));
+  const costPoints: ChartPoint[] = cumulativeRows.map((row, index) => ({ x: xFor(index), y: yFor(row.employeeCost) }));
+  const profitPoints: ChartPoint[] = cumulativeRows.map((row, index) => ({ x: xFor(index), y: yFor(row.profit) }));
   const revenueLinePath = smoothLinePath(revenuePoints);
   const costLinePath = smoothLinePath(costPoints);
   const profitLinePath = smoothLinePath(profitPoints);
@@ -953,10 +955,10 @@ function RevenueCostProfitLineChart({ rows }: { rows: MonthRevenueCostProfit[] }
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Agency omzet, kost en winst per maand: ${rows
+        aria-label={`Agency omzet, kost en winst cumulatief per maand: ${cumulativeRows
           .map(
             (row) =>
-              `${row.label} omzet ${formatCurrency(row.revenue)}, kost ${formatCurrency(row.employeeCost)} en winst ${formatCurrency(
+              `${row.label} totaal omzet ${formatCurrency(row.revenue)}, totaal kost ${formatCurrency(row.employeeCost)} en totaal winst ${formatCurrency(
                 row.profit
               )}`
           )
@@ -978,19 +980,19 @@ function RevenueCostProfitLineChart({ rows }: { rows: MonthRevenueCostProfit[] }
           </g>
         ))}
         <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
-        {rows.length > 1 ? <path className="revenue-line-area revenue-line-area--profit" d={profitAreaPath} fill={`url(#${gradientId})`} /> : null}
-        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--invoice" d={revenueLinePath} /> : null}
-        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--employee-cost" d={costLinePath} /> : null}
-        {rows.length > 1 ? <path className="revenue-line-path revenue-line-path--profit" d={profitLinePath} /> : null}
-        {rows.map((row, index) => {
+        {cumulativeRows.length > 1 ? <path className="revenue-line-area revenue-line-area--profit" d={profitAreaPath} fill={`url(#${gradientId})`} /> : null}
+        {cumulativeRows.length > 1 ? <path className="revenue-line-path revenue-line-path--invoice" d={revenueLinePath} /> : null}
+        {cumulativeRows.length > 1 ? <path className="revenue-line-path revenue-line-path--employee-cost" d={costLinePath} /> : null}
+        {cumulativeRows.length > 1 ? <path className="revenue-line-path revenue-line-path--profit" d={profitLinePath} /> : null}
+        {cumulativeRows.map((row, index) => {
           const { x, y: revenueY } = revenuePoints[index];
           const { y: costY } = costPoints[index];
           const { y: profitY } = profitPoints[index];
-          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+          const anchor = index === 0 ? "start" : index === cumulativeRows.length - 1 ? "end" : "middle";
 
           return (
             <g key={row.key}>
-              <title>{`${row.label}: omzet ${formatCurrency(row.revenue)}, kost ${formatCurrency(row.employeeCost)} en winst ${formatCurrency(
+              <title>{`${row.label}: totaal omzet ${formatCurrency(row.revenue)}, totaal kost ${formatCurrency(row.employeeCost)} en totaal winst ${formatCurrency(
                 row.profit
               )}`}</title>
               <circle className="revenue-line-point revenue-line-point--invoice" cx={x} cy={revenueY} r="4" />
@@ -1644,6 +1646,23 @@ function agencyCostProfitByMonthFromValue(
       revenue,
       employeeCost,
       profit: numberFrom(record?.profit) ?? revenue - employeeCost
+    };
+  });
+}
+
+function cumulativeRevenueCostProfitRows(rows: MonthRevenueCostProfit[]): MonthRevenueCostProfit[] {
+  let revenue = 0;
+  let employeeCost = 0;
+
+  return rows.map((row) => {
+    revenue += row.revenue;
+    employeeCost += row.employeeCost;
+
+    return {
+      ...row,
+      revenue,
+      employeeCost,
+      profit: revenue - employeeCost
     };
   });
 }
