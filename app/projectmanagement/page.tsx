@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { GrippClient } from "../../src/grippClient.js";
+import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
 import type { JsonValue } from "../../src/types.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 import { ProjectManagementAutoRefresh } from "./auto-refresh.js";
+import { PROJECT_MANAGEMENT_CACHE_KEY, PROJECT_MANAGEMENT_CACHE_TTL_MS, PROJECT_MANAGEMENT_CACHE_VERSION } from "./cache.js";
 import { CompleteProjectForm } from "./complete-project-form.js";
 import { ProjectTasksModal } from "./project-tasks-modal.js";
 
@@ -23,7 +25,7 @@ type CompanyDetails = {
 };
 
 type ProjectSource = {
-  mode: "live" | "demo";
+  mode: "live" | "cache" | "demo";
   message: string;
 };
 
@@ -51,6 +53,12 @@ type ProjectManagementData = {
   upcomingProjects: number;
   totalValue: number;
   lastUpdated: string;
+};
+
+type CachedProjectManagementData = {
+  version: number;
+  savedAt: string;
+  dashboard: ProjectManagementData;
 };
 
 type ProjectTimelineTick = {
@@ -105,7 +113,7 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
           </div>
           <div className="header-meta">
             <span className={`source-badge source-badge--${data.source.mode}`}>
-              {data.source.mode === "live" ? "Live uit Gripp" : "Demo-data"}
+              {projectSourceBadgeLabel(data.source.mode)}
             </span>
             <span>{data.totalProjects} lopende projecten</span>
             <span>Bijgewerkt {data.lastUpdated}</span>
@@ -280,7 +288,7 @@ function ProjectTimeline({
 
                 <div className="project-timeline-summary project-timeline-fixed project-timeline-fixed--right">
                   <strong>{project.value > 0 ? formatCurrency(project.value) : "-"}</strong>
-                  {sourceMode === "live" ? (
+                  {sourceMode !== "demo" ? (
                     <CompleteProjectForm projectId={project.id} projectName={project.name} />
                   ) : null}
                 </div>
@@ -301,28 +309,123 @@ async function getProjectManagementData(): Promise<ProjectManagementData> {
     });
   }
 
-  try {
-    const client = new GrippClient();
-    const projectRecords = await fetchProjectPages(client);
-    const relationIds = {
-      phases: uniqueRelationIds(projectRecords, "phase"),
-      tags: uniqueRelationIds(projectRecords, "tags")
-    };
-    const [companies, phases, tags] = await Promise.all([
-      fetchCompanyDetails(client, uniqueRelationIds(projectRecords, "company")),
-      fetchRelationNames(client, "projectphase", relationIds.phases),
-      fetchRelationNames(client, "tag", relationIds.tags)
-    ]);
-    const employees = await fetchRelationNames(client, "employee", [...new Set(companies.accountManagerIds.values())]);
+  const cached = await safeReadCachedProjectManagementData();
+  if (cached && projectManagementCacheAgeMs(cached) < PROJECT_MANAGEMENT_CACHE_TTL_MS) {
+    return projectManagementDataFromCache(cached);
+  }
 
-    const projects = projectRecords.map((project) => projectRowFromRecord(project, { companies, employees, phases, tags }));
-    return buildProjectManagementData(projects, { mode: "live", message: "" });
+  try {
+    const fresh = await loadFreshProjectManagementData();
+    const cacheWriteIssue = await safeWriteCachedProjectManagementData(fresh);
+    return cacheWriteIssue ? projectManagementDataWithSourceMessage(fresh, cacheWriteIssue) : fresh;
   } catch (error) {
+    if (cached) {
+      return projectManagementDataFromCache(
+        cached,
+        `Live opdrachten konden niet worden vernieuwd. Vorige cache blijft zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
+      );
+    }
+
     return buildProjectManagementData(createDemoProjects(), {
       mode: "demo",
       message: `Live opdrachten konden niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
     });
   }
+}
+
+async function loadFreshProjectManagementData(): Promise<ProjectManagementData> {
+  const client = new GrippClient();
+  const projectRecords = await fetchProjectPages(client);
+  const relationIds = {
+    phases: uniqueRelationIds(projectRecords, "phase"),
+    tags: uniqueRelationIds(projectRecords, "tags")
+  };
+  const [companies, phases, tags] = await Promise.all([
+    fetchCompanyDetails(client, uniqueRelationIds(projectRecords, "company")),
+    fetchRelationNames(client, "projectphase", relationIds.phases),
+    fetchRelationNames(client, "tag", relationIds.tags)
+  ]);
+  const employees = await fetchRelationNames(client, "employee", [...new Set(companies.accountManagerIds.values())]);
+
+  const projects = projectRecords.map((project) => projectRowFromRecord(project, { companies, employees, phases, tags }));
+  return buildProjectManagementData(projects, { mode: "live", message: "" });
+}
+
+async function safeReadCachedProjectManagementData() {
+  try {
+    const cached = await readJsonCache<unknown>(PROJECT_MANAGEMENT_CACHE_KEY);
+    return cachedProjectManagementDataFromCacheValue(cached);
+  } catch {
+    return null;
+  }
+}
+
+async function safeWriteCachedProjectManagementData(dashboard: ProjectManagementData) {
+  try {
+    await writeJsonCache(PROJECT_MANAGEMENT_CACHE_KEY, {
+      version: PROJECT_MANAGEMENT_CACHE_VERSION,
+      savedAt: new Date().toISOString(),
+      dashboard
+    } satisfies CachedProjectManagementData);
+    return "";
+  } catch (error) {
+    return `Cache kon niet worden opgeslagen${error instanceof Error ? `: ${error.message}` : ""}.`;
+  }
+}
+
+function cachedProjectManagementDataFromCacheValue(value: unknown): CachedProjectManagementData | null {
+  const record = asRecord(value);
+  const dashboard = asRecord(record?.dashboard);
+  if (
+    record?.version !== PROJECT_MANAGEMENT_CACHE_VERSION ||
+    typeof record.savedAt !== "string" ||
+    !dashboard ||
+    !Array.isArray(dashboard.projects)
+  ) {
+    return null;
+  }
+
+  return {
+    version: record.version,
+    savedAt: record.savedAt,
+    dashboard: dashboard as ProjectManagementData
+  };
+}
+
+function projectManagementCacheAgeMs(cached: CachedProjectManagementData) {
+  const savedAt = Date.parse(cached.savedAt);
+  return Number.isFinite(savedAt) ? Date.now() - savedAt : Number.POSITIVE_INFINITY;
+}
+
+function projectManagementDataFromCache(cached: CachedProjectManagementData, message = "Cache-data zichtbaar. Projectmanagement wordt maximaal 1x per uur vernieuwd."): ProjectManagementData {
+  return {
+    ...cached.dashboard,
+    source: {
+      mode: "cache",
+      message: [message, cached.dashboard.source.message].filter(Boolean).join(" ")
+    }
+  };
+}
+
+function projectManagementDataWithSourceMessage(dashboard: ProjectManagementData, message: string): ProjectManagementData {
+  return {
+    ...dashboard,
+    source: {
+      ...dashboard.source,
+      message: [dashboard.source.message, message].filter(Boolean).join(" ")
+    }
+  };
+}
+
+function projectSourceBadgeLabel(mode: ProjectSource["mode"]) {
+  if (mode === "live") {
+    return "Live uit Gripp";
+  }
+  if (mode === "cache") {
+    return "Cache uit Gripp";
+  }
+
+  return "Demo-data";
 }
 
 async function fetchProjectPages(client: GrippClient) {

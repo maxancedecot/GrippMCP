@@ -1214,30 +1214,17 @@ async function getPmDashboardData(
   const cacheKey = pmDashboardCacheKey(period, employeeBillabilityPeriod);
   const cached = (await safeReadCachedPmDashboardData(cacheKey)) ?? (await safeReadLegacyCachedPmDashboardData(period, employeeBillabilityPeriod));
   if (cached) {
-    const enrichedCached = cacheNotice === "refresh_failed" ? cached : await enrichCachedPmDashboardDataWithEmployeeCosts(cached, cacheKey);
-    return dashboardFromCache(enrichedCached, cacheNotice, cacheError);
+    return dashboardFromCache(cached, cacheNotice, cacheError);
   }
 
-  try {
-    const fresh = await loadFreshPmDashboardData(period, employeeBillabilityPeriod);
-    if (fresh.issues.length === 0) {
-      const cacheWriteIssue = await safeWriteCachedPmDashboardData(cacheKey, fresh.dashboard);
-      if (cacheWriteIssue) {
-        return dashboardWithSourceMessage(fresh.dashboard, cacheWriteIssue, "warning");
-      }
-    }
-
-    return dashboardWithCacheNotice(fresh.dashboard, cacheNotice, cacheError);
-  } catch (error) {
-    return dashboardWithCacheNotice(
-      buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
-        mode: "demo",
-        message: `Live PM-data kon niet worden geladen. Demo-data zichtbaar. ${error instanceof Error ? error.message : ""}`.trim()
-      }),
-      cacheNotice,
-      cacheError
-    );
-  }
+  return dashboardWithCacheNotice(
+    buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
+      mode: "demo",
+      message: "Geen PM-cache beschikbaar. Klik op Bijwerken om live Gripp-cijfers op te halen."
+    }),
+    cacheNotice,
+    cacheError
+  );
 }
 
 async function refreshCachedPmDashboardData(employeeBillabilityPeriod: EmployeeBillabilityPeriod): Promise<void> {
@@ -1381,47 +1368,6 @@ async function safeReadLegacyCachedPmDashboardData(period: Period, employeeBilla
   return null;
 }
 
-async function enrichCachedPmDashboardDataWithEmployeeCosts(cached: CachedPmDashboardData, cacheKey: string): Promise<CachedPmDashboardData> {
-  if (!dashboardNeedsEmployeeCostEnrichment(cached.dashboard)) {
-    return cached;
-  }
-
-  try {
-    const client = new GrippClient();
-    const employees = await fetchEmployees(client);
-    let detailsIssue = "";
-    const detailedEmployees = await fetchEmployeeDetailsForEmployees(client, employees).catch((error) => {
-      detailsIssue = `Medewerkerdetails niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}.`;
-      return employees;
-    });
-    const dashboard = dashboardWithEmployeeCostsFromEmployees(cached.dashboard, detailedEmployees);
-    const missingCount = dashboard.employeeBillabilitySummary.missingCostPerHourCount;
-    let dashboardWithNotice =
-      missingCount > 0
-        ? dashboardWithSourceMessage(dashboard, `Interne kostprijs ontbreekt voor ${formatEmployeeCount(missingCount)}.`, "warning")
-        : dashboard;
-    if (detailsIssue) {
-      dashboardWithNotice = dashboardWithSourceMessage(dashboardWithNotice, detailsIssue, "warning");
-    }
-    const cacheWriteIssue = await safeWriteCachedPmDashboardData(cacheKey, dashboardWithNotice);
-
-    return {
-      version: PM_DASHBOARD_CACHE_VERSION,
-      savedAt: new Date().toISOString(),
-      dashboard: cacheWriteIssue ? dashboardWithSourceMessage(dashboardWithNotice, cacheWriteIssue, "warning") : dashboardWithNotice
-    };
-  } catch (error) {
-    return {
-      ...cached,
-      dashboard: dashboardWithSourceMessage(
-        cached.dashboard,
-        `Interne kostprijs niet aangevuld: medewerkers niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}.`,
-        "warning"
-      )
-    };
-  }
-}
-
 async function safeWriteCachedPmDashboardData(cacheKey: string, dashboard: PmDashboardData) {
   try {
     await writeCachedPmDashboardData(cacheKey, dashboard);
@@ -1469,21 +1415,6 @@ function dashboardWithCacheNotice(dashboard: PmDashboardData, notice?: PmCacheNo
       ...dashboard.source,
       message: [noticeMessage, dashboard.source.message].filter(Boolean).join(" "),
       noticeTone: cacheNoticeTone(notice, dashboard.source.noticeTone)
-    }
-  };
-}
-
-function dashboardWithSourceMessage(
-  dashboard: PmDashboardData,
-  message: string,
-  noticeTone: DashboardSource["noticeTone"]
-): PmDashboardData {
-  return {
-    ...dashboard,
-    source: {
-      ...dashboard.source,
-      message: [dashboard.source.message, message].filter(Boolean).join(" "),
-      noticeTone: noticeTone ?? dashboard.source.noticeTone
     }
   };
 }
@@ -1732,49 +1663,6 @@ function buildRevenueCostProfitTotals(rows: MonthRevenueCostProfit[]) {
     revenue,
     employeeCost,
     profit: revenue - employeeCost
-  };
-}
-
-function dashboardNeedsEmployeeCostEnrichment(dashboard: PmDashboardData) {
-  return missingCostPerHourCount(dashboard.employeeBillability) > 0;
-}
-
-function dashboardWithEmployeeCostsFromEmployees(dashboard: PmDashboardData, employees: JsonRecord[]): PmDashboardData {
-  const employeesById = new Map<number, JsonRecord>();
-  for (const employee of employees) {
-    const employeeId = idFrom(readField(employee, "id"));
-    if (employeeId !== null) {
-      employeesById.set(employeeId, employee);
-    }
-  }
-
-  const rows = dashboard.employeeBillability.map((row) => {
-    if (row.costPerHour !== null) {
-      return {
-        ...row,
-        employeeCost: employeeCostFromHours(row.availableHours, row.leaveHours, row.costPerHour)
-      };
-    }
-
-    const employee = employeesById.get(row.employeeId);
-    const costPerHour = employee ? employeeCostPerHour(employee) : null;
-
-    return {
-      ...row,
-      costPerHour,
-      employeeCost: employeeCostFromHours(row.availableHours, row.leaveHours, costPerHour)
-    };
-  });
-  const employeeCost = rows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
-
-  return {
-    ...dashboard,
-    employeeCost,
-    employeeBillability: rows,
-    employeeBillabilitySummary: {
-      ...dashboard.employeeBillabilitySummary,
-      ...buildBillabilitySummary(rows, dashboard.employeeBillabilityOverhead ? [dashboard.employeeBillabilityOverhead] : [])
-    }
   };
 }
 

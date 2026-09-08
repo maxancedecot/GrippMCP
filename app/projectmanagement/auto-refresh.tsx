@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-
-const REFRESH_INTERVAL_MS = 120_000;
+import { PROJECT_MANAGEMENT_REFRESH_INTERVAL_MS } from "./cache.js";
 
 export function ProjectManagementAutoRefresh() {
   useEffect(() => {
@@ -24,12 +23,12 @@ export function ProjectManagementAutoRefresh() {
       window.location.reload();
     };
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible" && Date.now() - lastRefresh >= REFRESH_INTERVAL_MS) {
+      if (document.visibilityState === "visible" && Date.now() - lastRefresh >= PROJECT_MANAGEMENT_REFRESH_INTERVAL_MS) {
         refresh();
       }
     };
 
-    const interval = window.setInterval(refresh, REFRESH_INTERVAL_MS);
+    const interval = window.setInterval(refresh, PROJECT_MANAGEMENT_REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {

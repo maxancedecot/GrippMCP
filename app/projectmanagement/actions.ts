@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import { GrippClient } from "../../src/grippClient.js";
+import { deleteJsonCache } from "../../src/jsonCache.js";
 import type { JsonValue } from "../../src/types.js";
+import { PROJECT_MANAGEMENT_CACHE_KEY } from "./cache.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -37,6 +39,9 @@ export async function completeProjectAction(formData: FormData) {
     redirect(projectManagementHref("failed"));
   }
 
+  await deleteJsonCache(PROJECT_MANAGEMENT_CACHE_KEY).catch((error) => {
+    console.error("Projectmanagement cache invalidation failed", error);
+  });
   revalidatePath("/projectmanagement");
   redirect(projectManagementHref("completed"));
 }
