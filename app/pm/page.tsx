@@ -204,6 +204,7 @@ const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const INVOICE_REVENUE_SERIES_LABEL = "Agency Omzet";
 const CRM_REVENUE_SERIES_LABEL = "CRM omzet";
+const AGENCY_REVENUE_WITH_CRM_SERIES_LABEL = "Agency Omzet incl. CRM";
 const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
@@ -285,8 +286,8 @@ const CUSTOM_FIELD_VALUE_KEYS = new Set(
 );
 const CUSTOM_FIELD_RELATION_NAME_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "displayvalue", "displayValue"].map(normalizeComparisonValue));
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
-const PM_DASHBOARD_CACHE_VERSION = 14;
-const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [13, 12, 11, 10, 9, 8];
+const PM_DASHBOARD_CACHE_VERSION = 15;
+const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [14, 13, 12, 11, 10, 9, 8];
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
 const PM_DASHBOARD_TIME_ZONE = "Europe/Brussels";
@@ -519,7 +520,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
           <div className="panel-actions">
             {revenueView === "profit" ? (
               <>
-                <span className="panel-total panel-total--invoice">{INVOICE_REVENUE_SERIES_LABEL} {formatCurrency(agencyCostProfitTotals.revenue)}</span>
+                <span className="panel-total panel-total--invoice">{AGENCY_REVENUE_WITH_CRM_SERIES_LABEL} {formatCurrency(agencyCostProfitTotals.revenue)}</span>
                 <span className="panel-total panel-total--cost">Kost {formatCurrency(agencyCostProfitTotals.employeeCost)}</span>
                 <span className={`panel-total ${agencyCostProfitTotals.profit < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
                   Winst {formatCurrency(agencyCostProfitTotals.profit)}
@@ -948,14 +949,14 @@ function RevenueCostProfitLineChart({ rows }: { rows: MonthRevenueCostProfit[] }
   return (
     <div className="revenue-line-chart">
       <div className="revenue-line-legend" aria-hidden="true">
-        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />{INVOICE_REVENUE_SERIES_LABEL}</span>
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--invoice" />{AGENCY_REVENUE_WITH_CRM_SERIES_LABEL}</span>
         <span><i className="revenue-line-legend-dot revenue-line-legend-dot--employee-cost" />Kost</span>
         <span><i className="revenue-line-legend-dot revenue-line-legend-dot--profit" />Winst</span>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Agency omzet, kost en winst cumulatief per maand: ${cumulativeRows
+        aria-label={`Agency omzet incl. CRM, kost en winst cumulatief per maand: ${cumulativeRows
           .map(
             (row) =>
               `${row.label} totaal omzet ${formatCurrency(row.revenue)}, totaal kost ${formatCurrency(row.employeeCost)} en totaal winst ${formatCurrency(
@@ -1533,11 +1534,14 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData, cacheVers
     ...buildBillabilitySummary(rows, employeeBillabilityOverhead ? [employeeBillabilityOverhead] : [])
   };
   const revenueByMonthRows = Array.isArray(dashboard.revenueByMonth) ? dashboard.revenueByMonth : [];
+  const crmRevenueRows = monthRevenueRowsFromValue(asRecord((dashboard as JsonRecord).crmRevenue)?.byMonth);
+  const agencyRevenueByMonthRows = revenueRowsIncludingCrmRevenue(revenueByMonthRows, crmRevenueRows);
   const agencyCostProfitByMonth = agencyCostProfitByMonthFromValue(
     (dashboard as JsonRecord).agencyCostProfitByMonth,
-    revenueByMonthRows,
+    agencyRevenueByMonthRows,
     dashboard.period,
-    employeeCost + (employeeBillabilityOverhead?.employeeCost ?? 0)
+    employeeCost + (employeeBillabilityOverhead?.employeeCost ?? 0),
+    cacheVersion >= PM_DASHBOARD_CACHE_VERSION
   );
 
   return {
@@ -1620,7 +1624,8 @@ function agencyCostProfitByMonthFromValue(
   value: unknown,
   revenueRows: MonthRevenue[],
   period: Period,
-  fallbackTotalCost: number
+  fallbackTotalCost: number,
+  useCachedRevenue = true
 ): MonthRevenueCostProfit[] {
   const recordsByKey = new Map<string, JsonRecord>();
   if (Array.isArray(value)) {
@@ -1638,16 +1643,43 @@ function agencyCostProfitByMonthFromValue(
 
   return revenueRows.map((row) => {
     const record = recordsByKey.get(row.key);
-    const revenue = numberFrom(record?.revenue) ?? row.revenue;
+    const revenue = useCachedRevenue ? numberFrom(record?.revenue) ?? row.revenue : row.revenue;
     const employeeCost = numberFrom(record?.employeeCost) ?? fallbackCostsByMonth.get(row.key) ?? 0;
 
     return {
       ...row,
       revenue,
       employeeCost,
-      profit: numberFrom(record?.profit) ?? revenue - employeeCost
+      profit: useCachedRevenue ? numberFrom(record?.profit) ?? revenue - employeeCost : revenue - employeeCost
     };
   });
+}
+
+function monthRevenueRowsFromValue(value: unknown): MonthRevenue[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    const record = asRecord(item);
+    const key = stringFrom(record?.key);
+    const label = stringFrom(record?.label);
+    const revenue = numberFrom(record?.revenue);
+
+    return key && label && revenue !== null ? [{ key, label, revenue }] : [];
+  });
+}
+
+function revenueRowsIncludingCrmRevenue(revenueRows: MonthRevenue[], crmRevenueRows: MonthRevenue[]): MonthRevenue[] {
+  const crmRevenueByMonth = new Map<string, number>();
+  for (const row of crmRevenueRows) {
+    crmRevenueByMonth.set(row.key, (crmRevenueByMonth.get(row.key) ?? 0) + row.revenue);
+  }
+
+  return revenueRows.map((row) => ({
+    ...row,
+    revenue: row.revenue + (crmRevenueByMonth.get(row.key) ?? 0)
+  }));
 }
 
 function cumulativeRevenueCostProfitRows(rows: MonthRevenueCostProfit[]): MonthRevenueCostProfit[] {
@@ -2802,7 +2834,8 @@ function buildPmDashboardData(
     ...bucket,
     revenue: revenueByMonth.get(bucket.key) ?? 0
   }));
-  const agencyCostProfitByMonth = revenueByMonthRows.map((row) => {
+  const agencyRevenueByMonthRows = revenueRowsIncludingCrmRevenue(revenueByMonthRows, crmRevenue.byMonth);
+  const agencyCostProfitByMonth = agencyRevenueByMonthRows.map((row) => {
     const employeeCost = employeeCostByMonth.get(row.key) ?? 0;
 
     return {
