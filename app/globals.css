@@ -2022,6 +2022,15 @@ td .inline-bar {
   border-bottom: 0;
 }
 
+.pm-employee-table tfoot th,
+.pm-employee-table tfoot td {
+  border-top: 2px solid var(--border-strong);
+  border-bottom: 0;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-weight: 780;
+}
+
 .pm-employee-name {
   display: grid;
   gap: 3px;

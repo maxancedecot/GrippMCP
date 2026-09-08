@@ -304,6 +304,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
   const cacheError = pmCacheErrorFromParams(params);
   const dashboard = await getPmDashboardData(employeeBillabilityPeriod, cacheNotice, cacheError);
   const canRefresh = Boolean(process.env.GRIPP_API_TOKEN);
+  const employeeBillabilityTotals = buildEmployeeBillabilityTableTotals(dashboard.employeeBillability);
 
   return (
     <DashboardFrame>
@@ -423,6 +424,33 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <th scope="row">
+                      <span className="pm-employee-name">
+                        <strong>Totaal</strong>
+                        <span>{dashboard.employeeBillabilityPeriod.label}</span>
+                      </span>
+                    </th>
+                    <td className="pm-employee-percent">
+                      <strong>{formatPercent(employeeBillabilityTotals.billability)}%</strong>
+                      <span className="pm-employee-bar" aria-hidden="true">
+                        <span style={{ width: `${Math.max(0, Math.min(employeeBillabilityTotals.billability, 100))}%` }} />
+                      </span>
+                    </td>
+                    <td>{formatHours(employeeBillabilityTotals.billableHours)}</td>
+                    <td>{formatHours(employeeBillabilityTotals.availableHours)}</td>
+                    <td>{formatHours(employeeBillabilityTotals.calendarItemHours)}</td>
+                    <td>{formatHours(employeeBillabilityTotals.paidOvertimeHours)}</td>
+                    <td>{formatHours(employeeBillabilityTotals.planningWithoutTaskHours)}</td>
+                    <td>{formatHours(employeeBillabilityTotals.leaveHours)}</td>
+                    <td>{formatOptionalCurrencyPerHour(employeeBillabilityTotals.costPerHour)}</td>
+                    <td>{formatCurrency(employeeBillabilityTotals.employeeCost)}</td>
+                    <td className={restCellClassName(employeeBillabilityTotals.capacityRemainingHours)} style={restCellStyle(employeeBillabilityTotals.capacityRemainingHours)}>
+                      {formatHours(employeeBillabilityTotals.capacityRemainingHours)}
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </>
@@ -2562,6 +2590,34 @@ function buildBillabilitySummary(employeeBillabilityRows: EmployeeBillabilityRow
     availableHours,
     employeeCost,
     missingCostPerHourCount: missingCostPerHourCount(employeeBillabilityRows),
+    billability: percent(billableHours, availableHours)
+  };
+}
+
+function buildEmployeeBillabilityTableTotals(employeeBillabilityRows: EmployeeBillabilityRow[]) {
+  const billableHours = employeeBillabilityRows.reduce((total, row) => total + row.billableHours, 0);
+  const availableHours = employeeBillabilityRows.reduce((total, row) => total + row.availableHours, 0);
+  const calendarItemHours = employeeBillabilityRows.reduce((total, row) => total + row.calendarItemHours, 0);
+  const paidOvertimeHours = employeeBillabilityRows.reduce((total, row) => total + row.paidOvertimeHours, 0);
+  const planningWithoutTaskHours = employeeBillabilityRows.reduce((total, row) => total + row.planningWithoutTaskHours, 0);
+  const leaveHours = employeeBillabilityRows.reduce((total, row) => total + row.leaveHours, 0);
+  const employeeCost = employeeBillabilityRows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
+  const capacityRemainingHours = employeeBillabilityRows.reduce((total, row) => total + row.capacityRemainingHours, 0);
+  const costedHours = employeeBillabilityRows.reduce(
+    (total, row) => total + (row.costPerHour === null ? 0 : Math.max(0, row.availableHours + row.leaveHours)),
+    0
+  );
+
+  return {
+    billableHours,
+    availableHours,
+    calendarItemHours,
+    paidOvertimeHours,
+    planningWithoutTaskHours,
+    leaveHours,
+    employeeCost,
+    capacityRemainingHours,
+    costPerHour: costedHours > 0 ? employeeCost / costedHours : null,
     billability: percent(billableHours, availableHours)
   };
 }
