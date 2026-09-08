@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
-import { GrippClient } from "../../src/grippClient.js";
+import type { GrippClient } from "../../src/grippClient.js";
 import { deleteJsonCache } from "../../src/jsonCache.js";
 import type { JsonValue } from "../../src/types.js";
+import { createDashboardGrippClient, hasDashboardGrippApiToken } from "../dashboard-gripp.js";
 import { PROJECT_MANAGEMENT_CACHE_KEY } from "./cache.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -33,7 +34,7 @@ export async function completeProjectAction(formData: FormData) {
   }
 
   try {
-    const client = new GrippClient();
+    const client = createDashboardGrippClient();
     await client.call("project.update", [projectId, { enddate: completionDateKey(), archived: false }] as JsonValue[], true);
   } catch {
     redirect(projectManagementHref("failed"));
@@ -51,12 +52,12 @@ export async function getProjectTasksAction(projectId: number): Promise<ProjectT
     return { tasks: [], error: "Ongeldige opdracht." };
   }
 
-  if (!process.env.GRIPP_API_TOKEN) {
+  if (!hasDashboardGrippApiToken()) {
     return { tasks: createDemoProjectTasks(projectId) };
   }
 
   try {
-    const client = new GrippClient();
+    const client = createDashboardGrippClient();
     const taskRecords = await fetchProjectTaskRecords(client, projectId);
     return { tasks: taskRecords.map(projectTaskFromRecord) };
   } catch {

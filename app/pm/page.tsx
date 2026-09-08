@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import type { CSSProperties } from "react";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
-import { GrippClient } from "../../src/grippClient.js";
+import type { GrippClient } from "../../src/grippClient.js";
 import { signedGrippInvoiceRevenueAmount } from "../../src/grippInvoiceRevenue.js";
 import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
 import { demoStripeCrmRevenue, fetchStripeCrmRevenueForPeriod, unavailableStripeCrmRevenue, type StripeCrmRevenue } from "../../src/stripeRevenue.js";
 import type { JsonValue } from "../../src/types.js";
 import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.js";
+import { createDashboardGrippClient, DASHBOARD_GRIPP_API_TOKEN_ENV, hasDashboardGrippApiToken } from "../dashboard-gripp.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 
 export const dynamic = "force-dynamic";
@@ -325,7 +326,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
   const cacheNotice = pmCacheNoticeFromParams(params);
   const cacheError = pmCacheErrorFromParams(params);
   const dashboard = await getPmDashboardData(employeeBillabilityPeriod, cacheNotice, cacheError);
-  const canRefresh = Boolean(process.env.GRIPP_API_TOKEN);
+  const canRefresh = hasDashboardGrippApiToken();
   const employeeBillabilityOverhead = dashboard.employeeBillabilityOverhead;
   const employeeBillabilityTableRows = employeeBillabilityOverhead
     ? [...dashboard.employeeBillability, employeeBillabilityOverhead]
@@ -1200,11 +1201,11 @@ async function getPmDashboardData(
 ): Promise<PmDashboardData> {
   const period = getYearToDatePeriod();
 
-  if (!process.env.GRIPP_API_TOKEN) {
+  if (!hasDashboardGrippApiToken()) {
     return dashboardWithCacheNotice(
       buildDemoPmDashboardData(period, employeeBillabilityPeriod, {
         mode: "demo",
-        message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-cijfers te tonen."
+        message: `Demo-data zichtbaar. Zet ${DASHBOARD_GRIPP_API_TOKEN_ENV} om live Gripp-cijfers te tonen.`
       }),
       cacheNotice,
       cacheError
@@ -1228,8 +1229,8 @@ async function getPmDashboardData(
 }
 
 async function refreshCachedPmDashboardData(employeeBillabilityPeriod: EmployeeBillabilityPeriod): Promise<void> {
-  if (!process.env.GRIPP_API_TOKEN) {
-    throw new Error("GRIPP_API_TOKEN ontbreekt.");
+  if (!hasDashboardGrippApiToken()) {
+    throw new Error(`${DASHBOARD_GRIPP_API_TOKEN_ENV} ontbreekt.`);
   }
 
   const period = getYearToDatePeriod();
@@ -1245,7 +1246,7 @@ async function loadFreshPmDashboardData(
   employeeBillabilityPeriod: EmployeeBillabilityPeriod
 ): Promise<FreshPmDashboardData> {
   const dataPeriod = mergePeriods(period, employeeBillabilityPeriod);
-  const client = new GrippClient();
+  const client = createDashboardGrippClient();
   const issues: string[] = [];
   const crmRevenuePromise = loadOptionalStripeCrmRevenue(issues, period);
   const [invoices, hours, crmRevenue] = await Promise.all([
@@ -1746,8 +1747,8 @@ function refreshFailureMessage(error: unknown) {
   if (message.startsWith("Cache kon niet worden opgeslagen")) {
     return safeRefreshErrorMessage(message);
   }
-  if (message.includes("GRIPP_API_TOKEN")) {
-    return "GRIPP_API_TOKEN ontbreekt.";
+  if (message.includes(DASHBOARD_GRIPP_API_TOKEN_ENV)) {
+    return `${DASHBOARD_GRIPP_API_TOKEN_ENV} ontbreekt.`;
   }
 
   const code = errorCode(error);

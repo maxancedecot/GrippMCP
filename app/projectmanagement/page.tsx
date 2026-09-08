@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { GrippClient } from "../../src/grippClient.js";
+import type { GrippClient } from "../../src/grippClient.js";
 import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
 import type { JsonValue } from "../../src/types.js";
+import { createDashboardGrippClient, DASHBOARD_GRIPP_API_TOKEN_ENV, hasDashboardGrippApiToken } from "../dashboard-gripp.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 import { ProjectManagementAutoRefresh } from "./auto-refresh.js";
 import { PROJECT_MANAGEMENT_CACHE_KEY, PROJECT_MANAGEMENT_CACHE_TTL_MS, PROJECT_MANAGEMENT_CACHE_VERSION } from "./cache.js";
@@ -305,10 +306,10 @@ function ProjectTimeline({
 }
 
 async function getProjectManagementData(): Promise<ProjectManagementData> {
-  if (!process.env.GRIPP_API_TOKEN) {
+  if (!hasDashboardGrippApiToken()) {
     return buildProjectManagementData(createDemoProjects(), {
       mode: "demo",
-      message: "Demo-data zichtbaar. Zet GRIPP_API_TOKEN om live Gripp-opdrachten te tonen."
+      message: `Demo-data zichtbaar. Zet ${DASHBOARD_GRIPP_API_TOKEN_ENV} om live Gripp-opdrachten te tonen.`
     });
   }
 
@@ -337,7 +338,7 @@ async function getProjectManagementData(): Promise<ProjectManagementData> {
 }
 
 async function loadFreshProjectManagementData(): Promise<ProjectManagementData> {
-  const client = new GrippClient();
+  const client = createDashboardGrippClient();
   const projectRecords = await fetchProjectPages(client);
   const embeddedCompanies = companyDetailsFromProjectRecords(projectRecords);
   const embeddedPhases = relationNamesFromRecords(projectRecords, "phase");
