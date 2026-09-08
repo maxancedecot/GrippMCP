@@ -210,7 +210,8 @@ const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const OVERHEAD_DAILY_HOURS = 8;
 const REST_TONE_MAX_HOURS = 160;
-const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
+const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator", "facturen"];
+const EMPLOYEE_ROLE_TEXT_FIELD_KEY_MARKERS = ["role", "rechtenprofiel", "rightsprofile", "accessprofile", "permissionprofile"];
 const OVERHEAD_EMPLOYEE_ID = -1;
 const COUNTED_LEAVE_ABSENCE_STATUSES = new Set(["approved", "goedgekeurd", "pending", "inaanvraag", "aangevraagd"]);
 const REJECTED_ABSENCE_STATUSES = new Set(["REJECTED", "rejected", "afgewezen", "geweigerd"]);
@@ -286,8 +287,8 @@ const CUSTOM_FIELD_VALUE_KEYS = new Set(
 );
 const CUSTOM_FIELD_RELATION_NAME_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "displayvalue", "displayValue"].map(normalizeComparisonValue));
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
-const PM_DASHBOARD_CACHE_VERSION = 15;
-const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [14, 13, 12, 11, 10, 9, 8];
+const PM_DASHBOARD_CACHE_VERSION = 16;
+const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [15, 14, 13, 12, 11, 10, 9, 8];
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
 const PM_DASHBOARD_TIME_ZONE = "Europe/Brussels";
@@ -356,7 +357,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
         <MetricCard href="#pm-revenue-detail" label="Agency Omzet" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen min creditnota's, excl. btw netto" tone="good" />
         <MetricCard href="#pm-revenue-detail" label="CRM omzet" value={formatCurrency(dashboard.crmRevenue.amount)} detail={crmRevenueMetricDetail(dashboard.crmRevenue)} tone="neutral" />
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
-        <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Agency Omzet gedeeld door agenda-uren zonder beheerder" tone="neutral" />
+        <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Agency Omzet gedeeld door agenda-uren zonder overhead" tone="neutral" />
         <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Agency Omzet gedeeld door billable uren" tone="warning" />
       </section>
 
@@ -455,7 +456,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
                       <th scope="row">
                         <span className="pm-employee-name">
                           <strong>Overhead</strong>
-                          <span>{formatAdministratorCount(employeeBillabilityOverhead.employeeCount)}, 8u/werkdag</span>
+                          <span>{formatOverheadEmployeeCount(employeeBillabilityOverhead.employeeCount)}, 8u/werkdag</span>
                         </span>
                       </th>
                       <td className="pm-employee-percent pm-employee-percent--muted">
@@ -2219,13 +2220,22 @@ function employeeRoleTextValues(employee: JsonRecord) {
   collectRoleTextValues(readField(employee, "role"), values, seen);
 
   for (const [key, value] of Object.entries(employee)) {
-    const normalizedKey = key.toLowerCase();
-    if (normalizedKey.includes("role") && !normalizedKey.endsWith(".id") && normalizedKey !== "role.id") {
+    if (isEmployeeRoleTextFieldKey(key)) {
       collectRoleTextValues(value, values, seen);
     }
   }
 
   return values;
+}
+
+function isEmployeeRoleTextFieldKey(key: string) {
+  const normalizedKey = normalizeComparisonValue(key);
+  const normalizedSegment = normalizeComparisonValue(lastFieldSegment(key));
+  if (normalizedSegment === "id" || normalizedKey.endsWith("id")) {
+    return false;
+  }
+
+  return EMPLOYEE_ROLE_TEXT_FIELD_KEY_MARKERS.some((marker) => normalizedKey.includes(marker));
 }
 
 function collectRoleTextValues(value: unknown, values: string[], seen: Set<unknown>) {
@@ -4677,8 +4687,8 @@ function formatEmployeeCount(value: number) {
   return `${value} werknemer${value === 1 ? "" : "s"}`;
 }
 
-function formatAdministratorCount(value: number) {
-  return `${value} beheerder${value === 1 ? "" : "s"}`;
+function formatOverheadEmployeeCount(value: number) {
+  return `${value} overheadmedewerker${value === 1 ? "" : "s"}`;
 }
 
 function formatDate(value: string) {
