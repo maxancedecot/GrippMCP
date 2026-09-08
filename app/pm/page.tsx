@@ -291,6 +291,7 @@ const PM_DASHBOARD_CACHE_VERSION = 16;
 const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [15, 14, 13, 12, 11, 10, 9, 8];
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
+const PM_CACHE_REFRESH_ID_PARAM = "pmCacheRefresh";
 const PM_DASHBOARD_TIME_ZONE = "Europe/Brussels";
 
 const hoursFormatter = new Intl.NumberFormat("nl-NL", {
@@ -631,7 +632,7 @@ function crmRevenueMetricDetail(crmRevenue: StripeCrmRevenue) {
 }
 
 function PmDashboardRefreshForm({ params }: { params: PmSearchParams }) {
-  const hiddenInputs = preservedPmParamInputs(params, new Set([PM_CACHE_NOTICE_PARAM, PM_CACHE_ERROR_PARAM]));
+  const hiddenInputs = preservedPmParamInputs(params, new Set([PM_CACHE_NOTICE_PARAM, PM_CACHE_ERROR_PARAM, PM_CACHE_REFRESH_ID_PARAM]));
 
   return (
     <form className="pm-refresh-form" action={refreshPmDashboardAction}>
@@ -1807,7 +1808,7 @@ function pmHrefWithCacheNotice(params: PmSearchParams, notice: PmCacheNotice, er
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
-    if (key === PM_CACHE_NOTICE_PARAM || key === PM_CACHE_ERROR_PARAM) {
+    if (key === PM_CACHE_NOTICE_PARAM || key === PM_CACHE_ERROR_PARAM || key === PM_CACHE_REFRESH_ID_PARAM) {
       continue;
     }
 
@@ -1817,6 +1818,7 @@ function pmHrefWithCacheNotice(params: PmSearchParams, notice: PmCacheNotice, er
   }
 
   search.set(PM_CACHE_NOTICE_PARAM, notice);
+  search.set(PM_CACHE_REFRESH_ID_PARAM, String(Date.now()));
   const safeErrorMessage = safeRefreshErrorMessage(errorMessage);
   if (notice === "refresh_failed" && safeErrorMessage) {
     search.set(PM_CACHE_ERROR_PARAM, safeErrorMessage);
