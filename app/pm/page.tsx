@@ -2832,7 +2832,7 @@ function buildEmployeeBillabilityTableTotals(
   const leaveHours = employeeBillabilityRows.reduce((total, row) => total + row.leaveHours, 0);
   const employeeCost = costRows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
   const capacityRemainingHours = employeeBillabilityRows.reduce((total, row) => total + row.capacityRemainingHours, 0);
-  const costedHours = costRows.reduce(
+  const costedHours = employeeBillabilityRows.reduce(
     (total, row) => total + (row.costPerHour === null ? 0 : Math.max(0, row.availableHours + row.leaveHours)),
     0
   );
