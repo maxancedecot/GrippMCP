@@ -201,6 +201,7 @@ const CRM_REVENUE_SERIES_LABEL = "CRM omzet";
 const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
+const OVERHEAD_DAILY_HOURS = 8;
 const REST_TONE_MAX_HOURS = 160;
 const EXCLUDED_PM_ROLE_NAMES = ["beheerder", "admin", "administrator"];
 const OVERHEAD_EMPLOYEE_ID = -1;
@@ -278,8 +279,8 @@ const CUSTOM_FIELD_VALUE_KEYS = new Set(
 );
 const CUSTOM_FIELD_RELATION_NAME_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "displayvalue", "displayValue"].map(normalizeComparisonValue));
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
-const PM_DASHBOARD_CACHE_VERSION = 11;
-const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [10, 9, 8];
+const PM_DASHBOARD_CACHE_VERSION = 12;
+const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [11, 10, 9, 8];
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
 const PM_DASHBOARD_TIME_ZONE = "Europe/Brussels";
@@ -320,7 +321,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
   const employeeBillabilityTableRows = employeeBillabilityOverhead
     ? [...dashboard.employeeBillability, employeeBillabilityOverhead]
     : dashboard.employeeBillability;
-  const employeeBillabilityTotals = buildEmployeeBillabilityTableTotals(employeeBillabilityTableRows);
+  const employeeBillabilityTotals = buildEmployeeBillabilityTableTotals(dashboard.employeeBillability, employeeBillabilityOverhead);
   const employeeBillabilityDisplayCount = dashboard.employeeBillability.length + (employeeBillabilityOverhead?.employeeCount ?? 0);
 
   return (
@@ -445,14 +446,11 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
                       <th scope="row">
                         <span className="pm-employee-name">
                           <strong>Overhead</strong>
-                          <span>{formatAdministratorCount(employeeBillabilityOverhead.employeeCount)} met interne kostprijs</span>
+                          <span>{formatAdministratorCount(employeeBillabilityOverhead.employeeCount)}, 8u/werkdag</span>
                         </span>
                       </th>
-                      <td className="pm-employee-percent">
-                        <strong>{formatPercent(employeeBillabilityOverhead.billability)}%</strong>
-                        <span className="pm-employee-bar" aria-hidden="true">
-                          <span style={{ width: `${Math.max(0, Math.min(employeeBillabilityOverhead.billability, 100))}%` }} />
-                        </span>
+                      <td className="pm-employee-percent pm-employee-percent--muted">
+                        <strong>-</strong>
                       </td>
                       <td>{formatHours(employeeBillabilityOverhead.billableHours)}</td>
                       <td>{formatHours(employeeBillabilityOverhead.availableHours)}</td>
@@ -1136,18 +1134,8 @@ async function loadFreshPmDashboardData(
   );
   const overheadEmployees = overheadEmployeesFromEmployeeScope(employeeScope);
   const overheadEmployeeIds = employeeIdsFromEmployees(overheadEmployees);
-  const employeePeriodOverheadHours = recordsForPeriod(hoursForEmployeeIds(hours, overheadEmployeeIds), employeeBillabilityPeriod);
   const employeePeriodOverheadCalendarItems = recordsForPeriod(
     calendarItemsForEmployeeIds(calendarItems, overheadEmployeeIds),
-    employeeBillabilityPeriod
-  );
-  const employeePeriodOverheadAbsenceRequestLines = recordsForPeriod(
-    absenceRequestLinesForEmployeeIds(absenceRequestLines, absenceRequestsById, overheadEmployeeIds),
-    employeeBillabilityPeriod
-  );
-  const employeePeriodOverheadPaidOvertimeHoursByEmployeeId = buildPaidOvertimeHoursByEmployeeId(
-    employeePeriodOverheadAbsenceRequestLines,
-    absenceRequestsById,
     employeeBillabilityPeriod
   );
   const workingHoursCapacity = await optionalData(issues, "werktijden", emptyWorkingHoursCapacity(), () =>
@@ -1165,35 +1153,11 @@ async function loadFreshPmDashboardData(
           employeeBillabilityPeriod
         )
       );
-  const overheadWorkingHoursCapacity =
-    overheadEmployees.length === 0
-      ? emptyWorkingHoursCapacity()
-      : await optionalData(issues, "werktijden overhead", emptyWorkingHoursCapacity(), () =>
-          fetchWorkingHoursForEmployees(
-            client,
-            overheadEmployees,
-            employeePeriodOverheadHours,
-            employeePeriodOverheadAbsenceRequestLines,
-            absenceRequestsById,
-            employeeBillabilityPeriod
-          )
-        );
   const employeeBillabilityOverheadSources =
     overheadEmployees.length === 0
       ? null
       : {
-          capacitySources: capacitySourcesForEmployeeIds(
-            {
-              employees: overheadEmployees,
-              workingHoursByEmployeeId: overheadWorkingHoursCapacity.workingHoursByEmployeeId,
-              leaveHoursFromWorkingHoursByEmployeeId: overheadWorkingHoursCapacity.leaveHoursByEmployeeId,
-              paidOvertimeHoursByEmployeeId: employeePeriodOverheadPaidOvertimeHoursByEmployeeId,
-              absenceRequestLines: employeePeriodOverheadAbsenceRequestLines,
-              absenceRequestsById
-            },
-            overheadEmployees,
-            overheadEmployeeIds
-          ),
+          capacitySources: overheadCapacitySources(overheadEmployees),
           calendarItems: employeePeriodOverheadCalendarItems
         };
 
@@ -1370,7 +1334,7 @@ function cachedPmDashboardDataFromCacheValue(value: unknown): CachedPmDashboardD
   return {
     version: value.version,
     savedAt: value.savedAt,
-    dashboard: dashboardWithEmployeeCostDefaults(value.dashboard)
+    dashboard: dashboardWithEmployeeCostDefaults(value.dashboard, value.version)
   };
 }
 
@@ -1384,7 +1348,7 @@ function isCachedPmDashboardData(value: unknown): value is CachedPmDashboardData
   );
 }
 
-function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData): PmDashboardData {
+function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData, cacheVersion = PM_DASHBOARD_CACHE_VERSION): PmDashboardData {
   const rows = Array.isArray(dashboard.employeeBillability)
     ? dashboard.employeeBillability.map((row) => {
         const record = row as EmployeeBillabilityRow & JsonRecord;
@@ -1400,17 +1364,13 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData): PmDashbo
     : [];
   const employeeCost = numberFrom((dashboard as JsonRecord).employeeCost) ?? rows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
   const employeeBillabilityOverhead = employeeBillabilityOverheadFromValue(
-    (dashboard as JsonRecord).employeeBillabilityOverhead
+    (dashboard as JsonRecord).employeeBillabilityOverhead,
+    cacheVersion < PM_DASHBOARD_CACHE_VERSION ? dashboard.employeeBillabilityPeriod : undefined
   );
-  const summaryRows = employeeBillabilityOverhead ? [...rows, employeeBillabilityOverhead] : rows;
   const summary = asRecord(dashboard.employeeBillabilitySummary) ?? {};
   const employeeBillabilitySummary = {
     ...summary,
-    billableHours: numberFrom(summary.billableHours) ?? 0,
-    availableHours: numberFrom(summary.availableHours) ?? 0,
-    billability: numberFrom(summary.billability) ?? 0,
-    employeeCost: numberFrom(summary.employeeCost) ?? summaryRows.reduce((total, row) => total + (row.employeeCost ?? 0), 0),
-    missingCostPerHourCount: numberFrom(summary.missingCostPerHourCount) ?? missingCostPerHourCount(summaryRows)
+    ...buildBillabilitySummary(rows, employeeBillabilityOverhead ? [employeeBillabilityOverhead] : [])
   };
 
   return {
@@ -1422,13 +1382,16 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData): PmDashbo
   };
 }
 
-function employeeBillabilityOverheadFromValue(value: unknown): EmployeeBillabilityOverheadRow | null {
+function employeeBillabilityOverheadFromValue(
+  value: unknown,
+  period?: Pick<Period, "start" | "end">
+): EmployeeBillabilityOverheadRow | null {
   const record = asRecord(value);
   if (!record) {
     return null;
   }
 
-  return {
+  const row = {
     ...(record as EmployeeBillabilityOverheadRow),
     employeeId: numberFrom(record.employeeId) ?? OVERHEAD_EMPLOYEE_ID,
     name: stringFrom(record.name) ?? "Overhead",
@@ -1447,6 +1410,35 @@ function employeeBillabilityOverheadFromValue(value: unknown): EmployeeBillabili
     planningWithoutTaskHours: numberFrom(record.planningWithoutTaskHours) ?? 0,
     billability: numberFrom(record.billability) ?? 0,
     employeeCount: numberFrom(record.employeeCount) ?? 0
+  };
+
+  return normalizeCachedEmployeeBillabilityOverhead(row, period);
+}
+
+function normalizeCachedEmployeeBillabilityOverhead(
+  row: EmployeeBillabilityOverheadRow,
+  period?: Pick<Period, "start" | "end">
+): EmployeeBillabilityOverheadRow {
+  if (!period || !isDateKey(period.start) || !isDateKey(period.end) || period.start > period.end || row.employeeCount <= 0) {
+    return {
+      ...row,
+      billability: 0
+    };
+  }
+
+  const contractHours = row.employeeCount * calculateOverheadContractHours(period.start, period.end);
+  const employeeCost = row.costPerHour === null ? row.employeeCost : employeeCostFromHours(contractHours, 0, row.costPerHour);
+
+  return {
+    ...row,
+    contractHours,
+    leaveHours: 0,
+    availableHours: contractHours,
+    employeeCost,
+    paidOvertimeHours: 0,
+    usedWorkingHoursFallback: false,
+    capacityRemainingHours: contractHours - row.calendarItemHours,
+    billability: 0
   };
 }
 
@@ -1481,8 +1473,6 @@ function dashboardWithEmployeeCostsFromEmployees(dashboard: PmDashboardData, emp
     };
   });
   const employeeCost = rows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
-  const employeeBillabilitySummaryRows = dashboard.employeeBillabilityOverhead ? [...rows, dashboard.employeeBillabilityOverhead] : rows;
-  const employeeBillabilityCost = employeeBillabilitySummaryRows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
 
   return {
     ...dashboard,
@@ -1490,8 +1480,7 @@ function dashboardWithEmployeeCostsFromEmployees(dashboard: PmDashboardData, emp
     employeeBillability: rows,
     employeeBillabilitySummary: {
       ...dashboard.employeeBillabilitySummary,
-      employeeCost: employeeBillabilityCost,
-      missingCostPerHourCount: missingCostPerHourCount(employeeBillabilitySummaryRows)
+      ...buildBillabilitySummary(rows, dashboard.employeeBillabilityOverhead ? [dashboard.employeeBillabilityOverhead] : [])
     }
   };
 }
@@ -1673,7 +1662,7 @@ function buildDemoPmDashboardData(period: Period, employeeBillabilityPeriod: Emp
     overheadEmployees.length === 0
       ? null
       : {
-          capacitySources: capacitySourcesForEmployeeIds(employeePeriodCapacitySources, overheadEmployees, overheadEmployeeIds),
+          capacitySources: overheadCapacitySources(overheadEmployees),
           calendarItems: recordsForPeriod(calendarItemsForEmployeeIds(demoCalendarItems, overheadEmployeeIds), employeeBillabilityPeriod)
         };
 
@@ -1851,17 +1840,6 @@ function employeeIdsFromEmployees(employees: JsonRecord[]) {
   return ids;
 }
 
-function hoursForEmployeeIds(hours: JsonRecord[], employeeIds: Set<number>) {
-  if (employeeIds.size === 0) {
-    return [];
-  }
-
-  return hours.filter((hour) => {
-    const employeeId = relationId(hour, "employee");
-    return employeeId !== null && employeeIds.has(employeeId);
-  });
-}
-
 function calendarItemsForEmployeeIds(calendarItems: JsonRecord[], employeeIds: Set<number>) {
   if (employeeIds.size === 0) {
     return [];
@@ -1869,23 +1847,6 @@ function calendarItemsForEmployeeIds(calendarItems: JsonRecord[], employeeIds: S
 
   return calendarItems.filter((calendarItem) => {
     const employeeId = relationId(calendarItem, "calendaritememployee") ?? relationId(calendarItem, "employee");
-    return employeeId !== null && employeeIds.has(employeeId);
-  });
-}
-
-function absenceRequestLinesForEmployeeIds(
-  absenceRequestLines: JsonRecord[],
-  absenceRequestsById: Map<number, JsonRecord>,
-  employeeIds: Set<number>
-) {
-  if (employeeIds.size === 0) {
-    return [];
-  }
-
-  return absenceRequestLines.filter((line) => {
-    const absenceRequestId = relationId(line, "absencerequest");
-    const absenceRequest = absenceRequestId === null ? undefined : absenceRequestsById.get(absenceRequestId);
-    const employeeId = relationId(absenceRequest ?? line, "employee");
     return employeeId !== null && employeeIds.has(employeeId);
   });
 }
@@ -1914,14 +1875,14 @@ function capacitySourcesForEmployeeScope(capacitySources: CapacitySources, emplo
   };
 }
 
-function capacitySourcesForEmployeeIds(capacitySources: CapacitySources, employees: JsonRecord[], employeeIds: Set<number>): CapacitySources {
+function overheadCapacitySources(employees: JsonRecord[]): CapacitySources {
   return {
     employees,
-    workingHoursByEmployeeId: numberMapForEmployeeIds(capacitySources.workingHoursByEmployeeId, employeeIds),
-    leaveHoursFromWorkingHoursByEmployeeId: numberMapForEmployeeIds(capacitySources.leaveHoursFromWorkingHoursByEmployeeId, employeeIds),
-    paidOvertimeHoursByEmployeeId: numberMapForEmployeeIds(capacitySources.paidOvertimeHoursByEmployeeId, employeeIds),
-    absenceRequestLines: absenceRequestLinesForEmployeeIds(capacitySources.absenceRequestLines, capacitySources.absenceRequestsById, employeeIds),
-    absenceRequestsById: capacitySources.absenceRequestsById
+    workingHoursByEmployeeId: new Map<number, number>(),
+    leaveHoursFromWorkingHoursByEmployeeId: new Map<number, number>(),
+    paidOvertimeHoursByEmployeeId: new Map<number, number>(),
+    absenceRequestLines: [],
+    absenceRequestsById: new Map<number, JsonRecord>()
   };
 }
 
@@ -1931,14 +1892,6 @@ function numberMapForEmployeeScope(source: Map<number, number>, employeeScope: P
   }
 
   return new Map(Array.from(source.entries()).filter(([employeeId]) => !employeeScope.excludedEmployeeIds.has(employeeId)));
-}
-
-function numberMapForEmployeeIds(source: Map<number, number>, employeeIds: Set<number>) {
-  if (employeeIds.size === 0) {
-    return new Map<number, number>();
-  }
-
-  return new Map(Array.from(source.entries()).filter(([employeeId]) => employeeIds.has(employeeId)));
 }
 
 function employeeHasExcludedPmRole(employee: JsonRecord, excludedRoleIds: Set<number>) {
@@ -2601,7 +2554,8 @@ function buildPmDashboardData(
     employeeBillabilityPeriod
   );
   const employeeBillabilitySummary = buildBillabilitySummary(
-    employeeBillabilityOverhead ? [...employeeBillability, employeeBillabilityOverhead] : employeeBillability
+    employeeBillability,
+    employeeBillabilityOverhead ? [employeeBillabilityOverhead] : []
   );
   const capacityRemainingHours = yearEmployeeBillability.reduce((total, row) => total + row.capacityRemainingHours, 0);
   const calendarItemHours = yearEmployeeBillability.reduce((total, row) => total + row.calendarItemHours, 0);
@@ -2803,16 +2757,20 @@ function buildCapacitySummary(employeeCapacityRows: EmployeeCapacityRow[]): Capa
   };
 }
 
-function buildBillabilitySummary(employeeBillabilityRows: EmployeeBillabilityRow[]): BillabilitySummary {
+function buildBillabilitySummary(
+  employeeBillabilityRows: EmployeeBillabilityRow[],
+  extraCostRows: EmployeeBillabilityRow[] = []
+): BillabilitySummary {
+  const costRows = [...employeeBillabilityRows, ...extraCostRows];
   const billableHours = employeeBillabilityRows.reduce((total, row) => total + row.billableHours, 0);
   const availableHours = employeeBillabilityRows.reduce((total, row) => total + row.availableHours, 0);
-  const employeeCost = employeeBillabilityRows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
+  const employeeCost = costRows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
 
   return {
     billableHours,
     availableHours,
     employeeCost,
-    missingCostPerHourCount: missingCostPerHourCount(employeeBillabilityRows),
+    missingCostPerHourCount: missingCostPerHourCount(costRows),
     billability: percent(billableHours, availableHours)
   };
 }
@@ -2825,7 +2783,7 @@ function buildEmployeeBillabilityOverheadRow(
     return null;
   }
 
-  const capacityRows = buildEmployeeCapacityRows(sources.capacitySources, [], period).filter((row) => row.costPerHour !== null);
+  const capacityRows = buildOverheadCapacityRows(sources.capacitySources.employees, period);
   if (capacityRows.length === 0) {
     return null;
   }
@@ -2852,7 +2810,7 @@ function buildEmployeeBillabilityOverheadRow(
     costPerHour: costedHours > 0 ? employeeCost / costedHours : averageNumber(costPerHourValues),
     employeeCost,
     paidOvertimeHours,
-    usedWorkingHoursFallback: capacityRows.some((row) => row.usedWorkingHoursFallback),
+    usedWorkingHoursFallback: false,
     employeeCount: capacityRows.length,
     loggedHours: 0,
     billableHours: 0,
@@ -2864,19 +2822,58 @@ function buildEmployeeBillabilityOverheadRow(
   };
 }
 
-function buildEmployeeBillabilityTableTotals(employeeBillabilityRows: EmployeeBillabilityRow[]) {
-  const billableHours = employeeBillabilityRows.reduce((total, row) => total + row.billableHours, 0);
-  const availableHours = employeeBillabilityRows.reduce((total, row) => total + row.availableHours, 0);
-  const calendarItemHours = employeeBillabilityRows.reduce((total, row) => total + row.calendarItemHours, 0);
-  const paidOvertimeHours = employeeBillabilityRows.reduce((total, row) => total + row.paidOvertimeHours, 0);
-  const planningWithoutTaskHours = employeeBillabilityRows.reduce((total, row) => total + row.planningWithoutTaskHours, 0);
-  const leaveHours = employeeBillabilityRows.reduce((total, row) => total + row.leaveHours, 0);
-  const employeeCost = employeeBillabilityRows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
-  const capacityRemainingHours = employeeBillabilityRows.reduce((total, row) => total + row.capacityRemainingHours, 0);
-  const costedHours = employeeBillabilityRows.reduce(
+function buildOverheadCapacityRows(employees: JsonRecord[], period: Period): EmployeeCapacityRow[] {
+  const rows: EmployeeCapacityRow[] = [];
+
+  for (const employee of employees) {
+    const employeeId = idFrom(readField(employee, "id"));
+    const costPerHour = employeeCostPerHour(employee);
+    if (employeeId === null || costPerHour === null || booleanFrom(readField(employee, "active")) === false) {
+      continue;
+    }
+
+    const capacityStart = maxDateKey(period.start, employeeStartDate(employee));
+    if (capacityStart > period.end) {
+      continue;
+    }
+
+    const contractHours = calculateOverheadContractHours(capacityStart, period.end);
+
+    rows.push({
+      employeeId,
+      name: employeeDisplayName(employee, employeeId),
+      contractHours,
+      leaveHours: 0,
+      availableHours: contractHours,
+      costPerHour,
+      employeeCost: employeeCostFromHours(contractHours, 0, costPerHour),
+      paidOvertimeHours: 0,
+      usedWorkingHoursFallback: false
+    });
+  }
+
+  return rows.sort(compareEmployeeCapacityRows);
+}
+
+function buildEmployeeBillabilityTableTotals(
+  employeeBillabilityRows: EmployeeBillabilityRow[],
+  overheadRow: EmployeeBillabilityOverheadRow | null = null
+) {
+  const tableRows = overheadRow ? [...employeeBillabilityRows, overheadRow] : employeeBillabilityRows;
+  const billableHours = tableRows.reduce((total, row) => total + row.billableHours, 0);
+  const availableHours = tableRows.reduce((total, row) => total + row.availableHours, 0);
+  const calendarItemHours = tableRows.reduce((total, row) => total + row.calendarItemHours, 0);
+  const paidOvertimeHours = tableRows.reduce((total, row) => total + row.paidOvertimeHours, 0);
+  const planningWithoutTaskHours = tableRows.reduce((total, row) => total + row.planningWithoutTaskHours, 0);
+  const leaveHours = tableRows.reduce((total, row) => total + row.leaveHours, 0);
+  const employeeCost = tableRows.reduce((total, row) => total + (row.employeeCost ?? 0), 0);
+  const capacityRemainingHours = tableRows.reduce((total, row) => total + row.capacityRemainingHours, 0);
+  const costedHours = tableRows.reduce(
     (total, row) => total + (row.costPerHour === null ? 0 : Math.max(0, row.availableHours + row.leaveHours)),
     0
   );
+  const billabilityBillableHours = employeeBillabilityRows.reduce((total, row) => total + row.billableHours, 0);
+  const billabilityAvailableHours = employeeBillabilityRows.reduce((total, row) => total + row.availableHours, 0);
 
   return {
     billableHours,
@@ -2888,7 +2885,7 @@ function buildEmployeeBillabilityTableTotals(employeeBillabilityRows: EmployeeBi
     employeeCost,
     capacityRemainingHours,
     costPerHour: costedHours > 0 ? employeeCost / costedHours : null,
-    billability: percent(billableHours, availableHours)
+    billability: percent(billabilityBillableHours, billabilityAvailableHours)
   };
 }
 
@@ -3795,6 +3792,20 @@ function normalizeCurrencyNumberString(value: string) {
 
 function calculateDefaultContractHours(start: string, end: string) {
   return datesInRange(start, end).reduce((total, date) => total + defaultDailyContractHours(date), 0);
+}
+
+function calculateOverheadContractHours(start: string, end: string) {
+  return datesInRange(start, end).reduce((total, date) => total + overheadDailyHours(date), 0);
+}
+
+function overheadDailyHours(date: string) {
+  const parsedDate = parseDateKey(date);
+  if (!parsedDate) {
+    return 0;
+  }
+
+  const day = parsedDate.getDay();
+  return day === 0 || day === 6 ? 0 : OVERHEAD_DAILY_HOURS;
 }
 
 function defaultDailyContractHours(date: string) {

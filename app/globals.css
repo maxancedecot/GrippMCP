@@ -2070,6 +2070,10 @@ td .inline-bar {
   font-weight: 780;
 }
 
+.pm-employee-percent--muted strong {
+  color: var(--muted);
+}
+
 .pm-employee-bar {
   display: block;
   width: 100%;
