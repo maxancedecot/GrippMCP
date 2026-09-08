@@ -2022,6 +2022,15 @@ td .inline-bar {
   border-bottom: 0;
 }
 
+.pm-employee-overhead-row th,
+.pm-employee-overhead-row td {
+  background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
+}
+
+.pm-employee-overhead-row .pm-employee-name strong {
+  color: var(--warning);
+}
+
 .pm-employee-table tfoot th,
 .pm-employee-table tfoot td {
   border-top: 2px solid var(--border-strong);
