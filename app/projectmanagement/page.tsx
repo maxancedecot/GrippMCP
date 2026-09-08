@@ -22,6 +22,7 @@ type RelationEntity = "company" | "employee" | "projectphase" | "tag";
 type CompanyDetails = {
   names: Map<number, string>;
   accountManagerIds: Map<number, number>;
+  accountManagerNames: Map<number, string>;
 };
 
 type ProjectSource = {
@@ -74,6 +75,8 @@ type ProjectTimelineData = {
 
 const PROJECT_PAGE_SIZE = 250;
 const PROJECT_MAX_PAGES = 40;
+const RELATION_ID_CHUNK_SIZE = 100;
+const RELATION_FETCH_BATCH_SIZE = 8;
 const TIMELINE_DAY_WIDTH = 10;
 const TIMELINE_FIXED_WIDTH = 388;
 const PROJECT_DASHBOARD_TIME_ZONE = "Europe/Brussels";
@@ -336,16 +339,29 @@ async function getProjectManagementData(): Promise<ProjectManagementData> {
 async function loadFreshProjectManagementData(): Promise<ProjectManagementData> {
   const client = new GrippClient();
   const projectRecords = await fetchProjectPages(client);
+  const embeddedCompanies = companyDetailsFromProjectRecords(projectRecords);
+  const embeddedPhases = relationNamesFromRecords(projectRecords, "phase");
+  const embeddedTags = relationNamesFromRecords(projectRecords, "tags");
   const relationIds = {
+    companies: uniqueRelationIds(projectRecords, "company"),
     phases: uniqueRelationIds(projectRecords, "phase"),
     tags: uniqueRelationIds(projectRecords, "tags")
   };
   const [companies, phases, tags] = await Promise.all([
-    fetchCompanyDetails(client, uniqueRelationIds(projectRecords, "company")),
-    fetchRelationNames(client, "projectphase", relationIds.phases),
-    fetchRelationNames(client, "tag", relationIds.tags)
+    fetchCompanyDetails(client, missingCompanyDetailIds(relationIds.companies, embeddedCompanies), embeddedCompanies),
+    fetchRelationNames(client, "projectphase", missingRelationNameIds(relationIds.phases, embeddedPhases), embeddedPhases),
+    fetchRelationNames(client, "tag", missingRelationNameIds(relationIds.tags, embeddedTags), embeddedTags)
   ]);
-  const employees = await fetchRelationNames(client, "employee", [...new Set(companies.accountManagerIds.values())]);
+  const employeeSeeds = new Map(employeeRelationNamesFromProjectRecords(projectRecords));
+  for (const [employeeId, employeeName] of companies.accountManagerNames) {
+    employeeSeeds.set(employeeId, employeeName);
+  }
+  const employees = await fetchRelationNames(
+    client,
+    "employee",
+    missingRelationNameIds([...new Set(companies.accountManagerIds.values())], employeeSeeds),
+    employeeSeeds
+  );
 
   const projects = projectRecords.map((project) => projectRowFromRecord(project, { companies, employees, phases, tags }));
   return buildProjectManagementData(projects, { mode: "live", message: "" });
@@ -453,23 +469,34 @@ async function fetchProjectPages(client: GrippClient) {
   return records;
 }
 
-async function fetchRelationNames(client: GrippClient, entity: RelationEntity, ids: number[]) {
-  const names = new Map<number, string>();
+async function fetchRelationNames(client: GrippClient, entity: RelationEntity, ids: number[], seed = new Map<number, string>()) {
+  const names = new Map(seed);
+  const missingIds = missingRelationNameIds(ids, names);
+  if (missingIds.length === 0) {
+    return names;
+  }
 
-  for (let index = 0; index < ids.length; index += 100) {
-    const idChunk = ids.slice(index, index + 100);
-    const result = await client.call(`${entity}.get`, [
-      [{ field: `${entity}.id`, operator: "in", value: idChunk }],
-      {
-        paging: { firstresult: 0, maxresults: 250 },
-        orderings: [{ field: `${entity}.id`, direction: "asc" }]
-      }
-    ] as JsonValue[]);
+  const idChunks = chunksOf(missingIds, RELATION_ID_CHUNK_SIZE);
+  for (let index = 0; index < idChunks.length; index += RELATION_FETCH_BATCH_SIZE) {
+    const results = await client.batch(
+      idChunks.slice(index, index + RELATION_FETCH_BATCH_SIZE).map((idChunk) => ({
+        method: `${entity}.get`,
+        params: [
+          [{ field: `${entity}.id`, operator: "in", value: idChunk }],
+          {
+            paging: { firstresult: 0, maxresults: 250 },
+            orderings: [{ field: `${entity}.id`, direction: "asc" }]
+          }
+        ] as JsonValue[]
+      }))
+    );
 
-    for (const record of asRecords(result)) {
-      const id = idFrom(readField(record, "id"));
-      if (id !== null) {
-        names.set(id, recordDisplayName(record, "Onbekend"));
+    for (const result of results) {
+      for (const record of asRecords(result)) {
+        const id = idFrom(readField(record, "id"));
+        if (id !== null) {
+          names.set(id, recordDisplayName(record, "Onbekend"));
+        }
       }
     }
   }
@@ -477,35 +504,145 @@ async function fetchRelationNames(client: GrippClient, entity: RelationEntity, i
   return names;
 }
 
-async function fetchCompanyDetails(client: GrippClient, ids: number[]): Promise<CompanyDetails> {
-  const names = new Map<number, string>();
-  const accountManagerIds = new Map<number, number>();
+async function fetchCompanyDetails(client: GrippClient, ids: number[], seed = emptyCompanyDetails()): Promise<CompanyDetails> {
+  const names = new Map(seed.names);
+  const accountManagerIds = new Map(seed.accountManagerIds);
+  const accountManagerNames = new Map(seed.accountManagerNames);
+  const missingIds = missingCompanyDetailIds(ids, { names, accountManagerIds, accountManagerNames });
+  if (missingIds.length === 0) {
+    return { names, accountManagerIds, accountManagerNames };
+  }
 
-  for (let index = 0; index < ids.length; index += 100) {
-    const idChunk = ids.slice(index, index + 100);
-    const result = await client.call("company.get", [
-      [{ field: "company.id", operator: "in", value: idChunk }],
-      {
-        paging: { firstresult: 0, maxresults: 250 },
-        orderings: [{ field: "company.id", direction: "asc" }]
-      }
-    ] as JsonValue[]);
+  const idChunks = chunksOf(missingIds, RELATION_ID_CHUNK_SIZE);
+  for (let index = 0; index < idChunks.length; index += RELATION_FETCH_BATCH_SIZE) {
+    const results = await client.batch(
+      idChunks.slice(index, index + RELATION_FETCH_BATCH_SIZE).map((idChunk) => ({
+        method: "company.get",
+        params: [
+          [{ field: "company.id", operator: "in", value: idChunk }],
+          {
+            paging: { firstresult: 0, maxresults: 250 },
+            orderings: [{ field: "company.id", direction: "asc" }]
+          }
+        ] as JsonValue[]
+      }))
+    );
 
-    for (const record of asRecords(result)) {
-      const id = idFrom(readField(record, "id"));
-      if (id === null) {
-        continue;
-      }
+    for (const result of results) {
+      for (const record of asRecords(result)) {
+        const id = idFrom(readField(record, "id"));
+        if (id === null) {
+          continue;
+        }
 
-      names.set(id, recordDisplayName(record, "Onbekend"));
-      const accountManagerId = relationId(record, "accountmanager");
-      if (accountManagerId !== null) {
-        accountManagerIds.set(id, accountManagerId);
+        names.set(id, recordDisplayName(record, "Onbekend"));
+        const accountManagerId = relationId(record, "accountmanager");
+        if (accountManagerId !== null) {
+          accountManagerIds.set(id, accountManagerId);
+          collectRelationNames(readField(record, "accountmanager"), accountManagerNames);
+        }
       }
     }
   }
 
-  return { names, accountManagerIds };
+  return { names, accountManagerIds, accountManagerNames };
+}
+
+function emptyCompanyDetails(): CompanyDetails {
+  return {
+    names: new Map<number, string>(),
+    accountManagerIds: new Map<number, number>(),
+    accountManagerNames: new Map<number, string>()
+  };
+}
+
+function relationNamesFromRecords(records: JsonRecord[], field: string) {
+  const names = new Map<number, string>();
+  for (const record of records) {
+    collectRelationNames(readField(record, field), names);
+  }
+
+  return names;
+}
+
+function collectRelationNames(value: unknown, names: Map<number, string>) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectRelationNames(item, names);
+    }
+    return;
+  }
+
+  const record = asRecord(value);
+  const id = (record ? idFrom(readField(record, "id")) : null) ?? idFrom(value);
+  if (id === null) {
+    return;
+  }
+
+  const name = record ? recordDisplayName(record, "") : stringFrom(value);
+  if (name) {
+    names.set(id, name);
+  }
+}
+
+function companyDetailsFromProjectRecords(projectRecords: JsonRecord[]): CompanyDetails {
+  const details = emptyCompanyDetails();
+
+  for (const project of projectRecords) {
+    const companyId = relationId(project, "company");
+    if (companyId === null) {
+      continue;
+    }
+
+    const companyValue = readField(project, "company");
+    const company = asRecord(companyValue);
+    const companyName = company ? recordDisplayName(company, "") : stringFrom(companyValue);
+    if (companyName) {
+      details.names.set(companyId, companyName);
+    }
+
+    const accountManagerId = company ? relationId(company, "accountmanager") : relationId(project, "accountmanager");
+    if (accountManagerId !== null) {
+      details.accountManagerIds.set(companyId, accountManagerId);
+      collectRelationNames(company ? readField(company, "accountmanager") : readField(project, "accountmanager"), details.accountManagerNames);
+    }
+  }
+
+  return details;
+}
+
+function employeeRelationNamesFromProjectRecords(projectRecords: JsonRecord[]) {
+  const names = new Map<number, string>();
+  for (const project of projectRecords) {
+    const company = asRecord(readField(project, "company"));
+    if (company) {
+      collectRelationNames(readField(company, "accountmanager"), names);
+    }
+    collectRelationNames(readField(project, "accountmanager"), names);
+  }
+
+  return names;
+}
+
+function missingRelationNameIds(ids: number[], names: Map<number, string>) {
+  return uniqueSortedNumbers(ids.filter((id) => !names.has(id)));
+}
+
+function missingCompanyDetailIds(ids: number[], details: CompanyDetails) {
+  return uniqueSortedNumbers(ids.filter((id) => !details.names.has(id) || !details.accountManagerIds.has(id)));
+}
+
+function uniqueSortedNumbers(values: number[]) {
+  return Array.from(new Set(values)).sort((left, right) => left - right);
+}
+
+function chunksOf<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
 }
 
 function buildProjectManagementData(projects: ProjectRow[], source: ProjectSource): ProjectManagementData {

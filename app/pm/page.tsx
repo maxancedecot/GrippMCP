@@ -199,7 +199,6 @@ const PAGE_FETCH_BATCH_SIZE = 8;
 const MAX_INVOICE_PAGES = 80;
 const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
-const MAX_ABSENCE_REQUEST_PAGES = 80;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
 const INVOICE_REVENUE_SERIES_LABEL = "Agency Omzet";
@@ -1254,25 +1253,20 @@ async function loadFreshPmDashboardData(
     requiredData("uren", () => fetchHoursForPeriod(client, dataPeriod)),
     crmRevenuePromise
   ]);
-  const [employees, fetchedAbsenceRequestLines, fetchedAbsenceRequests, calendarItems] = await Promise.all([
+  const [employees, fetchedAbsenceRequestLines, calendarItems] = await Promise.all([
     optionalData(issues, "medewerkers", [], () => fetchEmployees(client)),
     optionalData(issues, "verlofmutaties", [], () => fetchAbsenceRequestLinesForPeriod(client, dataPeriod)),
-    optionalData(issues, "verlofaanvragen", [], () => fetchAbsenceRequests(client)),
     optionalData(issues, "planning", [], () => fetchCalendarItemsForPeriod(client, dataPeriod))
   ]);
   const detailedEmployees = await optionalData(issues, "medewerkerdetails", employees, () =>
-    fetchEmployeeDetailsForEmployees(client, employees)
+    fetchEmployeeDetailsForEmployees(client, employees, employeeDetailCandidateIds(employees, hours, fetchedAbsenceRequestLines, calendarItems))
   );
   const employeeScope = buildPmEmployeeScope(detailedEmployees);
   const scopedHours = hoursForEmployeeScope(hours, employeeScope);
   const scopedCalendarItems = calendarItemsForEmployeeScope(calendarItems, employeeScope);
-  const absenceRequestLines = mergeAbsenceRequestLines(
-    fetchedAbsenceRequestLines,
-    absenceRequestLinesFromRequests(fetchedAbsenceRequests, dataPeriod)
-  );
-  const indexedAbsenceRequestsById = indexAbsenceRequestsById(fetchedAbsenceRequests);
-  const absenceRequestsById = await optionalData(issues, "verlofaanvraagdetails", indexedAbsenceRequestsById, () =>
-    fetchAbsenceRequestsById(client, absenceRequestLines, indexedAbsenceRequestsById)
+  const absenceRequestLines = fetchedAbsenceRequestLines;
+  const absenceRequestsById = await optionalData(issues, "verlofaanvraagdetails", new Map<number, JsonRecord>(), () =>
+    fetchAbsenceRequestsById(client, absenceRequestLines)
   );
   const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
   const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
@@ -2196,9 +2190,13 @@ async function fetchEmployees(client: GrippClient) {
   return fetchPagedRecords(client, "employee", [], [{ field: "employee.id", direction: "asc" }], MAX_EMPLOYEE_PAGES);
 }
 
-async function fetchEmployeeDetailsForEmployees(client: GrippClient, employees: JsonRecord[]) {
+async function fetchEmployeeDetailsForEmployees(client: GrippClient, employees: JsonRecord[], candidateEmployeeIds?: Set<number>) {
   const employeeIds = Array.from(
-    new Set(employees.map((employee) => idFrom(readField(employee, "id"))).filter((employeeId): employeeId is number => employeeId !== null))
+    new Set(
+      employees
+        .map((employee) => idFrom(readField(employee, "id")))
+        .filter((employeeId): employeeId is number => employeeId !== null && (!candidateEmployeeIds || candidateEmployeeIds.has(employeeId)))
+    )
   ).sort((left, right) => left - right);
   if (employeeIds.length === 0) {
     return employees;
@@ -2247,6 +2245,33 @@ async function fetchEmployeeDetailsForEmployees(client: GrippClient, employees: 
   });
 }
 
+function employeeDetailCandidateIds(
+  employees: JsonRecord[],
+  hours: JsonRecord[],
+  absenceRequestLines: JsonRecord[],
+  calendarItems: JsonRecord[]
+) {
+  const employeeIds = new Set<number>();
+
+  for (const employee of employees) {
+    const employeeId = idFrom(readField(employee, "id"));
+    if (employeeId !== null && booleanFrom(readField(employee, "active")) !== false) {
+      employeeIds.add(employeeId);
+    }
+  }
+
+  for (const id of [
+    ...uniqueRelationIds(hours, "employee"),
+    ...uniqueRelationIds(absenceRequestLines, "employee"),
+    ...uniqueRelationIds(calendarItems, "calendaritememployee"),
+    ...uniqueRelationIds(calendarItems, "employee")
+  ]) {
+    employeeIds.add(id);
+  }
+
+  return employeeIds;
+}
+
 async function fetchEmployeeDetailChunk(client: GrippClient, employeeIds: number[]) {
   return client.batch(employeeIds.map((employeeId) => employeeDetailBatchItem(employeeId)));
 }
@@ -2287,147 +2312,36 @@ async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Pe
   return fetchPagedRecords(client, "absencerequestline", filters, [{ field: "absencerequestline.date", direction: "asc" }], MAX_ABSENCE_LINE_PAGES);
 }
 
-async function fetchAbsenceRequests(client: GrippClient) {
-  return fetchPagedRecords(
-    client,
-    "absencerequest",
-    [],
-    [{ field: "absencerequest.updatedon", direction: "desc" }],
-    MAX_ABSENCE_REQUEST_PAGES
-  );
-}
-
 async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines: JsonRecord[], seed = new Map<number, JsonRecord>()) {
   const absenceRequestsById = new Map(seed);
   const absenceRequestIds = uniqueRelationIds(absenceRequestLines, "absencerequest").filter((id) => !absenceRequestsById.has(id));
 
-  for (let index = 0; index < absenceRequestIds.length; index += 100) {
-    const idChunk = absenceRequestIds.slice(index, index + 100);
-    const result = await client.call("absencerequest.get", [
-      [{ field: "absencerequest.id", operator: "in", value: idChunk }],
-      {
-        paging: { firstresult: 0, maxresults: PAGE_SIZE },
-        orderings: [{ field: "absencerequest.id", direction: "asc" }]
-      }
-    ] as JsonValue[]);
+  const absenceRequestIdChunks = chunksOf(absenceRequestIds, 100);
+  for (let index = 0; index < absenceRequestIdChunks.length; index += PAGE_FETCH_BATCH_SIZE) {
+    const results = await client.batch(
+      absenceRequestIdChunks.slice(index, index + PAGE_FETCH_BATCH_SIZE).map((idChunk) => ({
+        method: "absencerequest.get",
+        params: [
+          [{ field: "absencerequest.id", operator: "in", value: idChunk }],
+          {
+            paging: { firstresult: 0, maxresults: PAGE_SIZE },
+            orderings: [{ field: "absencerequest.id", direction: "asc" }]
+          }
+        ] as JsonValue[]
+      }))
+    );
 
-    for (const absenceRequest of asRecords(result)) {
-      const id = idFrom(readField(absenceRequest, "id"));
-      if (id !== null) {
-        absenceRequestsById.set(id, absenceRequest);
+    for (const result of results) {
+      for (const absenceRequest of asRecords(result)) {
+        const id = idFrom(readField(absenceRequest, "id"));
+        if (id !== null) {
+          absenceRequestsById.set(id, absenceRequest);
+        }
       }
     }
   }
 
   return absenceRequestsById;
-}
-
-function indexAbsenceRequestsById(absenceRequests: JsonRecord[]) {
-  const absenceRequestsById = new Map<number, JsonRecord>();
-
-  for (const absenceRequest of absenceRequests) {
-    const id = idFrom(readField(absenceRequest, "id"));
-    if (id !== null) {
-      absenceRequestsById.set(id, absenceRequest);
-    }
-  }
-
-  return absenceRequestsById;
-}
-
-function absenceRequestLinesFromRequests(absenceRequests: JsonRecord[], period: Period) {
-  const lines: JsonRecord[] = [];
-
-  for (const absenceRequest of absenceRequests) {
-    const absenceRequestId = idFrom(readField(absenceRequest, "id"));
-    for (const line of nestedAbsenceRequestLines(absenceRequest)) {
-      const enrichedLine = enrichAbsenceRequestLine(line, absenceRequest, absenceRequestId);
-      const date = dateKeyFromValue(readField(enrichedLine, "date"));
-      if (!date || date < period.start || date > period.end) {
-        continue;
-      }
-
-      lines.push(enrichedLine);
-    }
-  }
-
-  return lines;
-}
-
-function nestedAbsenceRequestLines(absenceRequest: JsonRecord) {
-  return [
-    ...recordsFromField(absenceRequest, "absencerequestline"),
-    ...recordsFromField(absenceRequest, "absencerequestlines"),
-    ...recordsFromField(absenceRequest, "verlofmutatie"),
-    ...recordsFromField(absenceRequest, "verlofmutaties"),
-    ...recordsFromField(absenceRequest, "lines")
-  ];
-}
-
-function recordsFromField(record: JsonRecord, field: string) {
-  const value = readField(record, field);
-  return value === undefined ? [] : asRecords(value as JsonValue);
-}
-
-function enrichAbsenceRequestLine(line: JsonRecord, absenceRequest: JsonRecord, absenceRequestId: number | null) {
-  const enrichedLine = { ...line };
-
-  if (absenceRequestId !== null && relationId(enrichedLine, "absencerequest") === null) {
-    enrichedLine.absencerequest = absenceRequestId;
-  }
-
-  for (const field of ["employee", "absencetype"]) {
-    if (readField(enrichedLine, field) === undefined) {
-      const value = readField(absenceRequest, field);
-      if (value !== undefined) {
-        enrichedLine[field] = value;
-      }
-    }
-  }
-
-  if (readField(enrichedLine, "absencerequeststatus") === undefined) {
-    for (const field of ["absencerequeststatus", "status", "state"]) {
-      const value = readField(absenceRequest, field);
-      if (value !== undefined) {
-        enrichedLine.absencerequeststatus = value;
-        break;
-      }
-    }
-  }
-
-  return enrichedLine;
-}
-
-function mergeAbsenceRequestLines(primary: JsonRecord[], secondary: JsonRecord[]) {
-  const lines: JsonRecord[] = [];
-  const seen = new Set<string>();
-
-  for (const line of [...primary, ...secondary]) {
-    const key = absenceRequestLineKey(line);
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    lines.push(line);
-  }
-
-  return lines;
-}
-
-function absenceRequestLineKey(line: JsonRecord) {
-  const id = idFrom(readField(line, "id"));
-  if (id !== null) {
-    return `id:${id}`;
-  }
-
-  const absenceRequestId = relationId(line, "absencerequest") ?? "none";
-  const date = dateKeyFromValue(readField(line, "date")) ?? "";
-  const amount = numberFrom(readField(line, "amount")) ?? "";
-  const startingTime = stringFrom(readField(line, "startingtime")) ?? "";
-  const description = normalizeComparisonValue(stringFrom(readField(line, "description")) ?? "");
-
-  return `synthetic:${absenceRequestId}:${date}:${amount}:${startingTime}:${description}`;
 }
 
 async function fetchWorkingHoursForEmployees(
@@ -2455,25 +2369,15 @@ async function fetchWorkingHoursForEmployees(
   for (let index = 0; index < callableEntries.length; index += WORKING_HOURS_BATCH_SIZE) {
     const chunk = callableEntries.slice(index, index + WORKING_HOURS_BATCH_SIZE);
     const results = await client.batch(
-      chunk.flatMap((entry) => [
-        {
-          method: "employee.getWorkingHours",
-          params: [[entry.employeeId], entry.start, period.end, false] as JsonValue[]
-        },
-        {
-          method: "employee.getWorkingHours",
-          params: [[entry.employeeId], entry.start, period.end, true] as JsonValue[]
-        }
-      ])
+      chunk.map((entry) => ({
+        method: "employee.getWorkingHours",
+        params: [[entry.employeeId], entry.start, period.end, false] as JsonValue[]
+      }))
     );
 
     chunk.forEach((entry, chunkIndex) => {
-      const workingHoursWithoutAbsenceFlag = workingHoursTotalFromResult(results[chunkIndex * 2]);
-      const workingHoursWithAbsenceFlag = workingHoursTotalFromResult(results[chunkIndex * 2 + 1]);
-      const grossWorkingHours = Math.max(workingHoursWithoutAbsenceFlag, workingHoursWithAbsenceFlag);
-      const absenceHours = Math.abs(workingHoursWithAbsenceFlag - workingHoursWithoutAbsenceFlag);
-      workingHoursByEmployeeId.set(entry.employeeId, grossWorkingHours);
-      leaveHoursByEmployeeId.set(entry.employeeId, absenceHours);
+      workingHoursByEmployeeId.set(entry.employeeId, workingHoursTotalFromResult(results[chunkIndex]));
+      leaveHoursByEmployeeId.set(entry.employeeId, 0);
     });
   }
 
@@ -2483,25 +2387,59 @@ async function fetchWorkingHoursForEmployees(
 async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[], issues: string[] = []): Promise<BillabilitySources> {
   const offerProjectLines = new Map<number, LineBillability>();
   const taskOfferProjectLineIds = new Map<number, number>();
-  const directOfferProjectLineIds = uniqueRelationIds(hours, "offerprojectline");
-  const taskIds = uniqueRelationIds(hours, "task");
+  const directOfferProjectLineIds = new Set<number>();
+
+  for (const hour of hours) {
+    const directOfferProjectLineId = relationId(hour, "offerprojectline");
+    if (directOfferProjectLineId !== null) {
+      directOfferProjectLineIds.add(directOfferProjectLineId);
+      const directLineBillability = lineBillabilityFromEmbeddedRecord(asRecord(readField(hour, "offerprojectline")));
+      if (directLineBillability) {
+        offerProjectLines.set(directOfferProjectLineId, directLineBillability);
+      }
+    }
+
+    const taskId = relationId(hour, "task");
+    const task = asRecord(readField(hour, "task"));
+    const taskOfferProjectLineId = task ? relationId(task, "offerprojectline") : null;
+    if (taskId !== null && taskOfferProjectLineId !== null) {
+      taskOfferProjectLineIds.set(taskId, taskOfferProjectLineId);
+      const taskLineBillability = lineBillabilityFromEmbeddedRecord(asRecord(readField(task, "offerprojectline")));
+      if (taskLineBillability) {
+        offerProjectLines.set(taskOfferProjectLineId, taskLineBillability);
+      }
+    }
+  }
+
+  const taskIds = uniqueRelationIds(hours, "task").filter((taskId) => !taskOfferProjectLineIds.has(taskId));
 
   try {
-    for (let index = 0; index < taskIds.length; index += 100) {
-      const idChunk = taskIds.slice(index, index + 100);
-      const result = await client.call("task.get", [
-        [{ field: "task.id", operator: "in", value: idChunk }],
-        {
-          paging: { firstresult: 0, maxresults: PAGE_SIZE },
-          orderings: [{ field: "task.id", direction: "asc" }]
-        }
-      ] as JsonValue[]);
+    const taskIdChunks = chunksOf(taskIds, 100);
+    for (let index = 0; index < taskIdChunks.length; index += PAGE_FETCH_BATCH_SIZE) {
+      const results = await client.batch(
+        taskIdChunks.slice(index, index + PAGE_FETCH_BATCH_SIZE).map((idChunk) => ({
+          method: "task.get",
+          params: [
+            [{ field: "task.id", operator: "in", value: idChunk }],
+            {
+              paging: { firstresult: 0, maxresults: PAGE_SIZE },
+              orderings: [{ field: "task.id", direction: "asc" }]
+            }
+          ] as JsonValue[]
+        }))
+      );
 
-      for (const task of asRecords(result)) {
-        const taskId = idFrom(readField(task, "id"));
-        const offerProjectLineId = relationId(task, "offerprojectline");
-        if (taskId !== null && offerProjectLineId !== null) {
-          taskOfferProjectLineIds.set(taskId, offerProjectLineId);
+      for (const result of results) {
+        for (const task of asRecords(result)) {
+          const taskId = idFrom(readField(task, "id"));
+          const offerProjectLineId = relationId(task, "offerprojectline");
+          if (taskId !== null && offerProjectLineId !== null) {
+            taskOfferProjectLineIds.set(taskId, offerProjectLineId);
+            const taskLineBillability = lineBillabilityFromEmbeddedRecord(asRecord(readField(task, "offerprojectline")));
+            if (taskLineBillability) {
+              offerProjectLines.set(offerProjectLineId, taskLineBillability);
+            }
+          }
         }
       }
     }
@@ -2510,21 +2448,30 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
   }
 
   try {
-    const offerProjectLineIds = Array.from(new Set([...directOfferProjectLineIds, ...taskOfferProjectLineIds.values()]));
-    for (let index = 0; index < offerProjectLineIds.length; index += 100) {
-      const idChunk = offerProjectLineIds.slice(index, index + 100);
-      const result = await client.call("offerprojectline.get", [
-        [{ field: "offerprojectline.id", operator: "in", value: idChunk }],
-        {
-          paging: { firstresult: 0, maxresults: PAGE_SIZE },
-          orderings: [{ field: "offerprojectline.id", direction: "asc" }]
-        }
-      ] as JsonValue[]);
+    const offerProjectLineIds = Array.from(new Set([...directOfferProjectLineIds, ...taskOfferProjectLineIds.values()])).filter(
+      (offerProjectLineId) => !offerProjectLines.has(offerProjectLineId)
+    );
+    const offerProjectLineIdChunks = chunksOf(offerProjectLineIds, 100);
+    for (let index = 0; index < offerProjectLineIdChunks.length; index += PAGE_FETCH_BATCH_SIZE) {
+      const results = await client.batch(
+        offerProjectLineIdChunks.slice(index, index + PAGE_FETCH_BATCH_SIZE).map((idChunk) => ({
+          method: "offerprojectline.get",
+          params: [
+            [{ field: "offerprojectline.id", operator: "in", value: idChunk }],
+            {
+              paging: { firstresult: 0, maxresults: PAGE_SIZE },
+              orderings: [{ field: "offerprojectline.id", direction: "asc" }]
+            }
+          ] as JsonValue[]
+        }))
+      );
 
-      for (const offerProjectLine of asRecords(result)) {
-        const id = idFrom(readField(offerProjectLine, "id"));
-        if (id !== null) {
-          offerProjectLines.set(id, lineBillabilityFromRecord(offerProjectLine));
+      for (const result of results) {
+        for (const offerProjectLine of asRecords(result)) {
+          const id = idFrom(readField(offerProjectLine, "id"));
+          if (id !== null) {
+            offerProjectLines.set(id, lineBillabilityFromRecord(offerProjectLine));
+          }
         }
       }
     }
@@ -2533,6 +2480,23 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
   }
 
   return { offerProjectLines, taskOfferProjectLineIds };
+}
+
+function lineBillabilityFromEmbeddedRecord(record: JsonRecord | undefined) {
+  if (!record || readField(record, "sellingprice") === undefined) {
+    return null;
+  }
+
+  return lineBillabilityFromRecord(record);
+}
+
+function chunksOf<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
 }
 
 async function fetchPagedRecords(
