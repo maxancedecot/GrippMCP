@@ -204,8 +204,11 @@ const EMPLOYEE_COST_PER_HOUR_CUSTOM_FIELD_ID_ENV_NAMES = [
   "GRIPP_EMPLOYEE_COST_PER_HOUR_CUSTOM_FIELD_IDS"
 ];
 const EMPLOYEE_COST_PER_HOUR_FIELD_NAMES = [
+  "customfield_internekostprijsperuur",
+  "interne kostprijs per uur",
   "interne kostprijs van medewerker",
   "interne kostprijs medewerker",
+  "internekostprijsperuur",
   "internekostprijsvanmedewerker",
   "internekostprijsmedewerker",
   "cost per medewerker per uur",
@@ -263,8 +266,8 @@ const CUSTOM_FIELD_VALUE_KEYS = new Set(
 );
 const CUSTOM_FIELD_RELATION_NAME_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "displayvalue", "displayValue"].map(normalizeComparisonValue));
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
-const PM_DASHBOARD_CACHE_VERSION = 9;
-const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [8];
+const PM_DASHBOARD_CACHE_VERSION = 10;
+const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [9, 8];
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
 const PM_DASHBOARD_TIME_ZONE = "Europe/Brussels";
@@ -4055,7 +4058,7 @@ function createDemoCapacitySources(period: Period): CapacitySources {
       employeesince: `${period.year}-01-01`,
       active: true,
       role: { id: 2, searchname: "Medewerker" },
-      costpermedewerkerperuur: 72
+      customfield_internekostprijsperuur: 72
     },
     {
       id: 2,
@@ -4063,7 +4066,7 @@ function createDemoCapacitySources(period: Period): CapacitySources {
       employeesince: `${period.year}-02-01`,
       active: true,
       role: { id: 2, searchname: "Medewerker" },
-      customfields: [{ name: "Interne kostprijs van medewerker", value: 64 }]
+      customfields: [{ name: "Interne kostprijs per uur", value: 64 }]
     },
     {
       id: 3,
