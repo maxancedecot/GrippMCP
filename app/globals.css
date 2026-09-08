@@ -2074,6 +2074,11 @@ td .inline-bar {
   color: var(--muted);
 }
 
+.pm-employee-na {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .pm-employee-bar {
   display: block;
   width: 100%;
