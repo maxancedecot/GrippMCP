@@ -23,7 +23,9 @@ type JsonRecord = Record<string, unknown>;
 type PmSearchParams = Record<string, string | string[] | undefined>;
 type PmBillabilityView = "employees" | "monthly";
 type PmRevenueView = "revenue" | "profit";
+type PmRevenuePerHourView = "overall" | "tags";
 type PmEmployeeBillabilityPeriodPreset = "week" | "month" | "year" | "custom";
+type TaggedRevenueCategory = "project" | "regie" | "retainer";
 
 type Period = {
   start: string;
@@ -44,11 +46,14 @@ type DashboardSource = {
 
 type LineBillability = {
   hasPositiveUnitPrice: boolean;
+  projectId?: number | null;
 };
 
 type BillabilitySources = {
   offerProjectLines: Map<number, LineBillability>;
   taskOfferProjectLineIds: Map<number, number>;
+  taskProjectIds: Map<number, number>;
+  projectTagCategories: Map<number, TaggedRevenueCategory>;
 };
 
 type CapacitySources = {
@@ -128,6 +133,20 @@ type MonthRevenuePerBillableHour = MonthRevenue & {
   revenuePerCalendarItemHour: number;
 };
 
+type TaggedRevenuePerBillableHourBucket = {
+  revenue: number;
+  billableHours: number;
+  revenuePerBillableHour: number;
+};
+
+type TaggedRevenuePerBillableHourCategories = Record<TaggedRevenueCategory, TaggedRevenuePerBillableHourBucket>;
+
+type MonthTaggedRevenuePerBillableHour = {
+  key: string;
+  label: string;
+  categories: TaggedRevenuePerBillableHourCategories;
+};
+
 type MonthRevenueCostProfit = MonthRevenue & {
   employeeCost: number;
   profit: number;
@@ -179,6 +198,7 @@ type PmDashboardData = {
   revenueByMonth: MonthRevenue[];
   agencyCostProfitByMonth: MonthRevenueCostProfit[];
   revenuePerBillableHourByMonth: MonthRevenuePerBillableHour[];
+  taggedRevenuePerBillableHourByMonth: MonthTaggedRevenuePerBillableHour[];
   lastUpdated: string;
 };
 
@@ -198,6 +218,7 @@ type PmCacheNotice = "refreshed" | "refresh_failed";
 const PAGE_SIZE = 250;
 const PAGE_FETCH_BATCH_SIZE = 8;
 const MAX_INVOICE_PAGES = 80;
+const MAX_INVOICE_LINE_PAGES_PER_CHUNK = 40;
 const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
@@ -206,6 +227,12 @@ const INVOICE_REVENUE_SERIES_LABEL = "Agency Omzet";
 const CRM_REVENUE_SERIES_LABEL = "CRM omzet";
 const AGENCY_REVENUE_WITH_CRM_SERIES_LABEL = "Agency Omzet incl. CRM";
 const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
+const TAGGED_REVENUE_CATEGORIES = [
+  { key: "project", label: "Project" },
+  { key: "regie", label: "Regie" },
+  { key: "retainer", label: "Retainer" }
+] as const satisfies Array<{ key: TaggedRevenueCategory; label: string }>;
+const TAGGED_REVENUE_CATEGORY_PRIORITY: TaggedRevenueCategory[] = ["project", "regie", "retainer"];
 const WORKING_HOURS_BATCH_SIZE = 25;
 const DEFAULT_WEEKLY_CONTRACT_HOURS = 40;
 const OVERHEAD_DAILY_HOURS = 8;
@@ -287,8 +314,8 @@ const CUSTOM_FIELD_VALUE_KEYS = new Set(
 );
 const CUSTOM_FIELD_RELATION_NAME_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "displayvalue", "displayValue"].map(normalizeComparisonValue));
 const CUSTOM_FIELD_META_KEYS = new Set([...CUSTOM_FIELD_NAME_KEYS, "id", "type", "readonly", "required"].map(normalizeComparisonValue));
-const PM_DASHBOARD_CACHE_VERSION = 16;
-const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [15, 14, 13, 12, 11, 10, 9, 8];
+const PM_DASHBOARD_CACHE_VERSION = 17;
+const LEGACY_PM_DASHBOARD_CACHE_VERSIONS = [16, 15, 14, 13, 12, 11, 10, 9, 8];
 const PM_CACHE_NOTICE_PARAM = "pmCacheNotice";
 const PM_CACHE_ERROR_PARAM = "pmCacheError";
 const PM_CACHE_REFRESH_ID_PARAM = "pmCacheRefresh";
@@ -322,6 +349,7 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
   const params = (await searchParams) ?? {};
   const billabilityView = getPmBillabilityView(params);
   const revenueView = getPmRevenueView(params);
+  const revenuePerHourView = getPmRevenuePerHourView(params);
   const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
   const cacheNotice = pmCacheNoticeFromParams(params);
   const cacheError = pmCacheErrorFromParams(params);
@@ -565,14 +593,35 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Rendement</p>
-            <h2>Omzet / uur per maand</h2>
+            <h2>{revenuePerHourView === "tags" ? "Omzet / billable uur per tag" : "Omzet / uur per maand"}</h2>
           </div>
           <div className="panel-actions">
             <span className="panel-total panel-total--goal">Doel {formatCurrencyPerHour(REVENUE_PER_BILLABLE_HOUR_GOAL)}</span>
           </div>
         </div>
 
-        <RevenuePerBillableHourLineChart rows={dashboard.revenuePerBillableHourByMonth} goal={REVENUE_PER_BILLABLE_HOUR_GOAL} />
+        <nav className="dashboard-tabs pm-panel-tabs" aria-label="Omzet per uur tabs">
+          <a
+            className={`dashboard-tab ${revenuePerHourView === "overall" ? "dashboard-tab--active" : ""}`}
+            href={pmRevenuePerHourTabHref(params, "overall")}
+            aria-current={revenuePerHourView === "overall" ? "page" : undefined}
+          >
+            Omzet / uur
+          </a>
+          <a
+            className={`dashboard-tab ${revenuePerHourView === "tags" ? "dashboard-tab--active" : ""}`}
+            href={pmRevenuePerHourTabHref(params, "tags")}
+            aria-current={revenuePerHourView === "tags" ? "page" : undefined}
+          >
+            Per tag
+          </a>
+        </nav>
+
+        {revenuePerHourView === "tags" ? (
+          <TaggedRevenuePerBillableHourLineChart rows={dashboard.taggedRevenuePerBillableHourByMonth} goal={REVENUE_PER_BILLABLE_HOUR_GOAL} />
+        ) : (
+          <RevenuePerBillableHourLineChart rows={dashboard.revenuePerBillableHourByMonth} goal={REVENUE_PER_BILLABLE_HOUR_GOAL} />
+        )}
       </section>
       </main>
     </DashboardFrame>
@@ -715,6 +764,10 @@ function getPmRevenueView(params: PmSearchParams): PmRevenueView {
   return firstParam(params.revenueView) === "profit" ? "profit" : "revenue";
 }
 
+function getPmRevenuePerHourView(params: PmSearchParams): PmRevenuePerHourView {
+  return firstParam(params.revenuePerHourView) === "tags" ? "tags" : "overall";
+}
+
 function getEmployeeBillabilityPeriodFromParams(params: PmSearchParams): EmployeeBillabilityPeriod {
   const preset = firstParam(params.employeePeriod);
   if (preset === "week") {
@@ -771,6 +824,27 @@ function pmRevenueTabHref(params: PmSearchParams, view: PmRevenueView) {
 
   const query = search.toString();
   return query ? `/pm?${query}#pm-revenue-detail` : "/pm#pm-revenue-detail";
+}
+
+function pmRevenuePerHourTabHref(params: PmSearchParams, view: PmRevenuePerHourView) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (["revenuePerHourView", PM_CACHE_NOTICE_PARAM, PM_CACHE_ERROR_PARAM].includes(key)) {
+      continue;
+    }
+
+    for (const item of paramValues(value)) {
+      search.append(key, item);
+    }
+  }
+
+  if (view === "tags") {
+    search.set("revenuePerHourView", "tags");
+  }
+
+  const query = search.toString();
+  return query ? `/pm?${query}#pm-revenue-per-billable-hour-detail` : "/pm#pm-revenue-per-billable-hour-detail";
 }
 
 function pmEmployeeBillabilityPeriodHref(params: PmSearchParams, preset: PmEmployeeBillabilityPeriodPreset) {
@@ -1122,6 +1196,120 @@ function RevenuePerBillableHourLineChart({ rows, goal }: { rows: MonthRevenuePer
   );
 }
 
+function TaggedRevenuePerBillableHourLineChart({ rows, goal }: { rows: MonthTaggedRevenuePerBillableHour[]; goal: number }) {
+  const width = Math.max(720, rows.length * 112);
+  const height = 300;
+  const padding = { top: 26, right: 30, bottom: 48, left: 78 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const values = rows.flatMap((row) => TAGGED_REVENUE_CATEGORIES.map((category) => row.categories[category.key].revenuePerBillableHour));
+  const rawMaximum = Math.max(goal, 0, ...values);
+  const minimum = Math.min(0, ...values);
+  const maximum = rawMaximum === minimum ? rawMaximum + 1 : rawMaximum * 1.12;
+  const range = Math.max(1, maximum - minimum);
+  const xFor = (index: number) => padding.left + (rows.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (rows.length - 1));
+  const yFor = (value: number) => padding.top + ((maximum - value) / range) * chartHeight;
+  const pointsByCategory = new Map(
+    TAGGED_REVENUE_CATEGORIES.map((category) => [
+      category.key,
+      rows.map((row, index) => ({
+        x: xFor(index),
+        y: yFor(row.categories[category.key].revenuePerBillableHour)
+      }))
+    ])
+  );
+  const gridTicks = Array.from({ length: 5 }, (_, index) => {
+    const value = maximum - (range * index) / 4;
+    return { key: index, value, y: yFor(value) };
+  });
+  const zeroY = yFor(0);
+  const goalY = yFor(goal);
+
+  return (
+    <div className="revenue-line-chart">
+      <div className="revenue-line-legend" aria-hidden="true">
+        {TAGGED_REVENUE_CATEGORIES.map((category) => (
+          <span key={category.key}>
+            <i className={`revenue-line-legend-dot revenue-line-legend-dot--tag-${category.key}`} />
+            {category.label}
+          </span>
+        ))}
+        <span><i className="revenue-line-legend-dot revenue-line-legend-dot--goal" />Doel {formatCurrencyPerHour(goal)}</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Omzet per billable uur per opdracht-tag: ${rows
+          .map((row) =>
+            TAGGED_REVENUE_CATEGORIES.map((category) => {
+              const bucket = row.categories[category.key];
+              return `${row.label} ${category.label} ${formatCurrencyPerHour(bucket.revenuePerBillableHour)} bij ${formatHours(
+                bucket.billableHours
+              )} billable uren`;
+            }).join(", ")
+          )
+          .join(", ")}`}
+      >
+        <rect className="revenue-line-plot-bg" x={padding.left} y={padding.top} width={chartWidth} height={chartHeight} rx="6" />
+        {gridTicks.map((tick) => (
+          <g key={tick.key}>
+            <line className="revenue-line-grid" x1={padding.left} x2={width - padding.right} y1={tick.y} y2={tick.y} />
+            <text className="revenue-line-y-label" x={padding.left - 12} y={tick.y + 4} textAnchor="end">
+              {formatCurrencyPerHour(tick.value)}
+            </text>
+          </g>
+        ))}
+        <line className="revenue-line-axis" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
+        <line className="revenue-line-goal" x1={padding.left} x2={width - padding.right} y1={goalY} y2={goalY} />
+        <text className="revenue-line-goal-label" x={width - padding.right} y={goalY - 8} textAnchor="end">
+          Doel {formatCurrencyPerHour(goal)}
+        </text>
+        {TAGGED_REVENUE_CATEGORIES.map((category) => {
+          const points = pointsByCategory.get(category.key) ?? [];
+          return rows.length > 1 ? (
+            <path
+              key={category.key}
+              className={`revenue-line-path revenue-line-path--tag-${category.key}`}
+              d={smoothLinePath(points)}
+            />
+          ) : null;
+        })}
+        {rows.map((row, index) => {
+          const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+
+          return (
+            <g key={row.key}>
+              {TAGGED_REVENUE_CATEGORIES.map((category) => {
+                const points = pointsByCategory.get(category.key) ?? [];
+                const point = points[index];
+                const bucket = row.categories[category.key];
+                if (!point) {
+                  return null;
+                }
+
+                return (
+                  <circle
+                    key={category.key}
+                    className={`revenue-line-point revenue-line-point--tag-${category.key}`}
+                    cx={point.x}
+                    cy={point.y}
+                    r="4"
+                  >
+                    <title>{`${row.label} ${category.label}: ${formatCurrencyPerHour(
+                      bucket.revenuePerBillableHour
+                    )} per billable uur uit ${formatCurrency(bucket.revenue)} en ${formatHours(bucket.billableHours)} billable uren`}</title>
+                  </circle>
+                );
+              })}
+              <text className="revenue-line-label" x={xFor(index)} y={height - 22} textAnchor={anchor}>{row.label}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function BillabilityLineChart({ rows }: { rows: MonthBillability[] }) {
   const width = Math.max(720, rows.length * 112);
   const height = 300;
@@ -1270,7 +1458,15 @@ async function loadFreshPmDashboardData(
     fetchAbsenceRequestsById(client, absenceRequestLines)
   );
   const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
-  const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues);
+  const invoiceLines = await optionalData(issues, "factuurregels", [], () => fetchInvoiceLinesForInvoices(client, invoices, period));
+  const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues, offerProjectLineIdsFromInvoiceLines(invoiceLines));
+  billabilitySources.projectTagCategories = await optionalData(issues, "opdrachttags", new Map<number, TaggedRevenueCategory>(), () =>
+    fetchProjectTagCategories(
+      client,
+      projectIdsForTaggedRevenue(scopedHours, invoiceLines, billabilitySources),
+      projectRecordsFromTaggedRevenueSources(scopedHours, invoiceLines)
+    )
+  );
   const yearHours = recordsForPeriod(scopedHours, period);
   const yearCalendarItems = recordsForPeriod(scopedCalendarItems, period);
   const yearAbsenceRequestLines = recordsForPeriod(scopedAbsenceRequestLines, period);
@@ -1338,7 +1534,8 @@ async function loadFreshPmDashboardData(
       absenceRequestsById
     },
     employeePeriodCalendarItems,
-    employeeBillabilityOverheadSources
+    employeeBillabilityOverheadSources,
+    invoiceLines
   );
 
   return { dashboard, issues };
@@ -1471,6 +1668,10 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData, cacheVers
     employeeCost + (employeeBillabilityOverhead?.employeeCost ?? 0),
     cacheVersion >= PM_DASHBOARD_CACHE_VERSION
   );
+  const taggedRevenuePerBillableHourByMonth = taggedRevenuePerBillableHourRowsFromValue(
+    (dashboard as JsonRecord).taggedRevenuePerBillableHourByMonth,
+    dashboard.period
+  );
 
   return {
     ...dashboard,
@@ -1479,7 +1680,8 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData, cacheVers
     employeeBillabilityOverhead,
     employeeBillabilitySummary,
     revenueByMonth: revenueByMonthRows,
-    agencyCostProfitByMonth
+    agencyCostProfitByMonth,
+    taggedRevenuePerBillableHourByMonth
   };
 }
 
@@ -1596,6 +1798,50 @@ function monthRevenueRowsFromValue(value: unknown): MonthRevenue[] {
 
     return key && label && revenue !== null ? [{ key, label, revenue }] : [];
   });
+}
+
+function taggedRevenuePerBillableHourRowsFromValue(value: unknown, period: Period): MonthTaggedRevenuePerBillableHour[] {
+  const recordsByKey = new Map<string, JsonRecord>();
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const record = asRecord(item);
+      const key = stringFrom(record?.key);
+      if (record && key) {
+        recordsByKey.set(key, record);
+      }
+    }
+  }
+
+  return makeMonthBuckets(period).map((bucket) => {
+    const record = recordsByKey.get(bucket.key);
+    const categoriesRecord = asRecord(record?.categories);
+
+    return {
+      ...bucket,
+      categories: taggedRevenueCategoriesFromCacheValue(categoriesRecord)
+    };
+  });
+}
+
+function taggedRevenueCategoriesFromCacheValue(value: JsonRecord | undefined): TaggedRevenuePerBillableHourCategories {
+  return {
+    project: taggedRevenueBucketFromCacheValue(value?.project),
+    regie: taggedRevenueBucketFromCacheValue(value?.regie),
+    retainer: taggedRevenueBucketFromCacheValue(value?.retainer)
+  };
+}
+
+function taggedRevenueBucketFromCacheValue(value: unknown): TaggedRevenuePerBillableHourBucket {
+  const record = asRecord(value);
+  const revenue = numberFrom(record?.revenue) ?? 0;
+  const billableHours = numberFrom(record?.billableHours) ?? 0;
+  const revenuePerBillableHour = numberFrom(record?.revenuePerBillableHour) ?? divideCurrency(revenue, billableHours);
+
+  return {
+    revenue,
+    billableHours,
+    revenuePerBillableHour
+  };
 }
 
 function revenueRowsIncludingCrmRevenue(revenueRows: MonthRevenue[], crmRevenueRows: MonthRevenue[]): MonthRevenue[] {
@@ -1856,7 +2102,8 @@ function buildDemoPmDashboardData(period: Period, employeeBillabilityPeriod: Emp
     recordsForPeriod(scopedHours, employeeBillabilityPeriod),
     scopedEmployeePeriodCapacitySources,
     recordsForPeriod(scopedCalendarItems, employeeBillabilityPeriod),
-    employeeBillabilityOverheadSources
+    employeeBillabilityOverheadSources,
+    createDemoInvoiceLines(period)
   );
 }
 
@@ -1928,7 +2175,9 @@ function emptyWorkingHoursCapacity(): WorkingHoursCapacity {
 function emptyBillabilitySources(): BillabilitySources {
   return {
     offerProjectLines: new Map<number, LineBillability>(),
-    taskOfferProjectLineIds: new Map<number, number>()
+    taskOfferProjectLineIds: new Map<number, number>(),
+    taskProjectIds: new Map<number, number>(),
+    projectTagCategories: new Map<number, TaggedRevenueCategory>()
   };
 }
 
@@ -2317,6 +2566,70 @@ async function fetchAbsenceRequestLinesForPeriod(client: GrippClient, period: Pe
   return fetchPagedRecords(client, "absencerequestline", filters, [{ field: "absencerequestline.date", direction: "asc" }], MAX_ABSENCE_LINE_PAGES);
 }
 
+async function fetchInvoiceLinesForInvoices(client: GrippClient, invoices: JsonRecord[], period: Period) {
+  const revenueInvoices = invoices.filter((invoice) => invoiceRevenueEntry(invoice, period) !== null);
+  const invoiceIds = uniqueRelationRecordIds(revenueInvoices);
+  const embedded = invoiceLinesFromInvoices(revenueInvoices);
+  const missingInvoiceIds = invoiceIds.filter((invoiceId) => !embedded.invoiceIdsWithLines.has(invoiceId));
+  const fetchedLines: JsonRecord[] = [];
+
+  for (const invoiceIdChunk of chunksOf(missingInvoiceIds, 100)) {
+    fetchedLines.push(
+      ...(await fetchPagedRecords(
+        client,
+        "invoiceline",
+        [{ field: "invoiceline.invoice", operator: "in", value: invoiceIdChunk }],
+        [{ field: "invoiceline.id", direction: "asc" }],
+        MAX_INVOICE_LINE_PAGES_PER_CHUNK
+      ))
+    );
+  }
+
+  return mergeInvoiceLines(embedded.lines, fetchedLines);
+}
+
+async function fetchProjectTagCategories(client: GrippClient, projectIds: number[], seedProjectRecords: JsonRecord[] = []) {
+  const projectRecordsById = new Map<number, JsonRecord>();
+  for (const project of seedProjectRecords) {
+    const projectId = idFrom(readField(project, "id"));
+    if (projectId !== null) {
+      projectRecordsById.set(projectId, project);
+    }
+  }
+
+  const missingProjectIds = projectIds.filter((projectId) => !projectRecordsById.has(projectId));
+  for (const project of await fetchRecordsByIds(client, "project", missingProjectIds)) {
+    const projectId = idFrom(readField(project, "id"));
+    if (projectId !== null) {
+      projectRecordsById.set(projectId, project);
+    }
+  }
+
+  const projectRecords = Array.from(projectRecordsById.values());
+  const embeddedTagNames = tagNamesFromProjectRecords(projectRecords);
+  const missingTagIds = uniqueRelationIds(projectRecords, "tags").filter((tagId) => !embeddedTagNames.has(tagId));
+  const tagRecords = await fetchRecordsByIds(client, "tag", missingTagIds);
+  const tagNames = new Map(embeddedTagNames);
+
+  for (const tag of tagRecords) {
+    const tagId = idFrom(readField(tag, "id"));
+    if (tagId !== null) {
+      tagNames.set(tagId, recordDisplayName(tag, "Onbekend"));
+    }
+  }
+
+  const categories = new Map<number, TaggedRevenueCategory>();
+  for (const project of projectRecords) {
+    const projectId = idFrom(readField(project, "id"));
+    const category = taggedRevenueCategoryFromProject(project, tagNames);
+    if (projectId !== null && category) {
+      categories.set(projectId, category);
+    }
+  }
+
+  return categories;
+}
+
 async function fetchAbsenceRequestsById(client: GrippClient, absenceRequestLines: JsonRecord[], seed = new Map<number, JsonRecord>()) {
   const absenceRequestsById = new Map(seed);
   const absenceRequestIds = uniqueRelationIds(absenceRequestLines, "absencerequest").filter((id) => !absenceRequestsById.has(id));
@@ -2389,10 +2702,16 @@ async function fetchWorkingHoursForEmployees(
   return { workingHoursByEmployeeId, leaveHoursByEmployeeId };
 }
 
-async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[], issues: string[] = []): Promise<BillabilitySources> {
+async function fetchBillabilitySources(
+  client: GrippClient,
+  hours: JsonRecord[],
+  issues: string[] = [],
+  extraOfferProjectLineIds: number[] = []
+): Promise<BillabilitySources> {
   const offerProjectLines = new Map<number, LineBillability>();
   const taskOfferProjectLineIds = new Map<number, number>();
-  const directOfferProjectLineIds = new Set<number>();
+  const taskProjectIds = new Map<number, number>();
+  const directOfferProjectLineIds = new Set<number>(extraOfferProjectLineIds);
 
   for (const hour of hours) {
     const directOfferProjectLineId = relationId(hour, "offerprojectline");
@@ -2406,6 +2725,11 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
 
     const taskId = relationId(hour, "task");
     const task = asRecord(readField(hour, "task"));
+    const taskProjectId = task ? relationId(task, "offerprojectbase") : null;
+    if (taskId !== null && taskProjectId !== null) {
+      taskProjectIds.set(taskId, taskProjectId);
+    }
+
     const taskOfferProjectLineId = task ? relationId(task, "offerprojectline") : null;
     if (taskId !== null && taskOfferProjectLineId !== null) {
       taskOfferProjectLineIds.set(taskId, taskOfferProjectLineId);
@@ -2437,7 +2761,11 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
       for (const result of results) {
         for (const task of asRecords(result)) {
           const taskId = idFrom(readField(task, "id"));
+          const taskProjectId = relationId(task, "offerprojectbase");
           const offerProjectLineId = relationId(task, "offerprojectline");
+          if (taskId !== null && taskProjectId !== null) {
+            taskProjectIds.set(taskId, taskProjectId);
+          }
           if (taskId !== null && offerProjectLineId !== null) {
             taskOfferProjectLineIds.set(taskId, offerProjectLineId);
             const taskLineBillability = lineBillabilityFromEmbeddedRecord(asRecord(readField(task, "offerprojectline")));
@@ -2453,9 +2781,10 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
   }
 
   try {
-    const offerProjectLineIds = Array.from(new Set([...directOfferProjectLineIds, ...taskOfferProjectLineIds.values()])).filter(
-      (offerProjectLineId) => !offerProjectLines.has(offerProjectLineId)
-    );
+    const offerProjectLineIds = Array.from(new Set([...directOfferProjectLineIds, ...taskOfferProjectLineIds.values()])).filter((offerProjectLineId) => {
+      const line = offerProjectLines.get(offerProjectLineId);
+      return !line || line.projectId === null || line.projectId === undefined;
+    });
     const offerProjectLineIdChunks = chunksOf(offerProjectLineIds, 100);
     for (let index = 0; index < offerProjectLineIdChunks.length; index += PAGE_FETCH_BATCH_SIZE) {
       const results = await client.batch(
@@ -2484,7 +2813,7 @@ async function fetchBillabilitySources(client: GrippClient, hours: JsonRecord[],
     issues.push(`opdrachtregelprijzen niet geladen${errorCode(error) ? ` (${errorCode(error)})` : ""}`);
   }
 
-  return { offerProjectLines, taskOfferProjectLineIds };
+  return { offerProjectLines, taskOfferProjectLineIds, taskProjectIds, projectTagCategories: new Map<number, TaggedRevenueCategory>() };
 }
 
 function lineBillabilityFromEmbeddedRecord(record: JsonRecord | undefined) {
@@ -2502,6 +2831,232 @@ function chunksOf<T>(values: T[], size: number) {
   }
 
   return chunks;
+}
+
+function invoiceLinesFromInvoices(invoices: JsonRecord[]) {
+  const lines: JsonRecord[] = [];
+  const invoiceIdsWithLines = new Set<number>();
+
+  for (const invoice of invoices) {
+    const invoiceId = idFrom(readField(invoice, "id"));
+    const embeddedLines = recordsFromField(invoice, "invoicelines");
+    if (invoiceId !== null && embeddedLines.length > 0) {
+      invoiceIdsWithLines.add(invoiceId);
+    }
+
+    for (const line of embeddedLines) {
+      lines.push(enrichEmbeddedInvoiceLine(line, invoice, invoiceId));
+    }
+  }
+
+  return { lines, invoiceIdsWithLines };
+}
+
+function enrichEmbeddedInvoiceLine(invoiceLine: JsonRecord, invoice: JsonRecord, invoiceId: number | null) {
+  const enriched = { ...invoiceLine };
+  if (invoiceId !== null && relationId(enriched, "invoice") === null) {
+    enriched.invoice = invoiceId;
+  }
+  if (readField(enriched, "project") === undefined && readField(invoice, "project") !== undefined) {
+    enriched.project = readField(invoice, "project");
+  }
+
+  return enriched;
+}
+
+function recordsFromField(record: JsonRecord, field: string) {
+  const value = readField(record, field);
+  return value === undefined ? [] : asRecords(value as JsonValue);
+}
+
+function mergeInvoiceLines(primary: JsonRecord[], secondary: JsonRecord[]) {
+  const lines: JsonRecord[] = [];
+  const seen = new Set<string>();
+
+  for (const line of [...primary, ...secondary]) {
+    const key = invoiceLineKey(line);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    lines.push(line);
+  }
+
+  return lines;
+}
+
+function invoiceLineKey(invoiceLine: JsonRecord) {
+  const id = idFrom(readField(invoiceLine, "id"));
+  if (id !== null) {
+    return `id:${id}`;
+  }
+
+  const invoiceId = relationId(invoiceLine, "invoice") ?? "none";
+  const projectId = relationId(invoiceLine, "project") ?? "none";
+  const partId = relationId(invoiceLine, "part") ?? relationId(invoiceLine, "offerprojectline") ?? "none";
+  const amount = numberFrom(readField(invoiceLine, "amount")) ?? "";
+  const sellingPrice = numberFrom(readField(invoiceLine, "sellingprice")) ?? "";
+  const description = normalizeComparisonValue(stringFrom(readField(invoiceLine, "description")) ?? "");
+  return `synthetic:${invoiceId}:${projectId}:${partId}:${amount}:${sellingPrice}:${description}`;
+}
+
+function offerProjectLineIdsFromInvoiceLines(invoiceLines: JsonRecord[]) {
+  return uniqueSortedNumbers(
+    invoiceLines.flatMap((line) =>
+      directProjectIdForInvoiceLine(line) === null ? [relationId(line, "part"), relationId(line, "offerprojectline")] : []
+    )
+  );
+}
+
+function projectIdsForTaggedRevenue(hours: JsonRecord[], invoiceLines: JsonRecord[], billabilitySources: BillabilitySources) {
+  return uniqueSortedNumbers([
+    ...hours.map((hour) => projectIdForHour(hour, billabilitySources)),
+    ...invoiceLines.map((invoiceLine) => projectIdForInvoiceLine(invoiceLine, billabilitySources))
+  ]);
+}
+
+function projectRecordsFromTaggedRevenueSources(hours: JsonRecord[], invoiceLines: JsonRecord[]) {
+  const projectRecordsById = new Map<number, JsonRecord>();
+
+  for (const hour of hours) {
+    collectProjectRecord(readField(hour, "offerprojectbase"), projectRecordsById);
+    const task = asRecord(readField(hour, "task"));
+    if (task) {
+      collectProjectRecord(readField(task, "offerprojectbase"), projectRecordsById);
+    }
+    const offerProjectLine = asRecord(readField(hour, "offerprojectline"));
+    if (offerProjectLine) {
+      collectProjectRecord(readField(offerProjectLine, "offerprojectbase"), projectRecordsById);
+    }
+  }
+
+  for (const invoiceLine of invoiceLines) {
+    collectProjectRecord(readField(invoiceLine, "project"), projectRecordsById);
+    collectProjectRecord(readField(invoiceLine, "offerprojectbase"), projectRecordsById);
+    const part = asRecord(readField(invoiceLine, "part")) ?? asRecord(readField(invoiceLine, "offerprojectline"));
+    if (part) {
+      collectProjectRecord(readField(part, "offerprojectbase"), projectRecordsById);
+    }
+  }
+
+  return Array.from(projectRecordsById.values());
+}
+
+function collectProjectRecord(value: unknown, recordsById: Map<number, JsonRecord>) {
+  const record = asRecord(value);
+  if (!record || readField(record, "tags") === undefined) {
+    return;
+  }
+
+  const projectId = idFrom(readField(record, "id"));
+  if (projectId !== null) {
+    recordsById.set(projectId, record);
+  }
+}
+
+async function fetchRecordsByIds(client: GrippClient, entity: string, ids: number[]) {
+  const records: JsonRecord[] = [];
+  const idChunks = chunksOf(uniqueSortedNumbers(ids), 100);
+
+  for (let index = 0; index < idChunks.length; index += PAGE_FETCH_BATCH_SIZE) {
+    const results = await client.batch(
+      idChunks.slice(index, index + PAGE_FETCH_BATCH_SIZE).map((idChunk) => ({
+        method: `${entity}.get`,
+        params: [
+          [{ field: `${entity}.id`, operator: "in", value: idChunk }],
+          {
+            paging: { firstresult: 0, maxresults: PAGE_SIZE },
+            orderings: [{ field: `${entity}.id`, direction: "asc" }]
+          }
+        ] as JsonValue[]
+      }))
+    );
+
+    for (const result of results) {
+      records.push(...asRecords(result));
+    }
+  }
+
+  return records;
+}
+
+function tagNamesFromProjectRecords(projectRecords: JsonRecord[]) {
+  const names = new Map<number, string>();
+  for (const project of projectRecords) {
+    collectRelationNamesById(readField(project, "tags"), names);
+  }
+
+  return names;
+}
+
+function collectRelationNamesById(value: unknown, names: Map<number, string>) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectRelationNamesById(item, names));
+    return;
+  }
+
+  const record = asRecord(value);
+  const id = record ? idFrom(readField(record, "id")) : idFrom(value);
+  const name = record ? recordDisplayName(record, "") : stringFrom(value);
+  if (id !== null && name) {
+    names.set(id, name);
+  }
+}
+
+function taggedRevenueCategoryFromProject(project: JsonRecord, tagNames: Map<number, string>) {
+  const tagValues = projectTagTextValues(project, tagNames).map(normalizeComparisonValue);
+
+  for (const category of TAGGED_REVENUE_CATEGORY_PRIORITY) {
+    if (tagValues.some((value) => value === category || value.includes(category))) {
+      return category;
+    }
+  }
+
+  return null;
+}
+
+function projectTagTextValues(project: JsonRecord, tagNames: Map<number, string>) {
+  const values: string[] = [];
+  collectRelationTextValues(readField(project, "tags"), values, tagNames);
+  return values;
+}
+
+function collectRelationTextValues(value: unknown, values: string[], names: Map<number, string>) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectRelationTextValues(item, values, names));
+    return;
+  }
+
+  const record = asRecord(value);
+  const id = record ? idFrom(readField(record, "id")) : idFrom(value);
+  const namedValue = id === null ? undefined : names.get(id);
+  const directValue = record ? recordDisplayName(record, "") : stringFrom(value);
+
+  if (namedValue) {
+    values.push(namedValue);
+  }
+  if (directValue && idFrom(directValue) === null) {
+    values.push(directValue);
+  }
+}
+
+function recordDisplayName(record: JsonRecord, fallback: string) {
+  return (
+    stringFrom(readField(record, "displayvalue")) ||
+    stringFrom(readField(record, "name")) ||
+    stringFrom(readField(record, "searchname")) ||
+    stringFrom(readField(record, "screenname")) ||
+    fallback
+  );
+}
+
+function uniqueRelationRecordIds(records: JsonRecord[]) {
+  return uniqueSortedNumbers(records.map((record) => idFrom(readField(record, "id"))));
+}
+
+function uniqueSortedNumbers(values: Array<number | null>) {
+  return Array.from(new Set(values.filter((value): value is number => value !== null))).sort((left, right) => left - right);
 }
 
 async function fetchPagedRecords(
@@ -2630,7 +3185,8 @@ function buildPmDashboardData(
   employeeBillabilityHours: JsonRecord[] = hours,
   employeeBillabilityCapacitySources: CapacitySources = capacitySources,
   employeeBillabilityCalendarItems: JsonRecord[] = calendarItems,
-  employeeBillabilityOverheadSources: EmployeeBillabilityOverheadSources | null = null
+  employeeBillabilityOverheadSources: EmployeeBillabilityOverheadSources | null = null,
+  invoiceLines: JsonRecord[] = []
 ): PmDashboardData {
   let revenue = 0;
   let invoiceCount = 0;
@@ -2739,6 +3295,14 @@ function buildPmDashboardData(
       revenuePerCalendarItemHour: divideCurrency(monthlyRevenue, monthlyCalendarItemHours)
     };
   });
+  const taggedRevenuePerBillableHourByMonth = buildTaggedRevenuePerBillableHourByMonth(
+    invoices,
+    invoiceLines,
+    hours,
+    billabilitySources,
+    period,
+    monthBuckets
+  );
 
   return {
     period,
@@ -2770,6 +3334,7 @@ function buildPmDashboardData(
     revenueByMonth: revenueByMonthRows,
     agencyCostProfitByMonth,
     revenuePerBillableHourByMonth,
+    taggedRevenuePerBillableHourByMonth,
     lastUpdated: new Intl.DateTimeFormat("nl-NL", {
       timeZone: PM_DASHBOARD_TIME_ZONE,
       day: "2-digit",
@@ -2785,7 +3350,8 @@ function lineBillabilityFromRecord(line: JsonRecord): LineBillability {
   const sellingPrice = Math.max(0, numberFrom(readField(line, "sellingprice")) ?? 0);
 
   return {
-    hasPositiveUnitPrice: sellingPrice > 0
+    hasPositiveUnitPrice: sellingPrice > 0,
+    projectId: relationId(line, "offerprojectbase") ?? relationId(line, "project")
   };
 }
 
@@ -2819,6 +3385,201 @@ function invoiceRevenueEntry(invoice: JsonRecord, period: Period) {
 
   const amount = numberFrom(readField(invoice, "totalincldiscountexclvat"));
   return amount === null ? null : { amount: signedGrippInvoiceRevenueAmount(invoice, amount), monthKey };
+}
+
+function buildTaggedRevenuePerBillableHourByMonth(
+  invoices: JsonRecord[],
+  invoiceLines: JsonRecord[],
+  hours: JsonRecord[],
+  billabilitySources: BillabilitySources,
+  period: Period,
+  monthBuckets: MonthRevenue[]
+): MonthTaggedRevenuePerBillableHour[] {
+  const revenueByMonth = new Map(monthBuckets.map((bucket) => [bucket.key, emptyTaggedNumberValues()]));
+  const billableHoursByMonth = new Map(monthBuckets.map((bucket) => [bucket.key, emptyTaggedNumberValues()]));
+  const invoicesById = invoiceRecordsById(invoices);
+
+  for (const invoiceLine of invoiceLines) {
+    const invoice = invoiceForInvoiceLine(invoiceLine, invoicesById);
+    if (!invoice || stringFrom(readField(invoice, "status"))?.toUpperCase() === "CONCEPT") {
+      continue;
+    }
+
+    const reportDate = dateKeyFromValue(readField(invoice, "reportdate"));
+    const monthKey = monthKeyForDateInPeriod(reportDate, period);
+    const category = taggedRevenueCategoryForInvoiceLine(invoiceLine, billabilitySources);
+    const amount = invoiceLineRevenueAmount(invoiceLine, invoice);
+    if (!monthKey || !category || amount === null) {
+      continue;
+    }
+
+    const values = revenueByMonth.get(monthKey);
+    if (values) {
+      values[category] += amount;
+    }
+  }
+
+  for (const hour of hours) {
+    const amount = Math.max(0, numberFrom(readField(hour, "amount")) ?? 0);
+    const hourDate = dateKeyFromValue(readField(hour, "date"));
+    const monthKey = monthKeyForDateInPeriod(hourDate, period);
+    const category = taggedRevenueCategoryForHour(hour, billabilitySources);
+    if (amount === 0 || !monthKey || !category || !isBillableHour(hour, billabilitySources)) {
+      continue;
+    }
+
+    const values = billableHoursByMonth.get(monthKey);
+    if (values) {
+      values[category] += amount;
+    }
+  }
+
+  return monthBuckets.map((bucket) => {
+    const revenueValues = revenueByMonth.get(bucket.key) ?? emptyTaggedNumberValues();
+    const billableHourValues = billableHoursByMonth.get(bucket.key) ?? emptyTaggedNumberValues();
+
+    return {
+      ...bucket,
+      categories: taggedRevenueCategoriesFromValues(revenueValues, billableHourValues)
+    };
+  });
+}
+
+function taggedRevenueCategoriesFromValues(
+  revenueValues: Record<TaggedRevenueCategory, number>,
+  billableHourValues: Record<TaggedRevenueCategory, number>
+): TaggedRevenuePerBillableHourCategories {
+  return {
+    project: taggedRevenueBucket(revenueValues.project, billableHourValues.project),
+    regie: taggedRevenueBucket(revenueValues.regie, billableHourValues.regie),
+    retainer: taggedRevenueBucket(revenueValues.retainer, billableHourValues.retainer)
+  };
+}
+
+function taggedRevenueBucket(revenue: number, billableHours: number): TaggedRevenuePerBillableHourBucket {
+  return {
+    revenue,
+    billableHours,
+    revenuePerBillableHour: divideCurrency(revenue, billableHours)
+  };
+}
+
+function emptyTaggedNumberValues(): Record<TaggedRevenueCategory, number> {
+  return {
+    project: 0,
+    regie: 0,
+    retainer: 0
+  };
+}
+
+function invoiceRecordsById(invoices: JsonRecord[]) {
+  const invoicesById = new Map<number, JsonRecord>();
+
+  for (const invoice of invoices) {
+    const invoiceId = idFrom(readField(invoice, "id"));
+    if (invoiceId !== null) {
+      invoicesById.set(invoiceId, invoice);
+    }
+  }
+
+  return invoicesById;
+}
+
+function invoiceForInvoiceLine(invoiceLine: JsonRecord, invoicesById: Map<number, JsonRecord>) {
+  const invoiceId = relationId(invoiceLine, "invoice");
+  return invoiceId === null ? null : invoicesById.get(invoiceId) ?? null;
+}
+
+function invoiceLineRevenueAmount(invoiceLine: JsonRecord, invoice: JsonRecord) {
+  const directTotal = firstNumberFromFields(invoiceLine, ["totalincldiscountexclvat", "totalexclvat", "linetotalexclvat"]);
+  if (directTotal !== null) {
+    return signedGrippInvoiceRevenueAmount(invoice, directTotal);
+  }
+
+  const amount = numberFrom(readField(invoiceLine, "amount"));
+  const sellingPrice = numberFrom(readField(invoiceLine, "sellingprice"));
+  if (amount === null || sellingPrice === null) {
+    return null;
+  }
+
+  return signedGrippInvoiceRevenueAmount(invoice, amount * sellingPrice * invoiceLineDiscountMultiplier(invoiceLine));
+}
+
+function invoiceLineDiscountMultiplier(invoiceLine: JsonRecord) {
+  const discount = Math.max(0, numberFrom(readField(invoiceLine, "discount")) ?? 0);
+  return Math.max(0, 1 - discount / 100);
+}
+
+function firstNumberFromFields(record: JsonRecord, fields: string[]) {
+  for (const field of fields) {
+    const value = numberFrom(readField(record, field));
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function taggedRevenueCategoryForInvoiceLine(invoiceLine: JsonRecord, billabilitySources: BillabilitySources) {
+  const projectId = projectIdForInvoiceLine(invoiceLine, billabilitySources);
+  return projectId === null ? null : billabilitySources.projectTagCategories.get(projectId) ?? null;
+}
+
+function taggedRevenueCategoryForHour(hour: JsonRecord, billabilitySources: BillabilitySources) {
+  const projectId = projectIdForHour(hour, billabilitySources);
+  return projectId === null ? null : billabilitySources.projectTagCategories.get(projectId) ?? null;
+}
+
+function projectIdForHour(hour: JsonRecord, billabilitySources: BillabilitySources) {
+  const directProjectId = relationId(hour, "offerprojectbase");
+  if (directProjectId !== null) {
+    return directProjectId;
+  }
+
+  const taskId = relationId(hour, "task");
+  const taskProjectId = taskId === null ? null : billabilitySources.taskProjectIds.get(taskId) ?? null;
+  if (taskProjectId !== null) {
+    return taskProjectId;
+  }
+
+  const directOfferProjectLineId = relationId(hour, "offerprojectline");
+  const directLineProjectId = offerProjectLineProjectId(directOfferProjectLineId, billabilitySources);
+  if (directLineProjectId !== null) {
+    return directLineProjectId;
+  }
+
+  const taskOfferProjectLineId = taskId === null ? null : billabilitySources.taskOfferProjectLineIds.get(taskId) ?? null;
+  return offerProjectLineProjectId(taskOfferProjectLineId, billabilitySources);
+}
+
+function projectIdForInvoiceLine(invoiceLine: JsonRecord, billabilitySources: BillabilitySources) {
+  const directProjectId = directProjectIdForInvoiceLine(invoiceLine);
+  if (directProjectId !== null) {
+    return directProjectId;
+  }
+
+  const part = asRecord(readField(invoiceLine, "part")) ?? asRecord(readField(invoiceLine, "offerprojectline"));
+  const partProjectId = part ? relationId(part, "offerprojectbase") : null;
+  if (partProjectId !== null) {
+    return partProjectId;
+  }
+
+  return offerProjectLineProjectId(relationId(invoiceLine, "part") ?? relationId(invoiceLine, "offerprojectline"), billabilitySources);
+}
+
+function directProjectIdForInvoiceLine(invoiceLine: JsonRecord) {
+  const directProjectId = relationId(invoiceLine, "project") ?? relationId(invoiceLine, "offerprojectbase");
+  if (directProjectId !== null) {
+    return directProjectId;
+  }
+
+  const part = asRecord(readField(invoiceLine, "part")) ?? asRecord(readField(invoiceLine, "offerprojectline"));
+  return part ? relationId(part, "offerprojectbase") ?? relationId(part, "project") : null;
+}
+
+function offerProjectLineProjectId(offerProjectLineId: number | null, billabilitySources: BillabilitySources) {
+  return offerProjectLineId === null ? null : billabilitySources.offerProjectLines.get(offerProjectLineId)?.projectId ?? null;
 }
 
 function buildEmployeeCapacityRows(capacitySources: CapacitySources, hours: JsonRecord[], period: Period): EmployeeCapacityRow[] {
@@ -4577,10 +5338,42 @@ function createDemoHours(period: Period): JsonRecord[] {
   return makeMonthBuckets(period).flatMap((bucket, index) => {
     const month = bucket.key;
     return [
-      { id: index * 4 + 1, date: `${month}-05`, amount: 138 + (index % 3) * 4, employee: 1, task: 6000 + index * 4, offerprojectline: 1000 + index * 4 },
-      { id: index * 4 + 2, date: `${month}-12`, amount: 126 + (index % 4) * 3, employee: 2, task: 6001 + index * 4, offerprojectline: 1001 + index * 4 },
-      { id: index * 4 + 3, date: `${month}-19`, amount: 114 + (index % 2) * 5, employee: 3, task: 6002 + index * 4, offerprojectline: 1002 + index * 4 },
-      { id: index * 4 + 4, date: `${month}-24`, amount: 32 + (index % 3) * 2, employee: 4, task: 6003 + index * 4, offerprojectline: 1003 + index * 4 }
+      {
+        id: index * 4 + 1,
+        date: `${month}-05`,
+        amount: 138 + (index % 3) * 4,
+        employee: 1,
+        task: 6000 + index * 4,
+        offerprojectbase: 101,
+        offerprojectline: 1000 + index * 4
+      },
+      {
+        id: index * 4 + 2,
+        date: `${month}-12`,
+        amount: 126 + (index % 4) * 3,
+        employee: 2,
+        task: 6001 + index * 4,
+        offerprojectbase: 102,
+        offerprojectline: 1001 + index * 4
+      },
+      {
+        id: index * 4 + 3,
+        date: `${month}-19`,
+        amount: 114 + (index % 2) * 5,
+        employee: 3,
+        task: 6002 + index * 4,
+        offerprojectbase: 103,
+        offerprojectline: 1002 + index * 4
+      },
+      {
+        id: index * 4 + 4,
+        date: `${month}-24`,
+        amount: 32 + (index % 3) * 2,
+        employee: 4,
+        task: 6003 + index * 4,
+        offerprojectbase: 101,
+        offerprojectline: 1003 + index * 4
+      }
     ];
   });
 }
@@ -4599,23 +5392,38 @@ function createDemoCalendarItems(period: Period): JsonRecord[] {
 function createDemoBillabilitySources(hours: JsonRecord[]): BillabilitySources {
   const offerProjectLines = new Map<number, LineBillability>();
   const taskOfferProjectLineIds = new Map<number, number>();
+  const taskProjectIds = new Map<number, number>();
 
   uniqueRelationIds(hours, "offerprojectline").forEach((id, index) => {
     const sellingPrice = index % 5 === 4 ? 0 : 95 + (index % 4) * 10;
     offerProjectLines.set(id, {
-      hasPositiveUnitPrice: sellingPrice > 0
+      hasPositiveUnitPrice: sellingPrice > 0,
+      projectId: [101, 102, 103, 101][index % 4]
     });
   });
 
   for (const hour of hours) {
     const taskId = relationId(hour, "task");
     const offerProjectLineId = relationId(hour, "offerprojectline");
+    const projectId = relationId(hour, "offerprojectbase");
     if (taskId !== null && offerProjectLineId !== null) {
       taskOfferProjectLineIds.set(taskId, offerProjectLineId);
     }
+    if (taskId !== null && projectId !== null) {
+      taskProjectIds.set(taskId, projectId);
+    }
   }
 
-  return { offerProjectLines, taskOfferProjectLineIds };
+  return {
+    offerProjectLines,
+    taskOfferProjectLineIds,
+    taskProjectIds,
+    projectTagCategories: new Map<number, TaggedRevenueCategory>([
+      [101, "project"],
+      [102, "regie"],
+      [103, "retainer"]
+    ])
+  };
 }
 
 function createDemoInvoices(period: Period): JsonRecord[] {
@@ -4625,6 +5433,17 @@ function createDemoInvoices(period: Period): JsonRecord[] {
     status: "SENT",
     totalincldiscountexclvat: [18500, 22400, 26350, 19800, 28900, 24400][index % 6]
   }));
+}
+
+function createDemoInvoiceLines(period: Period): JsonRecord[] {
+  return makeMonthBuckets(period).flatMap((bucket, index) => {
+    const invoiceId = 9000 + index;
+    return [
+      { id: index * 3 + 9200, invoice: invoiceId, project: 101, amount: 1, sellingprice: 8600 + (index % 3) * 400, discount: 0 },
+      { id: index * 3 + 9201, invoice: invoiceId, project: 102, amount: 1, sellingprice: 6200 + (index % 4) * 350, discount: 0 },
+      { id: index * 3 + 9202, invoice: invoiceId, project: 103, amount: 1, sellingprice: 4200 + (index % 2) * 250, discount: 0 }
+    ];
+  });
 }
 
 function createDemoCapacitySources(period: Period): CapacitySources {
