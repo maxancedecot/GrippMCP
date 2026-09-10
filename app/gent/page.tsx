@@ -7,7 +7,7 @@ import "./gent.css";
 export const metadata: Metadata = {
   title: "Gent 3D | Ledoux",
   description:
-    "Een interactieve stadskaart van Gent met 3D-gebouwen en herkenningspunten."
+    "Een interactieve kaart van het huidige Gent in middeleeuwse stijl, met 3D-gebouwen en herkenningspunten."
 };
 
 export default function GentPage() {

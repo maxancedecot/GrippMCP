@@ -15,6 +15,8 @@ export type GentPlace = {
   coordinates: [number, number];
 };
 
+export const GENT_PLACE_NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII"];
+
 export const GENT_PLACES: GentPlace[] = [
   {
     id: "gravensteen",
@@ -76,14 +78,14 @@ export const GENT_STYLE: StyleSpecification = {
     {
       id: "land",
       type: "background",
-      paint: { "background-color": "#edf0ed" }
+      paint: { "background-color": "#c7cbb5" }
     },
     {
       id: "landuse",
       type: "fill",
       source: "city",
       "source-layer": "landuse",
-      paint: { "fill-color": "#e3e8e3", "fill-opacity": 0.7 }
+      paint: { "fill-color": "#b9c0a4", "fill-opacity": 0.6 }
     },
     {
       id: "green",
@@ -91,21 +93,21 @@ export const GENT_STYLE: StyleSpecification = {
       source: "city",
       "source-layer": "landcover",
       filter: ["in", "class", "wood", "grass", "scrub"],
-      paint: { "fill-color": "#bfd5bd", "fill-opacity": 0.8 }
+      paint: { "fill-color": "#849974", "fill-opacity": 0.85 }
     },
     {
       id: "parks",
       type: "fill",
       source: "city",
       "source-layer": "park",
-      paint: { "fill-color": "#c3dbbf", "fill-opacity": 0.75 }
+      paint: { "fill-color": "#8b9d78", "fill-opacity": 0.8 }
     },
     {
       id: "water",
       type: "fill",
       source: "city",
       "source-layer": "water",
-      paint: { "fill-color": "#7fbecb" }
+      paint: { "fill-color": "#547d7c", "fill-outline-color": "#375d5c" }
     },
     {
       id: "waterways",
@@ -113,7 +115,7 @@ export const GENT_STYLE: StyleSpecification = {
       source: "city",
       "source-layer": "waterway",
       paint: {
-        "line-color": "#7fbecb",
+        "line-color": "#547d7c",
         "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1, 18, 8]
       }
     },
@@ -125,7 +127,7 @@ export const GENT_STYLE: StyleSpecification = {
       filter: ["!in", "class", "rail", "path"],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": "#d4d9d3",
+        "line-color": "#a5aa91",
         "line-width": [
           "interpolate",
           ["exponential", 1.5],
@@ -147,7 +149,7 @@ export const GENT_STYLE: StyleSpecification = {
       filter: ["!in", "class", "rail", "path"],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": "#ffffff",
+        "line-color": "#d5d1bb",
         "line-width": [
           "interpolate",
           ["exponential", 1.5],
@@ -168,7 +170,7 @@ export const GENT_STYLE: StyleSpecification = {
       "source-layer": "transportation",
       filter: ["==", "class", "path"],
       paint: {
-        "line-color": "#ffffff",
+        "line-color": "#d5d1bb",
         "line-width": 2,
         "line-dasharray": [2, 1]
       }
@@ -180,7 +182,7 @@ export const GENT_STYLE: StyleSpecification = {
       "source-layer": "transportation",
       filter: ["==", "class", "rail"],
       paint: {
-        "line-color": "#a8b4ae",
+        "line-color": "#818773",
         "line-width": 1.5,
         "line-dasharray": [3, 2]
       }
@@ -191,7 +193,7 @@ export const GENT_STYLE: StyleSpecification = {
       source: "city",
       "source-layer": "building",
       minzoom: 13,
-      paint: { "fill-color": "#d0d6d4", "fill-outline-color": "#aebbb7" }
+      paint: { "fill-color": "#a59f93", "fill-outline-color": "#736f63" }
     },
     {
       id: "street-labels",
@@ -208,9 +210,9 @@ export const GENT_STYLE: StyleSpecification = {
         "symbol-spacing": 300
       },
       paint: {
-        "text-color": "#5b6b67",
-        "text-halo-color": "#ffffff",
-        "text-halo-width": 1.5
+        "text-color": "#4b4e3b",
+        "text-halo-color": "#e0dcc5",
+        "text-halo-width": 1
       }
     },
     {
@@ -226,8 +228,8 @@ export const GENT_STYLE: StyleSpecification = {
         "text-size": 12
       },
       paint: {
-        "text-color": "#2e6c7f",
-        "text-halo-color": "#a9d4dc",
+        "text-color": "#e4e1c9",
+        "text-halo-color": "#3f6363",
         "text-halo-width": 1
       }
     },
@@ -244,8 +246,8 @@ export const GENT_STYLE: StyleSpecification = {
         "text-transform": "uppercase"
       },
       paint: {
-        "text-color": "#536560",
-        "text-halo-color": "#ffffff",
+        "text-color": "#434a36",
+        "text-halo-color": "#d5d1bb",
         "text-halo-width": 2
       }
     }

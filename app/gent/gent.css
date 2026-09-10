@@ -22,6 +22,11 @@
   min-height: 0;
 }
 .gent-page {
+  --good: #c4aa75;
+  --muted: #b4b49f;
+  --border: rgba(196, 170, 117, 0.22);
+  --background: #182423;
+  --font-display: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -42,7 +47,8 @@
   align-items: center;
   gap: 28px;
   padding: 16px 28px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 3px double #766e52;
+  background: #182423;
 }
 .gent-heading {
   display: flex;
@@ -59,7 +65,7 @@
   font-family: var(--font-display);
   font-size: 32px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 400;
 }
 .gent-heading-dot {
   color: var(--good);
@@ -77,7 +83,7 @@
   padding: 3px;
   gap: 3px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
 }
 .gent-view-mode button {
   min-width: 58px;
@@ -95,8 +101,9 @@
   cursor: pointer;
 }
 .gent-view-mode button[aria-pressed="true"] {
-  background: var(--good);
-  color: #171b18;
+  background: #743543;
+  box-shadow: inset 0 0 0 1px #a48760;
+  color: #f1e9d7;
 }
 .gent-workspace {
   flex: 1;
@@ -108,7 +115,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: #141716;
+  background: #182423;
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
@@ -120,7 +127,7 @@
 }
 .gent-places-heading h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
   font-family: var(--font-display);
   font-weight: 600;
 }
@@ -135,10 +142,10 @@
   gap: 8px;
   height: 40px;
   padding: 0 10px;
-  border: 1px solid #38413b;
-  border-radius: 4px;
-  color: #a8b5ad;
-  background: #1b201d;
+  border: 1px solid #515644;
+  border-radius: 2px;
+  color: #c2c3ad;
+  background: #202f2b;
   flex-shrink: 0;
 }
 .gent-search input {
@@ -151,7 +158,7 @@
   outline: 0;
 }
 .gent-search input::placeholder {
-  color: #a8b5ad;
+  color: #b3b9a6;
 }
 .gent-search:focus-within {
   border-color: var(--good);
@@ -178,25 +185,26 @@
   color: #fafcfb;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 2px;
   cursor: pointer;
 }
 .gent-place:hover {
-  background: #222a25;
+  background: #273a31;
 }
 .gent-place[aria-pressed="true"] {
-  background: #2d3222;
-  border-color: #535738;
+  background: #472b32;
+  border-color: #94754e;
 }
 .gent-place-number {
   display: grid;
   place-items: center;
   flex: 0 0 29px;
   height: 29px;
-  border: 1px solid #434e46;
-  border-radius: 50%;
-  font-size: 10px;
-  color: #bbc7bf;
+  border: 1px solid #8f805b;
+  border-radius: 2px 2px 45% 45%;
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: #d6c293;
 }
 .gent-place[aria-pressed="true"] .gent-place-number {
   background: var(--good);
@@ -211,8 +219,9 @@
   gap: 5px;
 }
 .gent-place-text strong {
-  font-size: 12px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 400;
   overflow-wrap: anywhere;
 }
 .gent-place-text > span {
@@ -232,7 +241,7 @@
   margin: auto 0 0;
   padding: 18px 20px 20px;
   border: 0;
-  border-top: 1px solid #303933;
+  border-top: 3px double #515644;
   flex-shrink: 0;
 }
 .gent-layers legend {
@@ -301,7 +310,7 @@
   align-items: center;
   gap: 8px;
   padding: 17px 20px;
-  border-top: 1px solid #303933;
+  border-top: 1px solid #515644;
   font-size: 9px;
   color: #a4b0a8;
   flex-shrink: 0;
@@ -313,7 +322,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #58bb83;
+  background: #a79059;
   flex-shrink: 0;
 }
 .gent-map-area {
@@ -321,8 +330,8 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  background: #edf0ed;
-  color: #25352e;
+  background: #c7cbb5;
+  color: #353e33;
 }
 .gent-map-canvas {
   position: absolute;
@@ -337,14 +346,22 @@
   gap: 9px;
   max-width: calc(100% - 95px);
   padding: 10px 13px;
-  border: 1px solid #d9e1db;
-  background: #ffffffed;
-  border-radius: 4px;
-  font-size: 11px;
+  border: 1px solid #a28d66;
+  background: #ece8d9f5;
+  box-shadow:
+    inset 0 0 0 3px #ece8d9,
+    inset 0 0 0 4px #c4b899;
+  border-radius: 2px;
+  font-family: var(--font-display);
+  font-size: 13px;
   line-height: 1.4;
 }
 .gent-map-caption > span:not(.gent-status-dot) {
-  color: #9eaba3;
+  color: #9c8a67;
+}
+.gent-map-caption > svg {
+  color: #783d49;
+  flex-shrink: 0;
 }
 .gent-map-tools {
   position: absolute;
@@ -358,9 +375,9 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid #c4d0c8;
-  border-radius: 5px;
-  box-shadow: 0 2px 7px #23382a0a;
+  border: 1px solid #9a865f;
+  border-radius: 2px;
+  box-shadow: 0 2px 6px #25362d26;
 }
 .gent-icon-button {
   display: grid;
@@ -368,16 +385,16 @@
   width: 39px;
   height: 39px;
   padding: 0;
-  background: #fff;
-  color: #31483b;
+  background: #ece8d9;
+  color: #62323d;
   border: 0;
   cursor: pointer;
 }
 .gent-icon-button + .gent-icon-button {
-  border-top: 1px solid #e0e7e2;
+  border-top: 1px solid #c6b99a;
 }
 .gent-icon-button:hover {
-  background: #edf2ec;
+  background: #d8d2ba;
 }
 .gent-icon-button[aria-pressed="true"] {
   background: var(--good);
@@ -389,7 +406,7 @@
 }
 .gent-page button:focus-visible,
 .gent-page a:focus-visible {
-  outline: 2px solid #c88f00;
+  outline: 2px solid #a79059;
   outline-offset: 3px;
 }
 .gent-compass {
@@ -403,14 +420,15 @@
   gap: 4px;
   width: 44px;
   height: 58px;
-  border: 0;
-  background: #ffffffed;
-  border-radius: 4px;
-  color: #294637;
+  border: 3px double #9e8759;
+  background: #ece8d9f5;
+  border-radius: 50%;
+  color: #783b45;
   cursor: pointer;
 }
 .gent-compass span {
   font-size: 10px;
+  font-family: var(--font-display);
   font-weight: 700;
 }
 .gent-pitch {
@@ -422,15 +440,15 @@
   gap: 9px;
   padding: 12px;
   height: 42px;
-  background: #ffffffed;
-  border: 1px solid #d9e1db;
-  border-radius: 4px;
+  background: #ece8d9f5;
+  border: 1px solid #a28d66;
+  border-radius: 2px;
   font-size: 11px;
 }
 .gent-pitch input {
   width: 88px;
   min-width: 0;
-  accent-color: #345d43;
+  accent-color: #783b45;
   cursor: pointer;
 }
 .gent-pitch output {
@@ -439,21 +457,25 @@
 }
 .gent-marker {
   width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 2px solid #fff;
-  border-radius: 50% 50% 50% 2px;
-  background: #263e31;
-  box-shadow: 0 2px 6px #24372b38;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
+  height: 38px;
+  padding: 0 0 5px;
+  border: 2px solid #cbb781;
+  border-radius: 2px 2px 50% 50%;
+  background: #703342;
+  box-shadow:
+    inset 0 0 0 2px #4b2530,
+    0 2px 6px #24372b55;
+  color: #f2e7c9;
+  font-family: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  font-size: 14px;
+  font-weight: 400;
   cursor: pointer;
 }
 .gent-marker:hover,
-.gent-marker[aria-pressed="true"] {
-  background: #ffc400;
-  color: #18241b;
+.gent-marker[aria-pressed="true"],
+.gent-marker:focus-visible {
+  background: #c4aa75;
+  color: #39292b;
   z-index: 2;
 }
 .gent-marker[hidden] {
@@ -468,10 +490,10 @@
   gap: 12px;
   padding: 14px;
   max-width: calc(100% - 96px);
-  background: #141e19;
+  background: #38252e;
   color: #fff;
-  border: 1px solid #46554a;
-  border-radius: 6px;
+  border: 1px solid #a28d66;
+  border-radius: 2px;
   box-shadow: 0 5px 15px #203c291c;
 }
 .gent-selection > svg {
@@ -487,8 +509,9 @@
 }
 .gent-selection h2 {
   margin: 5px 0 0;
-  font-size: 14px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 400;
   overflow-wrap: anywhere;
 }
 .gent-selection a,
@@ -513,13 +536,14 @@
   align-items: center;
   gap: 16px;
   padding: 28px;
-  background: #edf0edee;
+  background: #d6d8c8f5;
   text-align: center;
   font-size: 14px;
 }
 .gent-map-message h2 {
   margin: 0;
   font-size: 20px;
+  font-family: var(--font-display);
 }
 .gent-map-message p {
   max-width: 340px;
@@ -531,9 +555,9 @@
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  border: 0;
-  border-radius: 4px;
-  background: #24452f;
+  border: 1px solid #a28d66;
+  border-radius: 2px;
+  background: #703342;
   color: #fff;
   cursor: pointer;
 }
@@ -549,13 +573,14 @@
   bottom: 10px;
 }
 .gent-map-area .maplibregl-ctrl-scale {
-  border-color: #465f50;
-  background: #ffffffb8;
-  color: #314c3b;
+  border-color: #666746;
+  background: #ece8d9dd;
+  color: #3f4634;
   font-size: 10px;
 }
 .gent-map-area .maplibregl-ctrl-attrib {
   font-size: 10px;
+  background-color: #ece8d9eb;
 }
 @keyframes gent-spin {
   to {

@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   Box,
   Building2,
+  Castle,
   Check,
   ChevronRight,
   Compass,
@@ -29,6 +30,7 @@ import type { GentBuildingsLayer } from "./buildings-layer.js";
 import {
   GENT_CAMERA,
   GENT_PLACES,
+  GENT_PLACE_NUMERALS,
   GENT_STYLE,
   type GentPlace
 } from "./map-style.js";
@@ -170,8 +172,12 @@ export function GentMap() {
         currentMap.on("load", () => {
           if (cancelled) return;
           clearTimeout(timeout);
-          if (!currentMap.queryRenderedFeatures({ layers: ["buildings"] }).length) {
-            fail("De kaartdata is momenteel niet beschikbaar. Probeer opnieuw.");
+          if (
+            !currentMap.queryRenderedFeatures({ layers: ["buildings"] }).length
+          ) {
+            fail(
+              "De kaartdata is momenteel niet beschikbaar. Probeer opnieuw."
+            );
             return;
           }
           const layer = new BuildingsLayer();
@@ -189,7 +195,7 @@ export function GentMap() {
             button.title = place.name;
             button.setAttribute("aria-label", `Bekijk ${place.name}`);
             button.setAttribute("aria-pressed", "false");
-            button.textContent = String(index + 1).padStart(2, "0");
+            button.textContent = GENT_PLACE_NUMERALS[index];
             button.addEventListener("click", () => selectPlace.current(place));
             return new libre.Marker({ element: button, anchor: "bottom" })
               .setLngLat(place.coordinates)
@@ -320,7 +326,7 @@ export function GentMap() {
     >
       <header className="gent-header">
         <div className="gent-heading">
-          <span className="gent-eyebrow">Stadskaart</span>
+          <span className="gent-eyebrow">Stadsatlas</span>
           <h1>
             Gent<span className="gent-heading-dot">.</span>
           </h1>
@@ -385,7 +391,7 @@ export function GentMap() {
                 onClick={() => selectPlace.current(place)}
               >
                 <span className="gent-place-number">
-                  {String(GENT_PLACES.indexOf(place) + 1).padStart(2, "0")}
+                  {GENT_PLACE_NUMERALS[GENT_PLACES.indexOf(place)]}
                 </span>
                 <span className="gent-place-text">
                   <strong>{place.name}</strong>
@@ -455,7 +461,7 @@ export function GentMap() {
           {ready && (
             <>
               <div className="gent-map-caption">
-                <span className="gent-status-dot" />
+                <Castle size={16} aria-hidden />
                 Gent <span>/</span> {selected?.name ?? "Centrum"}
               </div>
               <div className="gent-map-tools">
