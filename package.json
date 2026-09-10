@@ -13,7 +13,9 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prebuild:vercel": "node scripts/prepare-map-assets.mjs",
     "build:vercel": "next build",
+    "predev:web": "node scripts/prepare-map-assets.mjs",
     "dev:web": "next dev",
     "dev": "tsx src/cli.ts",
     "start": "node dist/src/cli.js",
@@ -22,12 +24,16 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "lucide-react": "^1.44.0",
+    "maplibre-gl": "^6.9.0",
+    "three": "^0.186.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.4",
     "next": "^16.2.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
