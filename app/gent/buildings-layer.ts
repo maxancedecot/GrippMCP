@@ -5,16 +5,17 @@ import {
   type Map as LibreMap
 } from "maplibre-gl";
 import {
-  AmbientLight,
   BufferGeometry,
   Camera,
   Color,
-  DirectionalLight,
+  EdgesGeometry,
   ExtrudeGeometry,
   Float32BufferAttribute,
+  LineBasicMaterial,
+  LineSegments,
   Matrix4,
   Mesh,
-  MeshLambertMaterial,
+  MeshBasicMaterial,
   Path,
   Scene,
   Shape,
@@ -25,10 +26,10 @@ import {
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { GENT_CENTER } from "./map-style.js";
 
-const STONE_COLORS = ["#c3beb0", "#b9b6a8", "#b4b8b3", "#cdc8b8"].map(
+const STONE_COLORS = ["#e5dac9", "#e8dece", "#e2d7c7", "#e9dfcf"].map(
   (value) => new Color(value)
 );
-const ROOF_COLORS = ["#764745", "#4b5c67", "#56605b", "#715752"].map(
+const ROOF_COLORS = ["#f2e8d7", "#f0e5d4", "#eee3d2", "#f3e9d9"].map(
   (value) => new Color(value)
 );
 
@@ -113,7 +114,19 @@ export class GentBuildingsLayer implements CustomLayerInterface {
   private renderer?: WebGLRenderer;
   private camera = new Camera();
   private scene = new Scene();
-  private material = new MeshLambertMaterial({ vertexColors: true });
+  private material = new MeshBasicMaterial({
+    vertexColors: true,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1
+  });
+  private lineMaterial = new LineBasicMaterial({
+    color: "#756555",
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false
+  });
+  private outlines?: LineSegments;
   private mesh?: Mesh;
   private origin = MercatorCoordinate.fromLngLat(GENT_CENTER);
   private scale = this.origin.meterInMercatorCoordinateUnits();
@@ -134,10 +147,6 @@ export class GentBuildingsLayer implements CustomLayerInterface {
       antialias: true
     });
     this.renderer.autoClear = false;
-    this.scene.add(new AmbientLight(0xffffff, 1.5));
-    const sun = new DirectionalLight("#fff1d6", 1.8);
-    sun.position.set(-150, -100, 300);
-    this.scene.add(sun);
     map.on("idle", this.updateBuildings);
     map.on("moveend", this.markDirty);
     map.on("sourcedata", this.markDirty);
@@ -212,6 +221,7 @@ export class GentBuildingsLayer implements CustomLayerInterface {
     if (signature === this.signature) return;
     this.signature = signature;
     const geometries: BufferGeometry[] = [];
+    const edgeGeometries: BufferGeometry[] = [];
     let roofCount = 0;
     for (const { rings, height, base, tint } of parts.values()) {
       const points = rings[0].map(this.localPoint);
@@ -233,9 +243,11 @@ export class GentBuildingsLayer implements CustomLayerInterface {
           : null;
       paintBuilding(geometry, roof ? stone : roofColor, stone);
       geometries.push(geometry);
+      edgeGeometries.push(new EdgesGeometry(geometry, 25));
       if (roof) {
         paintBuilding(roof, stone, roofColor);
         geometries.push(roof);
+        edgeGeometries.push(new EdgesGeometry(roof, 25));
         roofCount++;
       }
     }
@@ -243,6 +255,11 @@ export class GentBuildingsLayer implements CustomLayerInterface {
       this.scene.remove(this.mesh);
       this.mesh.geometry.dispose();
       this.mesh = undefined;
+    }
+    if (this.outlines) {
+      this.scene.remove(this.outlines);
+      this.outlines.geometry.dispose();
+      this.outlines = undefined;
     }
     if (geometries.length) {
       const merged = mergeGeometries(geometries);
@@ -252,9 +269,20 @@ export class GentBuildingsLayer implements CustomLayerInterface {
         this.scene.add(this.mesh);
       }
     }
+    if (edgeGeometries.length) {
+      const mergedEdges = mergeGeometries(edgeGeometries);
+      if (mergedEdges) {
+        this.outlines = new LineSegments(mergedEdges, this.lineMaterial);
+        this.outlines.frustumCulled = false;
+        this.outlines.renderOrder = 1;
+        this.scene.add(this.outlines);
+      }
+    }
     for (const geometry of geometries) geometry.dispose();
+    for (const geometry of edgeGeometries) geometry.dispose();
     this.map.getCanvas().dataset.buildingCount = String(parts.size);
     this.map.getCanvas().dataset.roofCount = String(roofCount);
+    this.map.getCanvas().dataset.outlineCount = String(parts.size);
     this.map.triggerRepaint();
   };
 
@@ -283,6 +311,8 @@ export class GentBuildingsLayer implements CustomLayerInterface {
     this.map?.off("moveend", this.markDirty);
     this.map?.off("sourcedata", this.markDirty);
     this.mesh?.geometry.dispose();
+    this.outlines?.geometry.dispose();
+    this.lineMaterial.dispose();
     this.material.dispose();
     this.renderer?.dispose();
     this.scene.clear();

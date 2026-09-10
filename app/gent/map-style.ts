@@ -1,11 +1,15 @@
 import type { StyleSpecification } from "maplibre-gl";
+import { ALICE_BUYSSEHOF_STREET } from "./location-data.js";
 
-export const GENT_CENTER: [number, number] = [3.723, 51.055];
+// Street centre from the Flemish address register (no house number was specified).
+export const GENT_CENTER: [number, number] = [
+  3.5487761349497497, 51.031929790964462
+];
 export const GENT_CAMERA = {
   center: GENT_CENTER,
-  zoom: 16.3,
-  pitch: 58,
-  bearing: -24
+  zoom: 17.2,
+  pitch: 48,
+  bearing: -28
 };
 
 export type GentPlace = {
@@ -15,50 +19,32 @@ export type GentPlace = {
   coordinates: [number, number];
 };
 
-export const GENT_PLACE_NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII"];
+export const GENT_PLACE_NUMERALS = ["01", "02", "03", "04"];
 
 export const GENT_PLACES: GentPlace[] = [
   {
-    id: "gravensteen",
-    name: "Gravensteen",
-    category: "Burcht",
-    coordinates: [3.7206512, 51.0571758]
+    id: "alice-buyssehof",
+    name: "Alice Buyssehof",
+    category: "9850 Nevele",
+    coordinates: GENT_CENTER
   },
   {
-    id: "graslei",
-    name: "Graslei & Korenlei",
-    category: "Aan de Leie",
-    coordinates: [3.7209302, 51.0547777]
+    id: "nevelemarkt",
+    name: "Nevelemarkt",
+    category: "Dorpsplein",
+    coordinates: [3.549285517758416, 51.0327774527161]
   },
   {
-    id: "belfort",
-    name: "Belfort",
-    category: "Historische toren",
-    coordinates: [3.7247914, 51.0536613]
+    id: "cyriel-buysse",
+    name: "Cyriel Buyssestraat",
+    category: "Nevele",
+    coordinates: [3.5475915141597625, 51.03236427800865]
   },
   {
-    id: "sint-baafs",
-    name: "Sint-Baafskathedraal",
-    category: "Kathedraal",
-    coordinates: [3.7271875, 51.0529819]
-  },
-  {
-    id: "vrijdagmarkt",
-    name: "Vrijdagmarkt",
-    category: "Stadsplein",
-    coordinates: [3.7257391, 51.0569768]
-  },
-  {
-    id: "portus-ganda",
-    name: "Portus Ganda",
-    category: "Jachthaven",
-    coordinates: [3.7335833, 51.055753]
-  },
-  {
-    id: "sint-pieters",
-    name: "Sint-Pietersabdij",
-    category: "Abdij & tuin",
-    coordinates: [3.7270233, 51.0417785]
+    id: "sint-mauritius",
+    name: "Sint-Mauritiuskerk",
+    category: "Nevelemarkt",
+    coordinates: [3.5490587, 51.0333793]
   }
 ];
 
@@ -67,6 +53,7 @@ export const GENT_STYLE: StyleSpecification = {
   version: 8,
   glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
   sources: {
+    address: { type: "geojson", data: ALICE_BUYSSEHOF_STREET },
     city: {
       type: "vector",
       url: "https://tiles.openfreemap.org/planet",
@@ -78,14 +65,14 @@ export const GENT_STYLE: StyleSpecification = {
     {
       id: "land",
       type: "background",
-      paint: { "background-color": "#c7cbb5" }
+      paint: { "background-color": "#f3e9d9" }
     },
     {
       id: "landuse",
       type: "fill",
       source: "city",
       "source-layer": "landuse",
-      paint: { "fill-color": "#b9c0a4", "fill-opacity": 0.6 }
+      paint: { "fill-color": "#e8ddcd", "fill-opacity": 0.35 }
     },
     {
       id: "green",
@@ -93,21 +80,21 @@ export const GENT_STYLE: StyleSpecification = {
       source: "city",
       "source-layer": "landcover",
       filter: ["in", "class", "wood", "grass", "scrub"],
-      paint: { "fill-color": "#849974", "fill-opacity": 0.85 }
+      paint: { "fill-color": "#d9cfbd", "fill-opacity": 0.55 }
     },
     {
       id: "parks",
       type: "fill",
       source: "city",
       "source-layer": "park",
-      paint: { "fill-color": "#8b9d78", "fill-opacity": 0.8 }
+      paint: { "fill-color": "#ded3c3", "fill-opacity": 0.6 }
     },
     {
       id: "water",
       type: "fill",
       source: "city",
       "source-layer": "water",
-      paint: { "fill-color": "#547d7c", "fill-outline-color": "#375d5c" }
+      paint: { "fill-color": "#a49589", "fill-outline-color": "#827266" }
     },
     {
       id: "waterways",
@@ -115,7 +102,7 @@ export const GENT_STYLE: StyleSpecification = {
       source: "city",
       "source-layer": "waterway",
       paint: {
-        "line-color": "#547d7c",
+        "line-color": "#a49589",
         "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1, 18, 8]
       }
     },
@@ -127,7 +114,7 @@ export const GENT_STYLE: StyleSpecification = {
       filter: ["!in", "class", "rail", "path"],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": "#a5aa91",
+        "line-color": "#998a79",
         "line-width": [
           "interpolate",
           ["exponential", 1.5],
@@ -149,7 +136,7 @@ export const GENT_STYLE: StyleSpecification = {
       filter: ["!in", "class", "rail", "path"],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": "#d5d1bb",
+        "line-color": "#f3e9d9",
         "line-width": [
           "interpolate",
           ["exponential", 1.5],
@@ -170,7 +157,7 @@ export const GENT_STYLE: StyleSpecification = {
       "source-layer": "transportation",
       filter: ["==", "class", "path"],
       paint: {
-        "line-color": "#d5d1bb",
+        "line-color": "#a49583",
         "line-width": 2,
         "line-dasharray": [2, 1]
       }
@@ -182,9 +169,30 @@ export const GENT_STYLE: StyleSpecification = {
       "source-layer": "transportation",
       filter: ["==", "class", "rail"],
       paint: {
-        "line-color": "#818773",
+        "line-color": "#8d8071",
         "line-width": 1.5,
         "line-dasharray": [3, 2]
+      }
+    },
+    {
+      id: "address-street",
+      type: "line",
+      source: "address",
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "#937050",
+        "line-opacity": 0.8,
+        "line-width": [
+          "interpolate",
+          ["exponential", 1.5],
+          ["zoom"],
+          14,
+          3,
+          17,
+          8,
+          19,
+          18
+        ]
       }
     },
     {
@@ -193,7 +201,7 @@ export const GENT_STYLE: StyleSpecification = {
       source: "city",
       "source-layer": "building",
       minzoom: 13,
-      paint: { "fill-color": "#a59f93", "fill-outline-color": "#736f63" }
+      paint: { "fill-color": "#f0e5d4", "fill-outline-color": "#8d7e6c" }
     },
     {
       id: "street-labels",
@@ -210,8 +218,8 @@ export const GENT_STYLE: StyleSpecification = {
         "symbol-spacing": 300
       },
       paint: {
-        "text-color": "#4b4e3b",
-        "text-halo-color": "#e0dcc5",
+        "text-color": "#55473d",
+        "text-halo-color": "#f3e9d9",
         "text-halo-width": 1
       }
     },
@@ -228,8 +236,8 @@ export const GENT_STYLE: StyleSpecification = {
         "text-size": 12
       },
       paint: {
-        "text-color": "#e4e1c9",
-        "text-halo-color": "#3f6363",
+        "text-color": "#493b34",
+        "text-halo-color": "#b6a79b",
         "text-halo-width": 1
       }
     },
@@ -246,8 +254,8 @@ export const GENT_STYLE: StyleSpecification = {
         "text-transform": "uppercase"
       },
       paint: {
-        "text-color": "#434a36",
-        "text-halo-color": "#d5d1bb",
+        "text-color": "#55473d",
+        "text-halo-color": "#f3e9d9",
         "text-halo-width": 2
       }
     }

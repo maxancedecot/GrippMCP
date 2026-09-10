@@ -5,7 +5,6 @@ import {
   ArrowUpRight,
   Box,
   Building2,
-  Castle,
   Check,
   ChevronRight,
   Compass,
@@ -76,7 +75,7 @@ export function GentMap() {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<GentPlace | null>(null);
+  const [selected, setSelected] = useState<GentPlace | null>(GENT_PLACES[0]);
   const [is3d, setIs3d] = useState(true);
   const [labels, setLabels] = useState(true);
   const [showPlaces, setShowPlaces] = useState(true);
@@ -93,6 +92,8 @@ export function GentMap() {
   );
   const duration = () =>
     window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 1100;
+  const overviewZoom = () =>
+    (container.current?.clientWidth ?? 1000) < 640 ? 16.5 : GENT_CAMERA.zoom;
 
   selectPlace.current = (place) => {
     setSelected(place);
@@ -116,7 +117,7 @@ export function GentMap() {
     setPitch(GENT_CAMERA.pitch);
     setLabels(true);
     setShowPlaces(true);
-    setSelected(null);
+    setSelected(GENT_PLACES[0]);
 
     async function initialize() {
       try {
@@ -131,18 +132,19 @@ export function GentMap() {
           container: container.current,
           style: GENT_STYLE,
           ...GENT_CAMERA,
-          minZoom: 12,
+          zoom: overviewZoom(),
+          minZoom: 14,
           maxZoom: 19,
           maxPitch: 70,
           maxBounds: [
-            [3.6, 50.99],
-            [3.85, 51.13]
+            [3.5, 51.005],
+            [3.59, 51.065]
           ],
           canvasContextAttributes: { antialias: true },
           attributionControl: { compact: true },
           locale: {
             "AttributionControl.ToggleAttribution": "Kaartbronnen",
-            "Map.Title": "Interactieve kaart van Gent"
+            "Map.Title": "Interactieve kaart van Alice Buyssehof, Nevele"
           }
         });
         map.current = instance;
@@ -167,7 +169,7 @@ export function GentMap() {
             fail(
               "De kaartdata is momenteel niet beschikbaar. Probeer opnieuw."
             );
-          console.warn("Gent-kaart:", event.error.message);
+          console.warn("Locatiekaart:", event.error.message);
         });
         currentMap.on("load", () => {
           if (cancelled) return;
@@ -180,6 +182,38 @@ export function GentMap() {
             );
             return;
           }
+          // Stipple only mapped vegetation, like the planting hatch in a site drawing.
+          const stipple = new Uint8Array(8 * 8 * 4);
+          for (const [x, y] of [
+            [1, 1],
+            [5, 5]
+          ])
+            stipple.set([105, 87, 67, 110], (y * 8 + x) * 4);
+          currentMap.addImage("planting-stipple", {
+            width: 8,
+            height: 8,
+            data: stipple
+          });
+          for (const sourceLayer of ["landcover", "park"])
+            currentMap.addLayer(
+              {
+                id: `${sourceLayer}-stipple`,
+                type: "fill",
+                source: "city",
+                "source-layer": sourceLayer,
+                ...(sourceLayer === "landcover"
+                  ? {
+                      filter: ["in", "class", "wood", "grass", "scrub"] as [
+                        "in",
+                        string,
+                        ...string[]
+                      ]
+                    }
+                  : {}),
+                paint: { "fill-pattern": "planting-stipple" }
+              },
+              "water"
+            );
           const layer = new BuildingsLayer();
           buildings.current = layer;
           currentMap.addLayer(layer, "street-labels");
@@ -299,10 +333,11 @@ export function GentMap() {
   }, []);
 
   function reset() {
-    setSelected(null);
+    setSelected(GENT_PLACES[0]);
     setRotating(false);
     map.current?.flyTo({
       ...GENT_CAMERA,
+      zoom: overviewZoom(),
       pitch: is3d ? GENT_CAMERA.pitch : 0,
       duration: duration()
     });
@@ -326,14 +361,12 @@ export function GentMap() {
     >
       <header className="gent-header">
         <div className="gent-heading">
-          <span className="gent-eyebrow">Stadsatlas</span>
-          <h1>
-            Gent<span className="gent-heading-dot">.</span>
-          </h1>
+          <span className="gent-eyebrow">Omgevingskaart</span>
+          <h1>Alice Buyssehof</h1>
         </div>
         <div className="gent-header-location">
           <MapPin size={15} aria-hidden />
-          <span>Oost-Vlaanderen, Belgie</span>
+          <span>Nevele, Deinze</span>
         </div>
         <div className="gent-view-mode" role="group" aria-label="Kaartweergave">
           <button
@@ -358,7 +391,7 @@ export function GentMap() {
       <div className="gent-workspace">
         <aside className="gent-sidebar" aria-label="Plekken en kaartlagen">
           <div className="gent-places-heading">
-            <h2>Plekken in Gent</h2>
+            <h2>In de buurt</h2>
             <span>{GENT_PLACES.length.toString().padStart(2, "0")}</span>
           </div>
           <div className="gent-search">
@@ -452,17 +485,20 @@ export function GentMap() {
           </fieldset>
           <div className="gent-sidebar-footer">
             <span className="gent-status-dot" />
-            <span>51.0550 N &nbsp; 3.7230 E</span>
+            <span>51.0319 N &nbsp; 3.5488 E</span>
             <ArrowUpRight size={14} aria-hidden />
           </div>
         </aside>
-        <section className="gent-map-area" aria-label="Kaart van Gent">
+        <section
+          className="gent-map-area"
+          aria-label="Kaart van Alice Buyssehof"
+        >
           <div className="gent-map-canvas" ref={container} />
           {ready && (
             <>
               <div className="gent-map-caption">
-                <Castle size={16} aria-hidden />
-                Gent <span>/</span> {selected?.name ?? "Centrum"}
+                <MapPin size={16} aria-hidden />
+                Nevele <span>/</span> {selected?.name ?? "Alice Buyssehof"}
               </div>
               <div className="gent-map-tools">
                 <div className="gent-tool-group">
@@ -478,7 +514,7 @@ export function GentMap() {
                   <MapButton
                     label="Uitzoomen"
                     icon={Minus}
-                    disabled={zoom <= 12}
+                    disabled={zoom <= 14}
                     onClick={() => {
                       setRotating(false);
                       map.current?.zoomOut();
@@ -517,7 +553,7 @@ export function GentMap() {
                 </div>
                 <div className="gent-tool-group">
                   <MapButton
-                    label="Terug naar centrum"
+                    label="Terug naar Alice Buyssehof"
                     icon={Focus}
                     onClick={reset}
                   />
@@ -606,7 +642,7 @@ export function GentMap() {
                     size={25}
                     aria-hidden
                   />
-                  <span>Gent wordt geladen...</span>
+                  <span>Alice Buyssehof wordt geladen...</span>
                 </>
               ) : (
                 <>
