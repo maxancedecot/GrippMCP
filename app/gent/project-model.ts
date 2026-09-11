@@ -13,6 +13,19 @@ export type ProjectModelSource = {
   file?: Blob;
 };
 
+export type ProjectModelInstance = {
+  source: ProjectModelSource;
+  placement: ProjectPlacement;
+  visible: boolean;
+};
+
+export type ModelSelectionOptions = {
+  select?: boolean;
+  visible?: boolean;
+  frame?: boolean;
+  persist?: boolean;
+};
+
 export const DEFAULT_PROJECT_MODEL: ProjectModelSource = {
   id: "alice-buyssehof",
   name: "Alice Buyssehof"

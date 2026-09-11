@@ -384,6 +384,58 @@
 .gent-model-library .gent-project-focus {
   margin-bottom: 7px;
 }
+.gent-model-list {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.gent-model-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+}
+.gent-model-row[data-selected="true"] {
+  background: #eee6d9;
+  border-color: #c9b69c;
+}
+.gent-model-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+.gent-model-row label span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gent-model-row input {
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #80644b;
+}
+.gent-model-row .gent-model-remove {
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+}
+.gent-model-row input:focus-visible {
+  outline: 2px solid #80644b;
+  outline-offset: 3px;
+}
+.gent-visibility-error {
+  margin: 0;
+  padding: 10px 20px;
+  color: #9c3527;
+  font-size: 11px;
+}
 .gent-model-remove {
   display: inline-flex;
   align-items: center;

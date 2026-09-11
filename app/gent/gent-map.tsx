@@ -27,9 +27,10 @@ import {
 import type { Map as LibreMap, Marker } from "maplibre-gl";
 import type { GentBuildingsLayer } from "./buildings-layer.js";
 import type { AliceProjectLayer } from "./project-layer.js";
-import { ALICE_PROJECT, DEFAULT_PROJECT_MODEL, PROJECT_BOUNDS, projectPlacementKey, readProjectPlacement, type ProjectModelSource, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
+import { ALICE_PROJECT, DEFAULT_PROJECT_MODEL, PROJECT_BOUNDS, projectPlacementKey, readProjectPlacement, type ModelSelectionOptions, type ProjectModelInstance, type ProjectModelSource, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
 import { ProjectPlacementControls } from "./project-placement.js";
 import { ModelLibrary } from "./model-library.js";
+import { rememberModelVisibility } from "./model-library-store.js";
 import {
   GENT_CAMERA,
   GENT_PLACES,
@@ -72,6 +73,7 @@ export function GentMap() {
   const map = useRef<LibreMap | null>(null);
   const buildings = useRef<GentBuildingsLayer | null>(null);
   const project = useRef<AliceProjectLayer | null>(null);
+  const modelSnapshot = useRef<ProjectModelInstance[]>([{ source: DEFAULT_PROJECT_MODEL, placement: ALICE_PROJECT, visible: true }]);
   const markers = useRef<Marker[]>([]);
   const selectPlace = useRef<(place: GentPlace) => void>(() => {});
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
@@ -83,6 +85,8 @@ export function GentMap() {
   const [selected, setSelected] = useState<GentPlace | null>(GENT_PLACES[0]);
   const [is3d, setIs3d] = useState(true);
   const [showProject, setShowProject] = useState(true);
+  const [modelVisibility, setModelVisibility] = useState<Record<string, boolean>>({});
+  const [visibilityError, setVisibilityError] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectModelStatus>("loading");
   const [activeModel, setActiveModel] = useState(DEFAULT_PROJECT_MODEL);
   const activeModelRef = useRef(activeModel);
@@ -107,30 +111,59 @@ export function GentMap() {
   const overviewZoom = () =>
     (container.current?.clientWidth ?? 1000) < 640 ? 16.5 : GENT_CAMERA.zoom;
 
-  const selectModel = useCallback(async (source: ProjectModelSource) => {
-    const layer = project.current;
-    if (!layer) return false;
+  const changeModelVisibility = useCallback((id: string, visible: boolean, persist = true) => {
+    project.current?.setModelVisible(id, visible);
+    setModelVisibility((previous) => ({ ...previous, [id]: visible }));
+    if (persist) {
+      setVisibilityError("");
+      void rememberModelVisibility(id, visible).catch(() => {
+        setVisibilityError("Je zichtbaarheid is aangepast, maar kon niet worden bewaard in deze browser.");
+      });
+    }
+  }, []);
+
+  const showAllModels = useCallback(() => {
+    const bounds = project.current?.getVisibleBounds();
+    if (!bounds) return;
     setRotating(false);
-    setEditingPlacement(false);
-    if (!await layer.load(source) || layer !== project.current) return false;
-    let saved: ProjectPlacement | null = null;
-    try { saved = readProjectPlacement(window.localStorage.getItem(projectPlacementKey(source))); } catch { /* Use preview anchor when storage is unavailable. */ }
-    const nextPlacement = saved ?? ALICE_PROJECT;
-    activeModelRef.current = source;
-    setActiveModel(source);
-    setPlacement(nextPlacement);
-    layer.setPlacement(nextPlacement);
     setShowProject(true);
     setIs3d(true);
     setSelected(null);
-    map.current?.flyTo({
-      center: nextPlacement.coordinates,
-      zoom: 19,
-      pitch: GENT_CAMERA.pitch,
-      bearing: 0,
+    map.current?.fitBounds(bounds, {
+      padding: { top: 55, bottom: 55, left: 55, right: 95 },
+      maxZoom: 18.5, pitch: GENT_CAMERA.pitch, bearing: 0,
       duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 800
     });
+  }, []);
+
+  const selectModel = useCallback(async (source: ProjectModelSource, options: ModelSelectionOptions = {}) => {
+    const layer = project.current;
+    if (!layer) return false;
+    let saved: ProjectPlacement | null = null;
+    try { saved = readProjectPlacement(window.localStorage.getItem(projectPlacementKey(source))); } catch { /* Use preview layout when storage is unavailable. */ }
+    const nextPlacement = await layer.load(source, saved);
+    if (!nextPlacement || layer !== project.current) return false;
+    changeModelVisibility(source.id, options.visible ?? true, options.persist !== false);
+    // Keep the suggested initial spacing stable after a reload too.
+    if (source.file && !saved) {
+      try { window.localStorage.setItem(projectPlacementKey(source), JSON.stringify(nextPlacement)); } catch { /* Session placement remains usable. */ }
+    }
+    if (options.select === false) return true;
+    setRotating(false);
+    setEditingPlacement(false);
+    activeModelRef.current = source;
+    setActiveModel(source);
+    setPlacement(nextPlacement);
+    layer.setActiveModel(source.id);
+    setShowProject(true);
+    setIs3d(true);
+    setSelected(null);
+    if (options.frame !== false) showAllModels();
     return true;
+  }, [changeModelVisibility, showAllModels]);
+
+  const removeModel = useCallback((id: string) => {
+    project.current?.removeModel(id);
   }, []);
 
   selectPlace.current = (place) => {
@@ -260,9 +293,10 @@ export function GentMap() {
           currentMap.addLayer(layer, "street-labels");
           const projectLayer = new AliceProjectLayer((modelStatus) => {
             if (!cancelled) setProjectStatus(modelStatus);
-          }, activeModelRef.current);
+          }, modelSnapshot.current);
           project.current = projectLayer;
           currentMap.addLayer(projectLayer, "street-labels");
+          projectLayer.setActiveModel(activeModelRef.current.id);
           currentMap.addControl(
             new libre.ScaleControl({ maxWidth: 100, unit: "metric" }),
             "bottom-left"
@@ -313,6 +347,8 @@ export function GentMap() {
       resize?.disconnect();
       markers.current.forEach((marker) => marker.remove());
       markers.current = [];
+      const snapshot = project.current?.snapshot();
+      if (snapshot?.length) modelSnapshot.current = snapshot;
       instance?.remove();
       map.current = null;
       buildings.current = null;
@@ -333,8 +369,8 @@ export function GentMap() {
   }, [is3d, showProject, ready]);
 
   useEffect(() => {
-    if (ready) project.current?.setPlacement(placement);
-  }, [placement, ready]);
+    if (ready) project.current?.setPlacement(activeModel.id, placement);
+  }, [placement, ready, activeModel.id]);
 
   useEffect(() => {
     if (!ready) return;
@@ -401,6 +437,7 @@ export function GentMap() {
   function focusProject(forPlacement = false) {
     setRotating(false);
     setShowProject(true);
+    changeModelVisibility(activeModel.id, true);
     const camera = {
       center: placement.coordinates,
       zoom: 19,
@@ -463,10 +500,15 @@ export function GentMap() {
         <aside className="gent-sidebar" aria-label="Plekken en kaartlagen">
           <ModelLibrary
             active={activeModel}
+            visibility={modelVisibility}
             ready={ready}
             disabled={!ready || editingPlacement || projectStatus === "loading"}
             onSelect={selectModel}
+            onVisibility={changeModelVisibility}
+            onRemove={removeModel}
+            onShowAll={showAllModels}
           />
+          {visibilityError && <p className="gent-visibility-error" role="alert">{visibilityError}</p>}
           <div className="gent-places-heading">
             <h2>In de buurt</h2>
             <span>{GENT_PLACES.length.toString().padStart(2, "0")}</span>
@@ -523,7 +565,7 @@ export function GentMap() {
             </legend>
             <label>
               <Box size={16} aria-hidden />
-              Projectmodel
+              Projectmodellen tonen
               <input
                 type="checkbox"
                 checked={showProject}
@@ -535,8 +577,8 @@ export function GentMap() {
             <div className="gent-project-status" role="status">
               {projectStatus === "loading" ? "3D-project wordt geladen…" :
                 projectStatus === "error" ? (
-                  <>Het 3D-project kon niet laden. <button type="button" onClick={() => void project.current?.load()}>Opnieuw proberen</button></>
-                ) : "3D-project geladen · vrij te plaatsen op de kaart."}
+                  <>Het 3D-project kon niet laden. <button type="button" onClick={() => void selectModel(activeModel)}>Opnieuw proberen</button></>
+                ) : `${activeModel.name} · geselecteerd om te bewerken.`}
             </div>
             <button
               className="gent-project-focus"

@@ -34,17 +34,21 @@ function validModel(value: unknown): value is ProjectModelSource & { file: Blob 
     model.file instanceof Blob && model.file.size >= 20 && model.file.size <= MAX_MODEL_BYTES;
 }
 
-export async function readModelLibrary(): Promise<{ models: ProjectModelSource[]; activeId: string }> {
+export async function readModelLibrary(): Promise<{ models: ProjectModelSource[]; activeId: string; visibility: Record<string, boolean> }> {
   const db = await openLibrary();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(["models", "settings"], "readonly");
     const models = tx.objectStore("models").getAll();
     const active = tx.objectStore("settings").get("active");
+    const visibility = tx.objectStore("settings").get("visibility");
     tx.oncomplete = () => {
       db.close();
       resolve({
         models: (models.result as unknown[]).filter(validModel),
-        activeId: typeof active.result === "string" ? active.result : DEFAULT_PROJECT_MODEL.id
+        activeId: typeof active.result === "string" ? active.result : DEFAULT_PROJECT_MODEL.id,
+        visibility: visibility.result && typeof visibility.result === "object"
+          ? Object.fromEntries(Object.entries(visibility.result).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"))
+          : {}
       });
     };
     tx.onabort = () => { db.close(); reject(tx.error); };
@@ -66,12 +70,24 @@ export async function rememberModel(model: ProjectModelSource, add = false) {
   });
 }
 
-export async function forgetModel(id: string) {
+export async function rememberModelVisibility(id: string, visible: boolean) {
+  const db = await openLibrary();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("settings", "readwrite");
+    const store = tx.objectStore("settings");
+    const request = store.get("visibility");
+    request.onsuccess = () => store.put({ ...request.result, [id]: visible }, "visibility");
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
+  });
+}
+
+export async function forgetModel(id: string, activeId = DEFAULT_PROJECT_MODEL.id) {
   const db = await openLibrary();
   return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(["models", "settings"], "readwrite");
     tx.objectStore("models").delete(id);
-    tx.objectStore("settings").put(DEFAULT_PROJECT_MODEL.id, "active");
+    tx.objectStore("settings").put(activeId, "active");
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onabort = () => { db.close(); reject(tx.error); };
     tx.onerror = () => { /* Transaction abort handles the failure. */ };

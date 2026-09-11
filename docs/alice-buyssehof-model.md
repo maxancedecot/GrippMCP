@@ -7,25 +7,38 @@ visibility control, loading/retry state and focus button; 2D hides it.
 
 ## Upload another Blender model
 
-Choose **Model uploaden** and select a self-contained `.glb` file up to 50 MB.
+Choose **Modellen uploaden** and select one or more self-contained `.glb` files,
+up to 50 MB each.
 In Blender, use **File → Export → glTF 2.0 → glTF Binary (.glb)**. The upload
 panel includes these instructions; native `.blend` files must be exported first.
 
-The **3D-model** selector switches between Alice Buyssehof and your uploads.
-One project model is shown at a time. Uploaded geometry is centred horizontally
+All checked models remain visible together, including while another is selected
+or being positioned. **Model bewerken** selects the model whose placement controls
+are active; it does not replace or reload the other scenes. Each model has its
+own visibility checkbox, and **Alles in beeld** fits the visible models in the
+viewport. Multiple files can be uploaded at once; an invalid file does not prevent
+the other files from being added.
+
+Uploaded geometry is centred horizontally
 and grounded using its bounding box, with its metric dimensions preserved.
 The placement pin for an upload sits at that ground centre. Each model has
 its own saved coordinates and rotation; Alice Buyssehof keeps its original
-placement storage key and facade-origin anchor.
+placement storage key and facade-origin anchor. New uploads without a saved
+placement are provisionally spaced beside existing geometry with an 8 m gap,
+so they can be seen separately. This initial layout is retained in browser
+placement storage when available; it is not a verified geographic placement.
 
-Models and the last selected model are retained in IndexedDB in this browser.
+Models, individual visibility settings and the last selected model are retained
+in IndexedDB in this browser. All stored models are restored on reload; libraries
+saved by the previous single-model version are supported without a migration.
 Files are not sent to a server or made available to other visitors.
 If browser storage is unavailable or full, an uploaded model remains usable for
 the current session and the interface explains that it could not be retained.
-**Verwijder dit model** removes an upload from the browser library and returns
-to Alice Buyssehof. The source file on your computer is unaffected.
+The remove button beside an upload removes only that model. The other models,
+their visibility and their placements are retained. The source file on your
+computer is unaffected.
 
-An invalid or unsupported upload leaves the previous model and placement intact.
+An invalid or unsupported upload leaves all existing models and placements intact.
 Container validation rejects malformed GLB headers and chunk sizes, and refuses
 external resource URLs. Model decoding also restricts resource loads to embedded
 data and blob URLs. Export textures with the geometry in the GLB file.
@@ -48,6 +61,12 @@ with an actionable message. Movement is limited to the map's Nevele bounds.
 While editing, the model stays visible in 3D and the landmark pins are hidden.
 Normal map navigation, landmark visibility and 2D controls return after editing.
 The focus button always follows the current placement, including after a reload.
+
+The project layer uses one WebGL renderer with a scene and transform per model.
+Decodes are queued to limit peak memory use. Switching the editing selection
+reuses already-loaded geometry. Leaving the page disposes all model resources;
+removing one model disposes only its own geometry, materials and textures. Map
+recovery restores a snapshot of all loaded models, placements and visibility.
 
 ## Placement still needs a site reference
 
