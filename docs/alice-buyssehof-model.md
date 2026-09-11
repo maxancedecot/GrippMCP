@@ -15,6 +15,37 @@ The MapLibre custom 3D layer uses the map camera and depth buffer, a local
 Draco decoder, and the installed Three.js version. Each model has its own
 visibility control and placement; 2D hides all project models.
 
+## Embed the viewer on another website
+
+In the normal map, open **Insluiten op website**, choose **Insluitcode maken**,
+then **Code kopiëren**. Paste the iframe into an HTML block in WordPress or
+another website builder. **Voorbeeld openen** opens the exact viewer link.
+The code uses the current site's origin, fills the available width, defaults to
+600 px high and enables fullscreen. Its height can be changed in the HTML.
+
+The standalone route is `/alice-buyssehof/embed`. It renders the map directly,
+without `DashboardFrame`, the Ledoux header/menu, the editing sidebar, model
+uploads, delete buttons, placement controls or the embed generator. Zoom,
+rotation, orbit, tilt, 2D/3D, layer visibility, landmarks, fullscreen and map
+attribution remain available. The map fills the iframe's viewport on desktop
+and mobile, without the main page's minimum height.
+
+Generated links contain a validated `scene` parameter with the visible deployed
+model IDs, their positions and facade bearings, camera settings and display
+preferences. This is a snapshot; regenerate the code after changing the setup.
+The viewer does not read or write the editor's IndexedDB or placement storage,
+so visitors see the shared setup even with third-party storage blocked. Plain
+`/alice-buyssehof/embed` shows the complete project at the default preview anchor.
+
+Local browser uploads cannot be shared through an iframe URL. The generator
+reports any omitted uploads; add those assets to the deployed model list before
+sharing them. Links accept only deployed model IDs and bounded numeric settings,
+never uploaded blobs or arbitrary model URLs. Invalid links show a viewer error.
+
+`next.config.mjs` allows framing specifically for `/alice-buyssehof/embed` using
+`Content-Security-Policy: frame-ancestors *`. The normal editor route is unchanged.
+The embed route is marked `noindex`.
+
 ## Upload another Blender model
 
 Choose **Modellen uploaden** and select one or more self-contained `.glb` files,

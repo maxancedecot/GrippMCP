@@ -27,10 +27,12 @@ import {
 import type { Map as LibreMap, Marker } from "maplibre-gl";
 import type { GentBuildingsLayer } from "./buildings-layer.js";
 import type { AliceProjectLayer } from "./project-layer.js";
-import { ALICE_PROJECT, DEFAULT_PROJECT_MODEL, PROJECT_BOUNDS, projectPlacementKey, readProjectPlacement, type ModelSelectionOptions, type ProjectModelInstance, type ProjectModelSource, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
+import { ALICE_PROJECT, BUILT_IN_PROJECT_MODELS, DEFAULT_PROJECT_MODEL, PROJECT_BOUNDS, projectPlacementKey, readProjectPlacement, type ModelSelectionOptions, type ProjectModelInstance, type ProjectModelSource, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
 import { ProjectPlacementControls } from "./project-placement.js";
 import { ModelLibrary } from "./model-library.js";
 import { rememberModelVisibility } from "./model-library-store.js";
+import { EmbedControls } from "./embed-controls.js";
+import { embedModelInstances, type EmbedScene } from "./embed-config.js";
 import {
   GENT_CAMERA,
   GENT_PLACES,
@@ -67,13 +69,15 @@ function MapButton({
   );
 }
 
-export function GentMap() {
+export function GentMap({ viewerScene }: { viewerScene?: EmbedScene }) {
+  const viewer = Boolean(viewerScene);
+  const initialModels = viewerScene ? embedModelInstances(viewerScene) : [{ source: DEFAULT_PROJECT_MODEL, placement: ALICE_PROJECT, visible: true }];
   const container = useRef<HTMLDivElement>(null);
   const shell = useRef<HTMLElement>(null);
   const map = useRef<LibreMap | null>(null);
   const buildings = useRef<GentBuildingsLayer | null>(null);
   const project = useRef<AliceProjectLayer | null>(null);
-  const modelSnapshot = useRef<ProjectModelInstance[]>([{ source: DEFAULT_PROJECT_MODEL, placement: ALICE_PROJECT, visible: true }]);
+  const modelSnapshot = useRef<ProjectModelInstance[]>(initialModels);
   const markers = useRef<Marker[]>([]);
   const selectPlace = useRef<(place: GentPlace) => void>(() => {});
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
@@ -82,24 +86,25 @@ export function GentMap() {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<GentPlace | null>(GENT_PLACES[0]);
-  const [is3d, setIs3d] = useState(true);
-  const [showProject, setShowProject] = useState(true);
+  const [selected, setSelected] = useState<GentPlace | null>(viewer ? null : GENT_PLACES[0]);
+  const [is3d, setIs3d] = useState(viewerScene?.is3d ?? true);
+  const [showProject, setShowProject] = useState(viewerScene?.showProject ?? true);
   const [modelVisibility, setModelVisibility] = useState<Record<string, boolean>>({});
   const [visibilityError, setVisibilityError] = useState("");
+  const [viewerError, setViewerError] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectModelStatus>("loading");
-  const [activeModel, setActiveModel] = useState(DEFAULT_PROJECT_MODEL);
+  const [activeModel, setActiveModel] = useState(initialModels[0].source);
   const activeModelRef = useRef(activeModel);
   activeModelRef.current = activeModel;
-  const [placement, setPlacement] = useState<ProjectPlacement>(ALICE_PROJECT);
+  const [placement, setPlacement] = useState<ProjectPlacement>(initialModels[0].placement);
   const [editingPlacement, setEditingPlacement] = useState(false);
-  const [labels, setLabels] = useState(true);
-  const [showPlaces, setShowPlaces] = useState(true);
+  const [labels, setLabels] = useState(viewerScene?.labels ?? true);
+  const [showPlaces, setShowPlaces] = useState(viewerScene?.places ?? true);
   const [rotating, setRotating] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [bearing, setBearing] = useState(GENT_CAMERA.bearing);
-  const [pitch, setPitch] = useState(GENT_CAMERA.pitch);
-  const [zoom, setZoom] = useState(GENT_CAMERA.zoom);
+  const [bearing, setBearing] = useState(viewerScene?.camera.bearing ?? GENT_CAMERA.bearing);
+  const [pitch, setPitch] = useState(viewerScene?.camera.pitch ?? GENT_CAMERA.pitch);
+  const [zoom, setZoom] = useState(viewerScene?.camera.zoom ?? GENT_CAMERA.zoom);
   const ready = status === "ready";
   const visiblePlaces = GENT_PLACES.filter((place) =>
     `${place.name} ${place.category}`
@@ -114,13 +119,13 @@ export function GentMap() {
   const changeModelVisibility = useCallback((id: string, visible: boolean, persist = true) => {
     project.current?.setModelVisible(id, visible);
     setModelVisibility((previous) => ({ ...previous, [id]: visible }));
-    if (persist) {
+    if (persist && !viewer) {
       setVisibilityError("");
       void rememberModelVisibility(id, visible).catch(() => {
         setVisibilityError("Je zichtbaarheid is aangepast, maar kon niet worden bewaard in deze browser.");
       });
     }
-  }, []);
+  }, [viewer]);
 
   const showAllModels = useCallback(() => {
     const bounds = project.current?.getVisibleBounds();
@@ -166,6 +171,21 @@ export function GentMap() {
     project.current?.removeModel(id);
   }, []);
 
+  function captureEmbed() {
+    const currentMap = map.current;
+    if (!currentMap) throw new Error("Wacht tot de kaart is geladen.");
+    const visible = (project.current?.snapshot() ?? []).filter((entry) => entry.visible);
+    const center = currentMap.getCenter();
+    const scene: EmbedScene = {
+      version: 1,
+      models: visible.filter((entry) => BUILT_IN_PROJECT_MODELS.some((model) => model.id === entry.source.id))
+        .map(({ source, placement: position }) => ({ id: source.id, coordinates: position.coordinates, facadeBearing: position.facadeBearing })),
+      camera: { center: [center.lng, center.lat], zoom: currentMap.getZoom(), pitch: currentMap.getPitch(), bearing: currentMap.getBearing() },
+      is3d, showProject, labels, places: showPlaces
+    };
+    return { scene, localUploads: visible.filter((entry) => entry.source.file).length };
+  }
+
   selectPlace.current = (place) => {
     setSelected(place);
     setRotating(false);
@@ -183,14 +203,15 @@ export function GentMap() {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     setStatus("loading");
     setError("");
+    setViewerError("");
     setRotating(false);
-    setIs3d(true);
-    setShowProject(true);
+    setIs3d(viewerScene?.is3d ?? true);
+    setShowProject(viewerScene?.showProject ?? true);
     setProjectStatus("loading");
-    setPitch(GENT_CAMERA.pitch);
-    setLabels(true);
-    setShowPlaces(true);
-    setSelected(GENT_PLACES[0]);
+    setPitch(viewerScene?.camera.pitch ?? GENT_CAMERA.pitch);
+    setLabels(viewerScene?.labels ?? true);
+    setShowPlaces(viewerScene?.places ?? true);
+    setSelected(viewer ? null : GENT_PLACES[0]);
 
     async function initialize() {
       try {
@@ -207,6 +228,7 @@ export function GentMap() {
           style: GENT_STYLE,
           ...GENT_CAMERA,
           zoom: overviewZoom(),
+          ...(viewerScene ? viewerScene.camera : {}),
           minZoom: 14,
           maxZoom: 19,
           maxPitch: 70,
@@ -291,12 +313,27 @@ export function GentMap() {
           const layer = new BuildingsLayer();
           buildings.current = layer;
           currentMap.addLayer(layer, "street-labels");
+          layer.setEnabled(viewerScene?.is3d ?? true);
           const projectLayer = new AliceProjectLayer((modelStatus) => {
             if (!cancelled) setProjectStatus(modelStatus);
-          }, modelSnapshot.current);
+          }, viewer ? [] : modelSnapshot.current);
           project.current = projectLayer;
           currentMap.addLayer(projectLayer, "street-labels");
+          projectLayer.setEnabled((viewerScene?.is3d ?? true) && (viewerScene?.showProject ?? true));
           projectLayer.setActiveModel(activeModelRef.current.id);
+          if (viewerScene) {
+            // Track each shared model so a partial network failure cannot
+            // silently leave a building out of the embedded project.
+            void (async () => {
+              const failed: string[] = [];
+              for (const entry of embedModelInstances(viewerScene)) {
+                const loaded = await projectLayer.load(entry.source, entry.placement);
+                if (cancelled) return;
+                if (!loaded) failed.push(entry.source.name);
+              }
+              if (failed.length) setViewerError(`Kon niet laden: ${failed.join(", ")}.`);
+            })();
+          }
           currentMap.addControl(
             new libre.ScaleControl({ maxWidth: 100, unit: "metric" }),
             "bottom-left"
@@ -354,12 +391,12 @@ export function GentMap() {
       buildings.current = null;
       project.current = null;
     };
-  }, [attempt]);
+  }, [attempt, viewerScene, viewer]);
 
   useEffect(() => {
     buildings.current?.setEnabled(is3d);
     map.current?.easeTo({
-      pitch: is3d ? GENT_CAMERA.pitch : 0,
+      pitch: is3d ? (viewerScene?.camera.pitch || GENT_CAMERA.pitch) : 0,
       duration: duration() / 2
     });
   }, [is3d]);
@@ -369,8 +406,8 @@ export function GentMap() {
   }, [is3d, showProject, ready]);
 
   useEffect(() => {
-    if (ready) project.current?.setPlacement(activeModel.id, placement);
-  }, [placement, ready, activeModel.id]);
+    if (ready && !viewer) project.current?.setPlacement(activeModel.id, placement);
+  }, [placement, ready, activeModel.id, viewer]);
 
   useEffect(() => {
     if (!ready) return;
@@ -424,6 +461,12 @@ export function GentMap() {
   }, []);
 
   function reset() {
+    if (viewerScene) {
+      setSelected(null);
+      setRotating(false);
+      map.current?.flyTo({ ...viewerScene.camera, pitch: is3d ? viewerScene.camera.pitch : 0, duration: duration() });
+      return;
+    }
     setSelected(GENT_PLACES[0]);
     setRotating(false);
     map.current?.flyTo({
@@ -462,12 +505,34 @@ export function GentMap() {
     }
   }
 
+  const viewMode = (
+    <div className="gent-view-mode" role="group" aria-label="Kaartweergave">
+      <button
+        type="button"
+        aria-pressed={!is3d}
+        disabled={!ready || editingPlacement}
+        onClick={() => setIs3d(false)}
+      >
+        2D
+      </button>
+      <button
+        type="button"
+        aria-pressed={is3d}
+        disabled={!ready}
+        onClick={() => setIs3d(true)}
+      >
+        <Box size={15} aria-hidden />
+        3D
+      </button>
+    </div>
+  );
+
   return (
     <main
-      className={`gent-page${fullscreen ? " gent-page--fullscreen" : ""}${editingPlacement ? " gent-page--placing" : ""}`}
+      className={`gent-page${viewer ? " gent-page--viewer" : ""}${fullscreen ? " gent-page--fullscreen" : ""}${editingPlacement ? " gent-page--placing" : ""}`}
       ref={shell}
     >
-      <header className="gent-header">
+      {!viewer && <header className="gent-header">
         <div className="gent-heading">
           <span className="gent-eyebrow">Omgevingskaart</span>
           <h1>Alice Buyssehof</h1>
@@ -476,28 +541,10 @@ export function GentMap() {
           <MapPin size={15} aria-hidden />
           <span>Nevele, Deinze</span>
         </div>
-        <div className="gent-view-mode" role="group" aria-label="Kaartweergave">
-          <button
-            type="button"
-            aria-pressed={!is3d}
-            disabled={!ready || editingPlacement}
-            onClick={() => setIs3d(false)}
-          >
-            2D
-          </button>
-          <button
-            type="button"
-            aria-pressed={is3d}
-            disabled={!ready}
-            onClick={() => setIs3d(true)}
-          >
-            <Box size={15} aria-hidden />
-            3D
-          </button>
-        </div>
-      </header>
+        {viewMode}
+      </header>}
       <div className="gent-workspace">
-        <aside className="gent-sidebar" aria-label="Plekken en kaartlagen">
+        {!viewer && <aside className="gent-sidebar" aria-label="Plekken en kaartlagen">
           <ModelLibrary
             active={activeModel}
             visibility={modelVisibility}
@@ -509,6 +556,7 @@ export function GentMap() {
             onShowAll={showAllModels}
           />
           {visibilityError && <p className="gent-visibility-error" role="alert">{visibilityError}</p>}
+          <EmbedControls disabled={!ready || editingPlacement || projectStatus !== "ready"} onCapture={captureEmbed} />
           <div className="gent-places-heading">
             <h2>In de buurt</h2>
             <span>{GENT_PLACES.length.toString().padStart(2, "0")}</span>
@@ -644,7 +692,7 @@ export function GentMap() {
             <span>51.0319 N &nbsp; 3.5488 E</span>
             <ArrowUpRight size={14} aria-hidden />
           </div>
-        </aside>
+        </aside>}
         <section
           className="gent-map-area"
           aria-label="Kaart van Alice Buyssehof"
@@ -652,10 +700,29 @@ export function GentMap() {
           <div className="gent-map-canvas" ref={container} />
           {ready && (
             <>
-              <div className="gent-map-caption">
+              {!viewer && <div className="gent-map-caption">
                 <MapPin size={16} aria-hidden />
                 Nevele <span>/</span> {selected?.name ?? "Alice Buyssehof"}
-              </div>
+              </div>}
+              {viewer && <>
+                <div className="gent-viewer-controls">
+                  {viewMode}
+                  <details className="gent-viewer-layers">
+                    <summary><Layers size={15} aria-hidden /> Kaartlagen</summary>
+                    <div>
+                      <label><input type="checkbox" checked={showProject} onChange={(event) => setShowProject(event.target.checked)} /> Projectmodellen</label>
+                      <label><input type="checkbox" checked={showPlaces} onChange={(event) => setShowPlaces(event.target.checked)} /> Herkenningspunten</label>
+                      <label><input type="checkbox" checked={labels} onChange={(event) => setLabels(event.target.checked)} /> Straatnamen</label>
+                    </div>
+                  </details>
+                </div>
+                {(projectStatus !== "ready" || viewerError) && <div className="gent-viewer-status" role={projectStatus === "error" || viewerError ? "alert" : "status"}>
+                  {projectStatus === "loading" && !viewerError ? "3D-project wordt geladen…" : <>
+                    {viewerError || "Het 3D-project kon niet laden."}
+                    <button type="button" onClick={() => setAttempt((value) => value + 1)}>Opnieuw proberen</button>
+                  </>}
+                </div>}
+              </>}
               <div className="gent-map-tools">
                 <div className="gent-tool-group">
                   <MapButton
