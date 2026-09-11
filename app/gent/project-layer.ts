@@ -6,8 +6,10 @@ import {
 } from "maplibre-gl";
 import {
   Camera,
+  Box3,
   DirectionalLight,
   HemisphereLight,
+  LoadingManager,
   Matrix4,
   Mesh,
   Scene,
@@ -18,7 +20,8 @@ import {
 } from "three";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { ALICE_PROJECT, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
+import { ALICE_PROJECT, DEFAULT_PROJECT_MODEL, type ProjectModelSource, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
+import { validateModelBuffer } from "./model-upload.js";
 
 function disposeModel(model: Object3D) {
   const textures = new Set<Texture>();
@@ -36,7 +39,12 @@ function disposeModel(model: Object3D) {
       material.dispose();
     }
   });
-  for (const texture of textures) texture.dispose();
+  const bitmaps = new Set<ImageBitmap>();
+  for (const texture of textures) {
+    if (typeof ImageBitmap !== "undefined" && texture.image instanceof ImageBitmap) bitmaps.add(texture.image);
+    texture.dispose();
+  }
+  for (const bitmap of bitmaps) bitmap.close();
 }
 
 export class AliceProjectLayer implements CustomLayerInterface {
@@ -52,7 +60,10 @@ export class AliceProjectLayer implements CustomLayerInterface {
   private enabled = true;
   private transform = new Matrix4();
 
-  constructor(private onStatus: (status: ProjectModelStatus) => void) {
+  constructor(
+    private onStatus: (status: ProjectModelStatus) => void,
+    private source: ProjectModelSource = DEFAULT_PROJECT_MODEL
+  ) {
     this.setPlacement(ALICE_PROJECT);
   }
 
@@ -91,8 +102,8 @@ export class AliceProjectLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
-  async load() {
-    if (!this.map) return;
+  async load(source: ProjectModelSource = this.source): Promise<boolean> {
+    if (!this.map) return false;
     this.request?.abort();
     const request = new AbortController();
     this.request = request;
@@ -102,35 +113,67 @@ export class AliceProjectLayer implements CustomLayerInterface {
       .setDecoderPath("/gent-map/draco/")
       .setWorkerLimit(2);
     const timeout = setTimeout(() => request.abort(), 45000);
+    let pending: Object3D | undefined;
     try {
-      const response = await fetch(ALICE_PROJECT.url, { signal: request.signal });
-      if (!response.ok) throw new Error(`Model request failed: ${response.status}`);
-      const buffer = await response.arrayBuffer();
-      const gltf = await new GLTFLoader().setDRACOLoader(draco).parseAsync(buffer, "");
+      let buffer: ArrayBuffer;
+      if (source.file) {
+        buffer = await source.file.arrayBuffer();
+        validateModelBuffer(buffer);
+      } else {
+        const response = await fetch(ALICE_PROJECT.url, { signal: request.signal });
+        if (!response.ok) throw new Error(`Model request failed: ${response.status}`);
+        buffer = await response.arrayBuffer();
+      }
+      if (!this.map || request !== this.request) return false;
+      if (request.signal.aborted) throw new Error("Model load timed out");
+      const manager = new LoadingManager();
+      if (source.file) manager.setURLModifier((url) => {
+        if (/^(blob:|data:)/.test(url)) return url;
+        throw new Error("Uploaded models must embed their resources.");
+      });
+      const gltf = await new GLTFLoader(manager).setDRACOLoader(draco).parseAsync(buffer, "");
+      pending = gltf.scene;
       if (!this.map || request.signal.aborted || request !== this.request) {
-        disposeModel(gltf.scene);
         // An active request that timed out should surface the retry action.
         if (this.map && request === this.request) throw new Error("Model load timed out");
-        return;
+        return false;
+      }
+      // Arbitrary Blender exports need a useful map anchor even when their
+      // origin is far from the building. Preserve metric dimensions.
+      if (source.file) {
+        const bounds = new Box3().setFromObject(gltf.scene);
+        if (bounds.isEmpty() || ![...bounds.min.toArray(), ...bounds.max.toArray()].every(Number.isFinite)) {
+          throw new Error("The model contains no visible geometry.");
+        }
+        const center = bounds.getCenter(new Vector3());
+        gltf.scene.position.add(new Vector3(-center.x, -bounds.min.y, -center.z));
       }
       if (this.model) {
         this.scene.remove(this.model);
         disposeModel(this.model);
       }
       this.model = gltf.scene;
+      pending = undefined;
+      this.source = source;
       this.model.traverse((object) => {
         if (object instanceof Mesh) object.frustumCulled = false;
       });
       this.scene.add(this.model);
       this.map.getCanvas().dataset.projectStatus = "ready";
+      this.map.getCanvas().dataset.projectModel = source.id;
       this.onStatus("ready");
       this.map.triggerRepaint();
+      return true;
     } catch (error) {
-      if (!this.map || request !== this.request) return;
+      if (!this.map || request !== this.request) return false;
       console.warn("Alice Buyssehof model:", error);
-      this.map.getCanvas().dataset.projectStatus = "error";
-      this.onStatus("error");
+      // Rejected uploads leave the previously loaded project usable.
+      const status = this.model ? "ready" : "error";
+      this.map.getCanvas().dataset.projectStatus = status;
+      this.onStatus(status);
+      return false;
     } finally {
+      if (pending) disposeModel(pending);
       clearTimeout(timeout);
       draco.dispose();
     }

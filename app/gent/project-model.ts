@@ -7,6 +7,23 @@ export type ProjectPlacement = {
 
 export const PROJECT_PLACEMENT_KEY = "alice-buyssehof:placement:v1";
 
+export type ProjectModelSource = {
+  id: string;
+  name: string;
+  file?: Blob;
+};
+
+export const DEFAULT_PROJECT_MODEL: ProjectModelSource = {
+  id: "alice-buyssehof",
+  name: "Alice Buyssehof"
+};
+
+export function projectPlacementKey(model: ProjectModelSource) {
+  return model.id === DEFAULT_PROJECT_MODEL.id
+    ? PROJECT_PLACEMENT_KEY
+    : `${PROJECT_PLACEMENT_KEY}:${model.id}`;
+}
+
 // Keep saved placements within the area navigable on this map.
 export const PROJECT_BOUNDS = { west: 3.5, east: 3.59, south: 51.005, north: 51.065 };
 

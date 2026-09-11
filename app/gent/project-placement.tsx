@@ -6,14 +6,16 @@ import type { Map as LibreMap, MapMouseEvent, Marker } from "maplibre-gl";
 import {
   ALICE_PROJECT,
   PROJECT_BOUNDS,
-  PROJECT_PLACEMENT_KEY,
+  projectPlacementKey,
   readProjectPlacement,
-  type ProjectPlacement
+  type ProjectPlacement,
+  type ProjectModelSource
 } from "./project-model.js";
 
 export function ProjectPlacementControls({
-  map, placement, editing, disabled, onChange, onEditingChange, onStart
+  model, map, placement, editing, disabled, onChange, onEditingChange, onStart
 }: {
+  model: ProjectModelSource;
   map: LibreMap | null;
   placement: ProjectPlacement;
   editing: boolean;
@@ -29,10 +31,11 @@ export function ProjectPlacementControls({
   const editButton = useRef<HTMLButtonElement>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const storageKey = projectPlacementKey(model);
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(PROJECT_PLACEMENT_KEY);
+      const raw = window.localStorage.getItem(storageKey);
       const stored = readProjectPlacement(raw);
       if (stored) {
         onChange(stored);
@@ -43,7 +46,7 @@ export function ProjectPlacementControls({
     } catch {
       setError("Je browser blokkeert het bewaren van de positie. Je kunt het project wel verplaatsen.");
     }
-  }, [onChange]);
+  }, [onChange, storageKey]);
 
   useEffect(() => {
     if (!map || !editing) return;
@@ -109,7 +112,7 @@ export function ProjectPlacementControls({
 
   function save() {
     try {
-      window.localStorage.setItem(PROJECT_PLACEMENT_KEY, JSON.stringify({
+      window.localStorage.setItem(storageKey, JSON.stringify({
         coordinates: placement.coordinates,
         facadeBearing: placement.facadeBearing
       }));
@@ -144,7 +147,7 @@ export function ProjectPlacementControls({
       ) : (
         <fieldset className="gent-placement-editor" disabled={disabled}>
           <legend>Project plaatsen</legend>
-          <p id="gent-placement-help">Sleep de pin of klik op de kaart. De pin staat in het midden van de voorgevel. Met de pijltjestoetsen verplaats je de geselecteerde pin nauwkeurig.</p>
+          <p id="gent-placement-help">Sleep de pin of klik op de kaart. {model.file ? "De pin staat midden onder het model." : "De pin staat in het midden van de voorgevel."} Met de pijltjestoetsen verplaats je de geselecteerde pin nauwkeurig.</p>
           <div className="gent-placement-bearing">
             <label htmlFor="gent-project-bearing">Richting voorgevel</label>
             <output htmlFor="gent-project-bearing">{placement.facadeBearing}°</output>

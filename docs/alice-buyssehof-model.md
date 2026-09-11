@@ -5,6 +5,31 @@ MapLibre custom 3D layer. It uses the map camera and depth buffer, a local
 Draco decoder, and the installed Three.js version. The model has its own
 visibility control, loading/retry state and focus button; 2D hides it.
 
+## Upload another Blender model
+
+Choose **Model uploaden** and select a self-contained `.glb` file up to 50 MB.
+In Blender, use **File → Export → glTF 2.0 → glTF Binary (.glb)**. The upload
+panel includes these instructions; native `.blend` files must be exported first.
+
+The **3D-model** selector switches between Alice Buyssehof and your uploads.
+One project model is shown at a time. Uploaded geometry is centred horizontally
+and grounded using its bounding box, with its metric dimensions preserved.
+The placement pin for an upload sits at that ground centre. Each model has
+its own saved coordinates and rotation; Alice Buyssehof keeps its original
+placement storage key and facade-origin anchor.
+
+Models and the last selected model are retained in IndexedDB in this browser.
+Files are not sent to a server or made available to other visitors.
+If browser storage is unavailable or full, an uploaded model remains usable for
+the current session and the interface explains that it could not be retained.
+**Verwijder dit model** removes an upload from the browser library and returns
+to Alice Buyssehof. The source file on your computer is unaffected.
+
+An invalid or unsupported upload leaves the previous model and placement intact.
+Container validation rejects malformed GLB headers and chunk sizes, and refuses
+external resource URLs. Model decoding also restricts resource loads to embedded
+data and blob URLs. Export textures with the geometry in the GLB file.
+
 ## Place the project on the map
 
 Choose **Verplaats het project** to focus the model and start editing. Drag

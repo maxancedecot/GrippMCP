@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import {
   ArrowUpRight,
   Box,
@@ -27,8 +27,9 @@ import {
 import type { Map as LibreMap, Marker } from "maplibre-gl";
 import type { GentBuildingsLayer } from "./buildings-layer.js";
 import type { AliceProjectLayer } from "./project-layer.js";
-import { ALICE_PROJECT, PROJECT_BOUNDS, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
+import { ALICE_PROJECT, DEFAULT_PROJECT_MODEL, PROJECT_BOUNDS, projectPlacementKey, readProjectPlacement, type ProjectModelSource, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
 import { ProjectPlacementControls } from "./project-placement.js";
+import { ModelLibrary } from "./model-library.js";
 import {
   GENT_CAMERA,
   GENT_PLACES,
@@ -83,6 +84,9 @@ export function GentMap() {
   const [is3d, setIs3d] = useState(true);
   const [showProject, setShowProject] = useState(true);
   const [projectStatus, setProjectStatus] = useState<ProjectModelStatus>("loading");
+  const [activeModel, setActiveModel] = useState(DEFAULT_PROJECT_MODEL);
+  const activeModelRef = useRef(activeModel);
+  activeModelRef.current = activeModel;
   const [placement, setPlacement] = useState<ProjectPlacement>(ALICE_PROJECT);
   const [editingPlacement, setEditingPlacement] = useState(false);
   const [labels, setLabels] = useState(true);
@@ -102,6 +106,32 @@ export function GentMap() {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 1100;
   const overviewZoom = () =>
     (container.current?.clientWidth ?? 1000) < 640 ? 16.5 : GENT_CAMERA.zoom;
+
+  const selectModel = useCallback(async (source: ProjectModelSource) => {
+    const layer = project.current;
+    if (!layer) return false;
+    setRotating(false);
+    setEditingPlacement(false);
+    if (!await layer.load(source) || layer !== project.current) return false;
+    let saved: ProjectPlacement | null = null;
+    try { saved = readProjectPlacement(window.localStorage.getItem(projectPlacementKey(source))); } catch { /* Use preview anchor when storage is unavailable. */ }
+    const nextPlacement = saved ?? ALICE_PROJECT;
+    activeModelRef.current = source;
+    setActiveModel(source);
+    setPlacement(nextPlacement);
+    layer.setPlacement(nextPlacement);
+    setShowProject(true);
+    setIs3d(true);
+    setSelected(null);
+    map.current?.flyTo({
+      center: nextPlacement.coordinates,
+      zoom: 19,
+      pitch: GENT_CAMERA.pitch,
+      bearing: 0,
+      duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 800
+    });
+    return true;
+  }, []);
 
   selectPlace.current = (place) => {
     setSelected(place);
@@ -230,7 +260,7 @@ export function GentMap() {
           currentMap.addLayer(layer, "street-labels");
           const projectLayer = new AliceProjectLayer((modelStatus) => {
             if (!cancelled) setProjectStatus(modelStatus);
-          });
+          }, activeModelRef.current);
           project.current = projectLayer;
           currentMap.addLayer(projectLayer, "street-labels");
           currentMap.addControl(
@@ -431,6 +461,12 @@ export function GentMap() {
       </header>
       <div className="gent-workspace">
         <aside className="gent-sidebar" aria-label="Plekken en kaartlagen">
+          <ModelLibrary
+            active={activeModel}
+            ready={ready}
+            disabled={!ready || editingPlacement || projectStatus === "loading"}
+            onSelect={selectModel}
+          />
           <div className="gent-places-heading">
             <h2>In de buurt</h2>
             <span>{GENT_PLACES.length.toString().padStart(2, "0")}</span>
@@ -511,6 +547,8 @@ export function GentMap() {
               <Focus size={15} aria-hidden /> Bekijk het project
             </button>
             <ProjectPlacementControls
+              key={activeModel.id}
+              model={activeModel}
               map={ready ? map.current : null}
               placement={placement}
               editing={editingPlacement}
