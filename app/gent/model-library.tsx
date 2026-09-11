@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Focus, LoaderCircle, Trash2, Upload } from "lucide-react";
-import { DEFAULT_PROJECT_MODEL, type ModelSelectionOptions, type ProjectModelSource } from "./project-model.js";
+import { BUILT_IN_PROJECT_MODELS, DEFAULT_PROJECT_MODEL, type ModelSelectionOptions, type ProjectModelSource } from "./project-model.js";
 import { forgetModel, readModelLibrary, rememberModel } from "./model-library-store.js";
 import { validateModelBuffer, validateModelFile } from "./model-upload.js";
 
@@ -24,7 +24,7 @@ export function ModelLibrary({ active, visibility, ready, disabled, onSelect, on
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const locked = disabled || busy;
-  const allModels = [DEFAULT_PROJECT_MODEL, ...models];
+  const allModels = [...BUILT_IN_PROJECT_MODELS, ...models];
 
   useEffect(() => {
     mounted.current = true;
@@ -35,12 +35,15 @@ export function ModelLibrary({ active, visibility, ready, disabled, onSelect, on
     if (!ready || restored.current) return;
     let cancelled = false;
     setBusy(true);
-    void readModelLibrary().then(async (library) => {
+    void readModelLibrary().catch(() => {
+      if (!cancelled) setMessage("Browseropslag is niet beschikbaar. Uploads blijven alleen tijdens deze sessie beschikbaar.");
+      return { models: [], activeId: DEFAULT_PROJECT_MODEL.id, visibility: {} as Record<string, boolean> };
+    }).then(async (library) => {
       if (cancelled) return;
       setModels(library.models);
       const loaded: ProjectModelSource[] = [];
       const failed: string[] = [];
-      for (const model of [DEFAULT_PROJECT_MODEL, ...library.models]) {
+      for (const model of [...BUILT_IN_PROJECT_MODELS, ...library.models]) {
         if (cancelled) return;
         const success = await onSelect(model, {
           select: false, visible: library.visibility[model.id] !== false, frame: false, persist: false
@@ -55,9 +58,9 @@ export function ModelLibrary({ active, visibility, ready, disabled, onSelect, on
       });
       if (cancelled) return;
       if (failed.length) setError(`Deze modellen konden niet laden: ${failed.join(", ")}. De andere modellen blijven zichtbaar.`);
-      if (library.models.length) onShowAll();
+      if (loaded.length > 1) onShowAll();
     }).catch(() => {
-      if (!cancelled) setMessage("Browseropslag is niet beschikbaar. Uploads blijven alleen tijdens deze sessie beschikbaar.");
+      if (!cancelled) setError("De modellen konden niet allemaal worden geopend. Kies een model om het opnieuw te proberen.");
     }).finally(() => {
       if (!cancelled) { restored.current = true; setBusy(false); }
     });

@@ -1,9 +1,19 @@
 # Alice Buyssehof project model
 
-The `/alice-buyssehof` map loads `public/models/alice-buyssehof.glb` as a
-MapLibre custom 3D layer. It uses the map camera and depth buffer, a local
-Draco decoder, and the installed Three.js version. The model has its own
-visibility control, loading/retry state and focus button; 2D hides it.
+The `/alice-buyssehof` map includes two built-in models:
+
+- **Alice Buyssehof**: `public/models/alice-buyssehof.glb`, the earlier model.
+- **Alice Buyssehof Compleet**: `public/models/alice-buyssehof-compleet.glb`,
+  exported from the supplied `Alice-Buyssehof-Compleet.blend`, including Blok B.
+
+Both load automatically and are available even when browser storage is blocked.
+The complete project is added beside the earlier model as a provisional preview;
+use its checkbox and **Model bewerken** to show, hide, move or rotate it separately.
+Built-in models are deployed with the site; uploaded models remain in the browser.
+
+The MapLibre custom 3D layer uses the map camera and depth buffer, a local
+Draco decoder, and the installed Three.js version. Each model has its own
+visibility control and placement; 2D hides all project models.
 
 ## Upload another Blender model
 
@@ -19,7 +29,7 @@ own visibility checkbox, and **Alles in beeld** fits the visible models in the
 viewport. Multiple files can be uploaded at once; an invalid file does not prevent
 the other files from being added.
 
-Uploaded geometry is centred horizontally
+Uploaded geometry and the complete built-in project are centred horizontally
 and grounded using its bounding box, with its metric dimensions preserved.
 The placement pin for an upload sits at that ground centre. Each model has
 its own saved coordinates and rotation; Alice Buyssehof keeps its original
@@ -46,7 +56,8 @@ data and blob URLs. Export textures with the geometry in the GLB file.
 ## Place the project on the map
 
 Choose **Verplaats het project** to focus the model and start editing. Drag
-the pin at the centre of the front facade, or click/tap elsewhere on the map.
+the pin, or click/tap elsewhere on the map. For the earlier model the pin is at
+the front facade; for the complete project and uploads it is at the ground centre.
 The selected pin can also be moved with the arrow keys (Shift moves it faster).
 Use **Richting voorgevel** to rotate the building; 0° is north, 90° east,
 180° south and 270° west. Geometry updates immediately without reloading the GLB.
@@ -101,12 +112,26 @@ therefore do not establish dimensional accuracy.
   "$PWD/public/models/alice-buyssehof.glb"
 ```
 
+For the complete model, use the same script with the supplied source file:
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender \
+  --background --disable-autoexec /path/to/Alice-Buyssehof-Compleet.blend -t 4 \
+  --python scripts/export-alice-model.py -- \
+  "$PWD/public/models/alice-buyssehof-compleet.glb"
+```
+
+The complete export is 8,471,848 bytes (8.5 MB), combining 2,778 source mesh
+objects into one mesh with 82 material primitives. It includes both building
+blocks with their relative arrangement from Blender preserved. Source SHA-256:
+`33e8765cba8f33e6089bab74553479858861f6307a1e92b725700d64e90142ff`.
+
 The script does not save or modify the source `.blend`. It preserves evaluated
 architectural geometry, simplifies dense foliage, excludes the 500 m studio
 lawn and individual lawn blades, retains material base colours, and substitutes
 a reflection tint for glass transmission. Cycles procedural texture detail is
-not baked. One joined mesh with 74 material primitives replaces approximately
-1,800 separate objects. The resulting Draco GLB is approximately 6.5 MB.
+not baked. The earlier export combines approximately 1,800 separate objects into
+one joined mesh with 74 material primitives, producing a Draco GLB of about 6.5 MB.
 
 `npm run dev:web` and `npm run build:vercel` copy the matching decoder assets
 into the ignored `public/gent-map/draco/` directory. The GLB itself is tracked

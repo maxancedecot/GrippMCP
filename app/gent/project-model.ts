@@ -11,6 +11,7 @@ export type ProjectModelSource = {
   id: string;
   name: string;
   file?: Blob;
+  url?: string;
 };
 
 export type ProjectModelInstance = {
@@ -30,6 +31,15 @@ export const DEFAULT_PROJECT_MODEL: ProjectModelSource = {
   id: "alice-buyssehof",
   name: "Alice Buyssehof"
 };
+
+export const BUILT_IN_PROJECT_MODELS: ProjectModelSource[] = [
+  DEFAULT_PROJECT_MODEL,
+  {
+    id: "alice-buyssehof-compleet",
+    name: "Alice Buyssehof Compleet",
+    url: "/models/alice-buyssehof-compleet.glb"
+  }
+];
 
 export function projectPlacementKey(model: ProjectModelSource) {
   return model.id === DEFAULT_PROJECT_MODEL.id

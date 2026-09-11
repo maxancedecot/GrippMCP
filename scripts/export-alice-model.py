@@ -23,6 +23,7 @@ omit = {
     "Lawn | individual editable blades",
     "Foreground lawn | extended blades",
     "Rear lawn | individual blades",
+    "Blok B | Gazon | losse grassprieten",
 }
 source_objects = [
     obj for obj in bpy.context.scene.objects
@@ -44,7 +45,7 @@ bpy.context.window.scene = export_scene
 # Leaf canopies are made for close-up rendering. Reduce those meshes only;
 # facades, roof tiles, windows and garden walls retain their full geometry.
 for obj in list(export_scene.objects):
-    if any(word in obj.name.lower() for word in ("leaf canopy", "leaf mesh", "hornbeam hedge")):
+    if any(word in obj.name.lower() for word in ("leaf canopy", "leaf mesh", "hornbeam hedge", "achterhaag", "zijhaag")):
         modifier = obj.modifiers.new("Map foliage detail", "DECIMATE")
         modifier.ratio = 0.18
         bpy.context.view_layer.objects.active = obj
@@ -63,7 +64,7 @@ for material in bpy.data.materials:
     for socket in shader.inputs:
         for link in list(socket.links):
             material.node_tree.links.remove(link)
-    if material.name == "Glass | architectural clear":
+    if material.name.endswith("Glass | architectural clear"):
         shader.inputs["Base Color"].default_value = (0.15, 0.21, 0.22, 1)
         shader.inputs["Transmission Weight"].default_value = 0
         shader.inputs["Metallic"].default_value = 0.25

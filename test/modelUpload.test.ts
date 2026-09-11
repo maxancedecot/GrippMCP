@@ -19,11 +19,13 @@ function glb(manifest: object) {
 }
 const manifest = { asset: { version: "2.0" }, meshes: [{ primitives: [] }] };
 
-test("accepts the Blender-exported, Draco-compressed Alice model", async () => {
-  const data = await readFile("public/models/alice-buyssehof.glb");
-  const buffer = new Uint8Array(data).buffer;
-  assert.doesNotThrow(() => validateModelFile({ name: "Building.GLB", size: buffer.byteLength }));
-  assert.doesNotThrow(() => validateModelBuffer(buffer));
+test("accepts both Blender-exported, Draco-compressed Alice models", async () => {
+  for (const name of ["alice-buyssehof.glb", "alice-buyssehof-compleet.glb"]) {
+    const data = await readFile(`public/models/${name}`);
+    const buffer = new Uint8Array(data).buffer;
+    assert.doesNotThrow(() => validateModelFile({ name: name.toUpperCase(), size: buffer.byteLength }));
+    assert.doesNotThrow(() => validateModelBuffer(buffer));
+  }
 });
 
 test("explains Blender export requirements and enforces the upload limit", () => {

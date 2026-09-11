@@ -145,7 +145,7 @@ export function GentMap() {
     if (!nextPlacement || layer !== project.current) return false;
     changeModelVisibility(source.id, options.visible ?? true, options.persist !== false);
     // Keep the suggested initial spacing stable after a reload too.
-    if (source.file && !saved) {
+    if (source.id !== DEFAULT_PROJECT_MODEL.id && !saved) {
       try { window.localStorage.setItem(projectPlacementKey(source), JSON.stringify(nextPlacement)); } catch { /* Session placement remains usable. */ }
     }
     if (options.select === false) return true;

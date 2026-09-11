@@ -5,6 +5,7 @@ import { Check, Move, RotateCcw } from "lucide-react";
 import type { Map as LibreMap, MapMouseEvent, Marker } from "maplibre-gl";
 import {
   ALICE_PROJECT,
+  DEFAULT_PROJECT_MODEL,
   PROJECT_BOUNDS,
   projectPlacementKey,
   readProjectPlacement,
@@ -147,7 +148,7 @@ export function ProjectPlacementControls({
       ) : (
         <fieldset className="gent-placement-editor" disabled={disabled}>
           <legend>Project plaatsen</legend>
-          <p id="gent-placement-help">Sleep de pin of klik op de kaart. {model.file ? "De pin staat midden onder het model." : "De pin staat in het midden van de voorgevel."} Met de pijltjestoetsen verplaats je de geselecteerde pin nauwkeurig.</p>
+          <p id="gent-placement-help">Sleep de pin of klik op de kaart. {model.id !== DEFAULT_PROJECT_MODEL.id ? "De pin staat midden onder het model." : "De pin staat in het midden van de voorgevel."} Met de pijltjestoetsen verplaats je de geselecteerde pin nauwkeurig.</p>
           <div className="gent-placement-bearing">
             <label htmlFor="gent-project-bearing">Richting voorgevel</label>
             <output htmlFor="gent-project-bearing">{placement.facadeBearing}°</output>

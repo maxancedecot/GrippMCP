@@ -431,6 +431,7 @@
   outline-offset: 3px;
 }
 .gent-visibility-error {
+  grid-column: 1 / -1;
   margin: 0;
   padding: 10px 20px;
   color: #9c3527;

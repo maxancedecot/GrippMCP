@@ -195,7 +195,7 @@ export class AliceProjectLayer implements CustomLayerInterface {
         buffer = await source.file.arrayBuffer();
         validateModelBuffer(buffer);
       } else {
-        const response = await fetch(ALICE_PROJECT.url, { signal: request.signal });
+        const response = await fetch(source.url ?? ALICE_PROJECT.url, { signal: request.signal });
         if (!response.ok) throw new Error(`Model request failed: ${response.status}`);
         buffer = await response.arrayBuffer();
       }
@@ -210,7 +210,7 @@ export class AliceProjectLayer implements CustomLayerInterface {
       pending = gltf.scene;
       if (!this.map) return null;
       if (request.signal.aborted) throw new Error("Model load timed out");
-      if (source.file) {
+      if (source.id !== DEFAULT_PROJECT_MODEL.id) {
         const bounds = new Box3().setFromObject(gltf.scene);
         if (bounds.isEmpty() || ![...bounds.min.toArray(), ...bounds.max.toArray()].every(Number.isFinite)) {
           throw new Error("The model contains no visible geometry.");
@@ -218,7 +218,7 @@ export class AliceProjectLayer implements CustomLayerInterface {
         const center = bounds.getCenter(new Vector3());
         gltf.scene.position.add(new Vector3(-center.x, -bounds.min.y, -center.z));
       }
-      const placement = this.placements.get(source.id) ?? requested ?? (source.file ? this.suggestPlacement(gltf.scene) : ALICE_PROJECT);
+      const placement = this.placements.get(source.id) ?? requested ?? (source.id !== DEFAULT_PROJECT_MODEL.id ? this.suggestPlacement(gltf.scene) : ALICE_PROJECT);
       gltf.scene.traverse((object) => { if (object instanceof Mesh) object.frustumCulled = false; });
       const scene = new Scene();
       scene.add(new HemisphereLight("#fff7e8", "#9b947f", 2.2));
