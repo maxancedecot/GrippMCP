@@ -236,6 +236,40 @@
   color: var(--muted);
   font-size: 12px;
 }
+.gent-project-status {
+  padding: 0 0 12px;
+  color: #7b7267;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.gent-project-status button {
+  color: #5d5044;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.gent-project-focus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 12px;
+  border: 1px solid #c9b69c;
+  border-radius: 2px;
+  background: #eee6d9;
+  color: #5d5044;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gent-project-focus:disabled { opacity: 0.5; cursor: default; }
+.gent-project-focus:focus-visible, .gent-project-status button:focus-visible {
+  outline: 2px solid #80644b;
+  outline-offset: 3px;
+}
 .gent-layers {
   margin: auto 0 0;
   padding: 18px 20px 20px;
@@ -243,7 +277,7 @@
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
-.gent-layers legend {
+.gent-layers > legend {
   float: left;
   display: flex;
   align-items: center;
@@ -254,7 +288,7 @@
   font-size: 11px;
   color: var(--muted);
 }
-.gent-layers label {
+.gent-layers > label {
   position: relative;
   display: flex;
   align-items: center;
@@ -264,7 +298,7 @@
   font-size: 11px;
   cursor: pointer;
 }
-.gent-layers label > svg,
+.gent-layers > label > svg,
 .gent-label-icon {
   width: 16px;
   color: var(--muted);
@@ -272,7 +306,7 @@
 .gent-label-icon {
   font-size: 12px;
 }
-.gent-layers input {
+.gent-layers input[type="checkbox"] {
   position: absolute;
   right: 0;
   width: 18px;
@@ -303,6 +337,113 @@
 .gent-layers input:focus-visible + .gent-check {
   outline: 2px solid #80644b;
   outline-offset: 3px;
+}
+.gent-layers input:disabled + .gent-check {
+  opacity: 0.45;
+}
+.gent-placement {
+  clear: both;
+  width: 100%;
+  margin-bottom: 12px;
+}
+.gent-page--placing .gent-places-heading,
+.gent-page--placing .gent-search,
+.gent-page--placing .gent-places {
+  display: none;
+}
+.gent-page--placing .gent-layers {
+  margin-top: 0;
+  border-top: 0;
+}
+.gent-placement p {
+  margin: 0 0 10px;
+  color: #6e6255;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.gent-placement-editor {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #c9b69c;
+  border-radius: 3px;
+  background: #f1eade;
+}
+.gent-placement-editor legend {
+  padding: 0 5px;
+  color: #5d5044;
+  font-size: 12px;
+  font-weight: 600;
+}
+.gent-placement-bearing {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.gent-placement-bearing output,
+.gent-placement-coordinates {
+  font-variant-numeric: tabular-nums;
+}
+.gent-placement input[type="range"] {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin: 5px 0;
+  accent-color: #80644b;
+  cursor: pointer;
+}
+.gent-placement input:focus-visible,
+.gent-project-handle:focus-visible {
+  outline: 2px solid #80644b;
+  outline-offset: 3px;
+}
+.gent-placement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gent-placement-actions button,
+.gent-placement-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 8px;
+  border: 1px solid #b7a58d;
+  border-radius: 2px;
+  color: #5d5044;
+  background: #faf8f3;
+  font-size: 11px;
+  cursor: pointer;
+}
+.gent-placement-actions .gent-placement-save {
+  flex: 1;
+  border-color: #80644b;
+  color: #fffaf2;
+  background: #80644b;
+}
+.gent-placement-reset {
+  padding-inline: 0;
+  border: 0;
+  background: transparent;
+  text-decoration: underline;
+}
+.gent-placement p:last-child {
+  margin-bottom: 0;
+}
+.gent-placement .gent-placement-error {
+  margin-top: 8px;
+  color: #9c3527;
+}
+.gent-project-handle {
+  cursor: grab;
+  z-index: 3;
+}
+.gent-project-handle:active {
+  cursor: grabbing;
 }
 .gent-sidebar-footer {
   display: flex;
@@ -680,25 +821,46 @@
     flex-wrap: wrap;
     gap: 5px 14px;
   }
-  .gent-layers legend {
+  .gent-layers > legend {
     display: none;
   }
-  .gent-layers label {
+  .gent-project-status {
+    flex-basis: 100%;
+    order: 1;
+    padding: 0;
+  }
+  .gent-project-focus {
+    order: 2;
+    width: auto;
+    margin: 0;
+    padding: 8px 12px;
+  }
+  .gent-layers > label {
     min-height: 30px;
     font-size: 10px;
     gap: 7px;
   }
-  .gent-layers label > svg,
+  .gent-layers > label > svg,
   .gent-label-icon {
     display: none;
   }
-  .gent-layers input {
+  .gent-layers input[type="checkbox"] {
     right: 0;
   }
   .gent-check {
     margin-left: 2px;
     width: 15px;
     height: 15px;
+  }
+  .gent-placement {
+    order: 3;
+    margin: 4px 0;
+  }
+  .gent-placement .gent-project-focus {
+    margin-bottom: 6px;
+  }
+  .gent-placement-editor {
+    padding: 12px;
   }
   .gent-sidebar-footer {
     display: none;

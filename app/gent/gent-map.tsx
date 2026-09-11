@@ -26,6 +26,9 @@ import {
 } from "lucide-react";
 import type { Map as LibreMap, Marker } from "maplibre-gl";
 import type { GentBuildingsLayer } from "./buildings-layer.js";
+import type { AliceProjectLayer } from "./project-layer.js";
+import { ALICE_PROJECT, PROJECT_BOUNDS, type ProjectModelStatus, type ProjectPlacement } from "./project-model.js";
+import { ProjectPlacementControls } from "./project-placement.js";
 import {
   GENT_CAMERA,
   GENT_PLACES,
@@ -67,6 +70,7 @@ export function GentMap() {
   const shell = useRef<HTMLElement>(null);
   const map = useRef<LibreMap | null>(null);
   const buildings = useRef<GentBuildingsLayer | null>(null);
+  const project = useRef<AliceProjectLayer | null>(null);
   const markers = useRef<Marker[]>([]);
   const selectPlace = useRef<(place: GentPlace) => void>(() => {});
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
@@ -77,6 +81,10 @@ export function GentMap() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<GentPlace | null>(GENT_PLACES[0]);
   const [is3d, setIs3d] = useState(true);
+  const [showProject, setShowProject] = useState(true);
+  const [projectStatus, setProjectStatus] = useState<ProjectModelStatus>("loading");
+  const [placement, setPlacement] = useState<ProjectPlacement>(ALICE_PROJECT);
+  const [editingPlacement, setEditingPlacement] = useState(false);
   const [labels, setLabels] = useState(true);
   const [showPlaces, setShowPlaces] = useState(true);
   const [rotating, setRotating] = useState(false);
@@ -114,6 +122,8 @@ export function GentMap() {
     setError("");
     setRotating(false);
     setIs3d(true);
+    setShowProject(true);
+    setProjectStatus("loading");
     setPitch(GENT_CAMERA.pitch);
     setLabels(true);
     setShowPlaces(true);
@@ -121,10 +131,11 @@ export function GentMap() {
 
     async function initialize() {
       try {
-        const [libre, { GentBuildingsLayer: BuildingsLayer }] =
+        const [libre, { GentBuildingsLayer: BuildingsLayer }, { AliceProjectLayer }] =
           await Promise.all([
             import("maplibre-gl"),
-            import("./buildings-layer.js")
+            import("./buildings-layer.js"),
+            import("./project-layer.js")
           ]);
         if (cancelled || !container.current) return;
         libre.setWorkerUrl("/gent-map/maplibre-gl-worker.mjs");
@@ -137,8 +148,8 @@ export function GentMap() {
           maxZoom: 19,
           maxPitch: 70,
           maxBounds: [
-            [3.5, 51.005],
-            [3.59, 51.065]
+            [PROJECT_BOUNDS.west, PROJECT_BOUNDS.south],
+            [PROJECT_BOUNDS.east, PROJECT_BOUNDS.north]
           ],
           canvasContextAttributes: { antialias: true },
           attributionControl: { compact: true },
@@ -217,6 +228,11 @@ export function GentMap() {
           const layer = new BuildingsLayer();
           buildings.current = layer;
           currentMap.addLayer(layer, "street-labels");
+          const projectLayer = new AliceProjectLayer((modelStatus) => {
+            if (!cancelled) setProjectStatus(modelStatus);
+          });
+          project.current = projectLayer;
+          currentMap.addLayer(projectLayer, "street-labels");
           currentMap.addControl(
             new libre.ScaleControl({ maxWidth: 100, unit: "metric" }),
             "bottom-left"
@@ -270,6 +286,7 @@ export function GentMap() {
       instance?.remove();
       map.current = null;
       buildings.current = null;
+      project.current = null;
     };
   }, [attempt]);
 
@@ -280,6 +297,14 @@ export function GentMap() {
       duration: duration() / 2
     });
   }, [is3d]);
+
+  useEffect(() => {
+    project.current?.setEnabled(is3d && showProject);
+  }, [is3d, showProject, ready]);
+
+  useEffect(() => {
+    if (ready) project.current?.setPlacement(placement);
+  }, [placement, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -294,13 +319,13 @@ export function GentMap() {
   useEffect(() => {
     for (const marker of markers.current) {
       const element = marker.getElement();
-      element.hidden = !showPlaces;
+      element.hidden = !showPlaces || editingPlacement;
       element.setAttribute(
         "aria-pressed",
         String(element.dataset.place === selected?.id)
       );
     }
-  }, [showPlaces, selected, ready]);
+  }, [showPlaces, selected, ready, editingPlacement]);
 
   useEffect(() => {
     if (!rotating || !ready) return;
@@ -343,6 +368,22 @@ export function GentMap() {
     });
   }
 
+  function focusProject(forPlacement = false) {
+    setRotating(false);
+    setShowProject(true);
+    const camera = {
+      center: placement.coordinates,
+      zoom: 19,
+      pitch: forPlacement ? 40 : 60,
+      bearing: forPlacement ? 0 : 180 - placement.facadeBearing
+    };
+    // Recenter before switching from 2D: the pitch effect can interrupt flyTo.
+    if (!is3d) map.current?.jumpTo(camera);
+    setIs3d(true);
+    setSelected(null);
+    map.current?.flyTo({ ...camera, duration: duration() });
+  }
+
   async function toggleFullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -356,7 +397,7 @@ export function GentMap() {
 
   return (
     <main
-      className={`gent-page${fullscreen ? " gent-page--fullscreen" : ""}`}
+      className={`gent-page${fullscreen ? " gent-page--fullscreen" : ""}${editingPlacement ? " gent-page--placing" : ""}`}
       ref={shell}
     >
       <header className="gent-header">
@@ -372,7 +413,7 @@ export function GentMap() {
           <button
             type="button"
             aria-pressed={!is3d}
-            disabled={!ready}
+            disabled={!ready || editingPlacement}
             onClick={() => setIs3d(false)}
           >
             2D
@@ -445,11 +486,46 @@ export function GentMap() {
               Kaartlagen
             </legend>
             <label>
+              <Box size={16} aria-hidden />
+              Projectmodel
+              <input
+                type="checkbox"
+                checked={showProject}
+                disabled={editingPlacement}
+                onChange={(event) => setShowProject(event.target.checked)}
+              />
+              <span className="gent-check"><Check size={12} /></span>
+            </label>
+            <div className="gent-project-status" role="status">
+              {projectStatus === "loading" ? "3D-project wordt geladen…" :
+                projectStatus === "error" ? (
+                  <>Het 3D-project kon niet laden. <button type="button" onClick={() => void project.current?.load()}>Opnieuw proberen</button></>
+                ) : "3D-project geladen · vrij te plaatsen op de kaart."}
+            </div>
+            <button
+              className="gent-project-focus"
+              type="button"
+              disabled={projectStatus !== "ready"}
+              onClick={() => focusProject(editingPlacement)}
+            >
+              <Focus size={15} aria-hidden /> Bekijk het project
+            </button>
+            <ProjectPlacementControls
+              map={ready ? map.current : null}
+              placement={placement}
+              editing={editingPlacement}
+              disabled={!ready || projectStatus !== "ready"}
+              onChange={setPlacement}
+              onEditingChange={setEditingPlacement}
+              onStart={() => focusProject(true)}
+            />
+            <label>
               <Building2 size={16} aria-hidden />
               3D-gebouwen
               <input
                 type="checkbox"
                 checked={is3d}
+                disabled={editingPlacement}
                 onChange={(event) => setIs3d(event.target.checked)}
               />
               <span className="gent-check">
@@ -547,6 +623,7 @@ export function GentMap() {
                       rotating ? "Rondvlucht stoppen" : "Rondvlucht starten"
                     }
                     icon={Orbit}
+                    disabled={editingPlacement}
                     pressed={rotating}
                     onClick={() => setRotating((value) => !value)}
                   />
@@ -602,7 +679,7 @@ export function GentMap() {
                   <output htmlFor="gent-pitch">{Math.round(pitch)}&deg;</output>
                 </div>
               )}
-              {selected && (
+              {selected && !editingPlacement && (
                 <div className="gent-selection" aria-live="polite">
                   <MapPin size={20} aria-hidden />
                   <div>
