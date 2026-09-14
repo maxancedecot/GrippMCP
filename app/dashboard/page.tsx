@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import {
@@ -14,12 +15,13 @@ import {
 import { DashboardFrame } from "../dashboard-frame.js";
 import { CvrMappingBoard } from "./cvr-mapping-board.js";
 import { CvrTrendChart } from "./cvr-trend-chart.js";
+import { CampaignPerformance } from "./campaign-performance.js";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "WordPress-prestaties | Dashboard",
-  description: "Centraal dashboard voor de prestaties van WordPress-sites."
+  title: "Website- en campagneprestaties | Dashboard",
+  description: "Websiteprestaties en campagneperformance uit Google Ads, Facebook Ads en GoHighLevel."
 };
 
 type DashboardSearchParams = Record<string, string | string[] | undefined>;
@@ -80,6 +82,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   const params = (await searchParams) ?? {};
   const days = dashboardDaysFromParams(params);
   const siteId = firstParam(params.site);
+  const view = firstParam(params.tab) === "campaigns" ? "campaigns" : "website";
   const dashboardPromise = getSiteAnalyticsDashboardData({ days, siteId });
   const connectedDashboardPromise = siteId ? getSiteAnalyticsDashboardData({ days }) : dashboardPromise;
   const [dashboard, connectedDashboard, configuredSites] = await Promise.all([
@@ -98,22 +101,35 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <main className="dashboard-shell site-analytics-shell">
         <header className="dashboard-header">
           <div>
-            <p className="eyebrow">WordPress-analyse</p>
-            <h1>Websiteprestaties</h1>
+            <p className="eyebrow">{view === "campaigns" ? "Marketingoverzicht" : "WordPress-analyse"}</p>
+            <h1>{view === "campaigns" ? "Campagneperformance" : "Websiteprestaties"}</h1>
           </div>
           <div className="header-meta">
             <a className="header-meta-link" href="/api/site-analytics/plugin" download>
               WordPress-plugin
             </a>
             <span className={`source-badge source-badge--${dashboard.source.mode}`}>
-              {dashboard.source.mode === "live" ? "Verbonden sites" : "Demogegevens"}
+              {dashboard.source.mode === "live" ? "WordPress verbonden" : "WordPress-demo"}
             </span>
             <span>{dashboard.period.label}</span>
             <span>Bijgewerkt {dashboard.lastUpdated}</span>
           </div>
         </header>
 
-        {dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
+        <nav className="dashboard-tabs site-analytics-view-tabs" aria-label="Dashboardweergave">
+          {(["website", "campaigns"] as const).map((tab) => (
+            <a
+              key={tab}
+              className={`dashboard-tab ${view === tab ? "dashboard-tab--active" : ""}`}
+              href={dashboardHref({ params: { ...params, tab: tab === "campaigns" ? tab : undefined }, days, siteId: dashboard.selectedSiteId })}
+              aria-current={view === tab ? "page" : undefined}
+            >
+              {tab === "campaigns" ? "Campagneperformance" : "Websiteprestaties"}
+            </a>
+          ))}
+        </nav>
+
+        {view === "website" && dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 
         <div className="site-analytics-controls">
           <nav className="dashboard-tabs" aria-label="Periode">
@@ -150,6 +166,11 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           </nav>
         </div>
 
+        {view === "campaigns" ? (
+          <Suspense fallback={<p className="data-notice" role="status">Campagnegegevens laden uit Google Ads, Facebook Ads en GoHighLevel…</p>}>
+            <CampaignPerformance dashboard={dashboard} />
+          </Suspense>
+        ) : <>
         <section className="metric-grid site-analytics-metric-grid" aria-label="WordPress KPI's">
           <MetricCard label="CVR" value={`${formatConversionRate(overallConversionRatePercent)}%`} detail="Conversieratio" tone="good" />
           <MetricCard label="Bezoekers" value={formatNumber(dashboard.totals.uniqueVisitors)} detail="Unieke bezoekers" tone="blue" />
@@ -200,6 +221,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           createAction={createCvrLinkAction}
           deleteAction={deleteCvrLinkAction}
         />
+        </>}
       </main>
     </DashboardFrame>
   );

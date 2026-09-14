@@ -11,7 +11,7 @@ test.afterEach(() => {
 test("checkMcpAccessKey allows local development when no access key is configured", () => {
   delete process.env.MCP_ACCESS_KEY;
   delete process.env.VERCEL;
-  process.env.NODE_ENV = "test";
+  Object.assign(process.env, { NODE_ENV: "test" });
 
   assert.deepEqual(checkMcpAccessKey(undefined), { ok: true });
 });

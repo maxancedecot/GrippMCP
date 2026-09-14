@@ -11,7 +11,7 @@ test.afterEach(() => {
 
 test("saveGhlTokenRecord indexes multiple installations for one MCP", async () => {
   delete process.env.VERCEL;
-  process.env.NODE_ENV = "test";
+  Object.assign(process.env, { NODE_ENV: "test" });
   process.env.GHL_TOKEN_ENCRYPTION_KEY = "2".repeat(64);
 
   const now = Date.now();

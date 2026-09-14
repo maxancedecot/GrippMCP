@@ -65,7 +65,7 @@ test("buildTokenExchangeBody uses form-encoded company OAuth parameters", () => 
 
 test("exchangeGhlAuthorizationCode sends a form-encoded body", async () => {
   delete process.env.VERCEL;
-  process.env.NODE_ENV = "test";
+  Object.assign(process.env, { NODE_ENV: "test" });
   process.env.GHL_CLIENT_ID = "client_123";
   process.env.GHL_CLIENT_SECRET = "secret_123";
   process.env.GHL_REDIRECT_URI = "https://gripp-mcp-two.vercel.app/api/connect/callback";
@@ -109,7 +109,7 @@ test("exchangeGhlAuthorizationCode sends a form-encoded body", async () => {
 
 test("createGhlLocationToken stores a location token from a company token", async () => {
   delete process.env.VERCEL;
-  process.env.NODE_ENV = "test";
+  Object.assign(process.env, { NODE_ENV: "test" });
   process.env.GHL_TOKEN_ENCRYPTION_KEY = "3".repeat(64);
 
   const originalFetch = globalThis.fetch;
