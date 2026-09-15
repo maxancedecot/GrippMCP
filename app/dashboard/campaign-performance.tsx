@@ -80,7 +80,7 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
       <p className="campaign-method-note">
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
         Facebook unieke link-CTR = unieke linkklikkers ÷ uniek bereik van de momenteel lopende campagnes, binnen de gekozen periode.
-        Facebook-cijfers omvatten de plaatsingen van het Meta-advertentieaccount, inclusief Instagram.
+        Facebook-cijfers tellen alleen campagnes met “Ledoux” in de naam, inclusief hun Instagram-plaatsingen.
         Leads = Brochure en Afspraken = Afspraak uit Websiteprestaties, voor dezelfde website en periode.
         Dit zijn bezoekers van gekoppelde bedankpagina’s; ze zijn niet uitsluitend aan advertenties toegeschreven.
         Websitemetingen gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
@@ -106,7 +106,7 @@ function ChannelPanel({ name, sources, uniqueCtr }: { name: string; sources: Cam
     <p className="campaign-channel-description">{summary.connected > 0
       ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary)}`
       : coverage(summary)}</p>
-    {uniqueCtr ? <p className="campaign-channel-description">Unieke link-CTR: alleen lopende campagnes in de gekozen periode.</p> : null}
+    {uniqueCtr ? <p className="campaign-channel-description">Alleen campagnes met “Ledoux” in de naam. Unieke link-CTR: alleen lopende campagnes in de gekozen periode.</p> : null}
     <dl className="campaign-channel-metrics">
       <div><dt>{uniqueCtr ? `Facebook unieke link-CTR${uniqueCtr.accounts > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
         <dd>{percentage(uniqueCtr ? uniqueCtr.ctr : summary.ctr)}</dd></div>

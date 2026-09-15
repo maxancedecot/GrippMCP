@@ -56,8 +56,8 @@ const googleRow = z.object({
   campaign: z.object({ id, status: id.optional(), primaryStatus: id.optional() }).optional(),
   metrics: z.object({ clicks: numeric.optional(), impressions: numeric.optional(), costMicros: numeric.optional() }).optional()
 });
-const metaCampaign = z.object({ id, effective_status: id, start_time: id.optional(), stop_time: id.optional() });
-const metaInsight = z.object({ campaign_id: id, clicks: numeric.optional(), impressions: numeric, spend: numeric });
+const metaCampaign = z.object({ id, name: id, effective_status: id, start_time: id.optional(), stop_time: id.optional() });
+const metaInsight = z.object({ campaign_id: id, campaign_name: id, clicks: numeric.optional(), impressions: numeric, spend: numeric });
 const metaUniqueInsight = z.object({ unique_link_clicks_ctr: numeric, reach: numeric });
 const graphPaging = z.object({ next: z.string().optional(), cursors: z.object({ after: id.optional() }).optional() }).optional();
 const MAX_PAGES = 100;
@@ -161,7 +161,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     // An empty live selection must never become an unfiltered account query.
     if (campaignIds.length === 0) return Promise.resolve({
       state: "connected", data: { accountId: config.adAccountId, reach: 0, ctr: null },
-      message: "Geen lopende campagne"
+      message: "Geen lopende Ledoux-campagne"
     });
     const key = JSON.stringify([config.adAccountId, campaignIds]);
     let pending = uniqueCtrRequests.get(key);
@@ -259,16 +259,19 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       const accountPath = `act_${config.adAccountId}`;
       const [account, statuses, metrics] = await Promise.all([
         graph(accountPath, { fields: "currency,account_status" }).then((value) => z.object({ currency: id, account_status: numeric }).parse(value)),
-        list(`${accountPath}/campaigns`, { fields: "id,effective_status,start_time,stop_time" }, metaCampaign),
+        list(`${accountPath}/campaigns`, { fields: "id,name,effective_status,start_time,stop_time" }, metaCampaign),
         list(`${accountPath}/insights`, {
-          fields: "campaign_id,clicks,impressions,spend", level: "campaign",
+          fields: "campaign_id,campaign_name,clicks,impressions,spend", level: "campaign",
           time_range: JSON.stringify({ since: dashboard.period.start, until: dashboard.period.end }),
           ...(config.campaignIds ? { filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: config.campaignIds }]) } : {})
         }, metaInsight)
       ]);
       const campaigns = new Map<string, AdCampaign>();
+      const currentNames = new Map(statuses.map((campaign) => [campaign.id, campaign.name]));
+      const knownIds = new Set([...currentNames.keys(), ...metrics.map((row) => row.campaign_id)]);
       for (const campaign of statuses) {
         if (config.campaignIds && !config.campaignIds.includes(campaign.id)) continue;
+        if (!isLedouxCampaign(campaign.name)) continue;
         const start = campaign.start_time ? Date.parse(campaign.start_time) : -Infinity;
         const end = campaign.stop_time ? Date.parse(campaign.stop_time) : Infinity;
         if (Number.isNaN(start) || Number.isNaN(end)) throw new Error("Invalid campaign schedule");
@@ -279,13 +282,15 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       }
       for (const row of metrics) {
         if (config.campaignIds && !config.campaignIds.includes(row.campaign_id)) continue;
+        // Current names take precedence; historical-only rows must also identify a Ledoux campaign.
+        if (!isLedouxCampaign(currentNames.get(row.campaign_id) ?? row.campaign_name)) continue;
         const campaign = campaigns.get(row.campaign_id) ?? { id: row.campaign_id, live: false, clicks: 0, impressions: 0, spend: 0 };
         campaign.clicks += row.clicks ?? 0;
         campaign.impressions += row.impressions;
         campaign.spend += row.spend;
         campaigns.set(campaign.id, campaign);
       }
-      if (config.campaignIds?.some((campaignId) => !campaigns.has(campaignId))) throw new Error("Campaign mapping not found");
+      if (config.campaignIds?.some((campaignId) => !knownIds.has(campaignId))) throw new Error("Campaign mapping not found");
       return { accountId: config.adAccountId, currency: currencyCode(account.currency), campaigns: [...campaigns.values()] };
     }, "Facebook Ads kon niet worden geladen. Controleer de accountkoppeling en toegangsrechten.");
   }
@@ -298,6 +303,10 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       data: { siteId, count: projects.reduce((sum, row) => sum + row[column].visitors, 0) }
     };
   }
+}
+
+function isLedouxCampaign(name: string) {
+  return name.toLowerCase().includes("ledoux");
 }
 
 function missing<T>(message: string): CampaignSource<T> {
