@@ -54,7 +54,7 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
             <table className="campaign-table">
               <thead><tr>
                 <th scope="col">Website</th><th scope="col">Google live</th><th scope="col">Facebook live</th>
-                <th scope="col">Leads</th><th scope="col">Afspraken</th><th scope="col">Facebook unieke CTR</th>
+                <th scope="col">Leads</th><th scope="col">Afspraken</th><th scope="col">Facebook unieke link-CTR</th>
                 <th scope="col">Facebook spend</th><th scope="col">Google CTR</th><th scope="col">Google spend</th><th scope="col">Website CVR</th>
               </tr></thead>
               <tbody>{rows.map((row) => <tr key={row.siteId}>
@@ -79,7 +79,7 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
 
       <p className="campaign-method-note">
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
-        Facebook unieke CTR (alle) = unieke klikkers ÷ uniek bereik van de momenteel lopende campagnes, binnen de gekozen periode.
+        Facebook unieke link-CTR = unieke linkklikkers ÷ uniek bereik van de momenteel lopende campagnes, binnen de gekozen periode.
         Facebook-cijfers omvatten de plaatsingen van het Meta-advertentieaccount, inclusief Instagram.
         Leads = Brochure en Afspraken = Afspraak uit Websiteprestaties, voor dezelfde website en periode.
         Dit zijn bezoekers van gekoppelde bedankpagina’s; ze zijn niet uitsluitend aan advertenties toegeschreven.
@@ -106,16 +106,16 @@ function ChannelPanel({ name, sources, uniqueCtr }: { name: string; sources: Cam
     <p className="campaign-channel-description">{summary.connected > 0
       ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary)}`
       : coverage(summary)}</p>
-    {uniqueCtr ? <p className="campaign-channel-description">Unieke CTR: alleen lopende campagnes in de gekozen periode.</p> : null}
+    {uniqueCtr ? <p className="campaign-channel-description">Unieke link-CTR: alleen lopende campagnes in de gekozen periode.</p> : null}
     <dl className="campaign-channel-metrics">
-      <div><dt>{uniqueCtr ? `Facebook unieke CTR${uniqueCtr.accounts > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
+      <div><dt>{uniqueCtr ? `Facebook unieke link-CTR${uniqueCtr.accounts > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
         <dd>{percentage(uniqueCtr ? uniqueCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
     {uniqueCtr?.accounts && uniqueCtr.accounts > 1 ? <p className="campaign-method-note">
       Gewogen op bereik per advertentieaccount. Personen die via meerdere accounts zijn bereikt, kunnen meermaals meetellen.
     </p> : null}
-    {uniqueCtr?.unavailable ? <p className="cell-muted">Unieke CTR niet beschikbaar voor alle gekoppelde accounts.</p> : null}
+    {uniqueCtr?.unavailable ? <p className="cell-muted">Unieke link-CTR niet beschikbaar voor alle gekoppelde accounts.</p> : null}
   </article>;
 }
 

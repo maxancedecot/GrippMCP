@@ -14,7 +14,7 @@ export type AdCampaign = {
   spend: number;
 };
 export type AdPerformance = { accountId: string; currency: string; campaigns: AdCampaign[] };
-export type UniqueCtrPerformance = { accountId: string; uniqueClicks: number; reach: number; ctr: number | null };
+export type UniqueCtrPerformance = { accountId: string; reach: number; ctr: number | null };
 export type UniqueCtrSummary = { ctr: number | null; accounts: number; unavailable: boolean };
 export type WebsiteConversionPerformance = { siteId: string; count: number };
 export type CampaignPerformanceRow = {
@@ -58,7 +58,7 @@ const googleRow = z.object({
 });
 const metaCampaign = z.object({ id, effective_status: id, start_time: id.optional(), stop_time: id.optional() });
 const metaInsight = z.object({ campaign_id: id, clicks: numeric.optional(), impressions: numeric, spend: numeric });
-const metaUniqueInsight = z.object({ unique_ctr: numeric, unique_clicks: numeric, reach: numeric });
+const metaUniqueInsight = z.object({ unique_link_clicks_ctr: numeric, reach: numeric });
 const graphPaging = z.object({ next: z.string().optional(), cursors: z.object({ after: id.optional() }).optional() }).optional();
 const MAX_PAGES = 100;
 
@@ -160,7 +160,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     const campaignIds = [...new Set(config.campaignIds)].sort();
     // An empty live selection must never become an unfiltered account query.
     if (campaignIds.length === 0) return Promise.resolve({
-      state: "connected", data: { accountId: config.adAccountId, uniqueClicks: 0, reach: 0, ctr: null },
+      state: "connected", data: { accountId: config.adAccountId, reach: 0, ctr: null },
       message: "Geen lopende campagne"
     });
     const key = JSON.stringify([config.adAccountId, campaignIds]);
@@ -169,7 +169,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       pending = safely(async () => {
         const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
         const params = new URLSearchParams({
-          fields: "unique_ctr,unique_clicks,reach", level: "account", time_increment: "all_days",
+          fields: "unique_link_clicks_ctr,reach", level: "account", time_increment: "all_days",
           time_range: JSON.stringify({ since: dashboard.period.start, until: dashboard.period.end }),
           filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }])
         });
@@ -179,9 +179,9 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         ));
         if (result.paging?.next) throw new Error("Unique metrics must cover the whole selection in one row");
         const row = result.data[0];
-        return { accountId: config.adAccountId, uniqueClicks: row?.unique_clicks ?? 0, reach: row?.reach ?? 0,
-          ctr: row && row.reach > 0 ? row.unique_ctr : null };
-      }, "Facebook unieke CTR kon niet worden geladen. Probeer opnieuw of kies een kortere periode.");
+        return { accountId: config.adAccountId, reach: row?.reach ?? 0,
+          ctr: row && row.reach > 0 ? row.unique_link_clicks_ctr : null };
+      }, "Facebook unieke link-CTR kon niet worden geladen. Probeer opnieuw of kies een kortere periode.");
       uniqueCtrRequests.set(key, pending);
     }
     return pending;
@@ -361,9 +361,9 @@ export function summarizeUniqueCtr(sources: CampaignSource<UniqueCtrPerformance>
   const unavailable = sources.some((source) => source.state !== "connected");
   const values = sources.flatMap((source) => source.data ? [source.data] : []);
   const reach = values.reduce((sum, value) => sum + value.reach, 0);
-  const uniqueClicks = values.reduce((sum, value) => sum + value.uniqueClicks, 0);
+  const weightedCtr = values.reduce((sum, value) => sum + (value.ctr ?? 0) * value.reach, 0);
   return {
     accounts: sources.length, unavailable,
-    ctr: unavailable || reach === 0 ? null : values.length === 1 ? values[0].ctr : uniqueClicks / reach * 100
+    ctr: unavailable || reach === 0 ? null : values.length === 1 ? values[0].ctr : weightedCtr / reach
   };
 }

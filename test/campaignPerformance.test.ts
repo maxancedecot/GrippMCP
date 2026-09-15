@@ -112,9 +112,9 @@ test("Facebook follows cursors on a fixed host, filters campaigns and honors sch
         assert.deepEqual(JSON.parse(url.searchParams.get("time_range")!), { since: period.start, until: period.end });
         if (url.searchParams.get("level") === "account") {
           assert.equal(url.searchParams.get("time_increment"), "all_days");
-          assert.equal(url.searchParams.get("fields"), "unique_ctr,unique_clicks,reach");
+          assert.equal(url.searchParams.get("fields"), "unique_link_clicks_ctr,reach");
           assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!), [{ field: "campaign.id", operator: "IN", value: ["1"] }]);
-          return response({ data: [{ unique_ctr: "10", unique_clicks: "20", reach: "200" }] });
+          return response({ data: [{ unique_link_clicks_ctr: "10", reach: "200", unique_ctr: "25", unique_clicks: "50" }] });
         }
         if (!url.searchParams.has("after")) return response({ data: [
           { campaign_id: "1", clicks: "10", impressions: "100", spend: "5" }
@@ -158,10 +158,10 @@ test("unique CTR totals union only running campaigns across overlapping sites an
         const ids = JSON.parse(url.searchParams.get("filtering")!)[0].value.join(",");
         selections.push(`${url.pathname}:${ids}`);
         const metrics = {
-          "1,2": { unique_ctr: "20", unique_clicks: "30", reach: "150" },
-          "2,3": { unique_ctr: "20", unique_clicks: "40", reach: "200" },
-          "1,2,3": { unique_ctr: "15", unique_clicks: "45", reach: "300" },
-          "9": { unique_ctr: "10", unique_clicks: "5", reach: "50" }
+          "1,2": { unique_link_clicks_ctr: "20", reach: "150" },
+          "2,3": { unique_link_clicks_ctr: "20", reach: "200" },
+          "1,2,3": { unique_link_clicks_ctr: "15", reach: "300" },
+          "9": { unique_link_clicks_ctr: "10", reach: "50" }
         };
         return response({ data: [metrics[ids as keyof typeof metrics]] });
       }
@@ -170,7 +170,7 @@ test("unique CTR totals union only running campaigns across overlapping sites an
   });
   assert.equal(result.rows[0].facebookUniqueCtr.data?.ctr, 20);
   assert.equal(result.rows[1].facebookUniqueCtr.data?.ctr, 20);
-  assert.equal(result.facebookUniqueCtr.ctr, 50 / 350 * 100);
+  assert.ok(Math.abs(result.facebookUniqueCtr.ctr! - 50 / 350 * 100) < 0.000001);
   assert.equal(result.facebookUniqueCtr.accounts, 2);
   assert.equal(result.facebookUniqueCtr.unavailable, false);
   assert.equal(selections.length, 4); // Duplicate and account-total scopes reuse the same requests.
@@ -193,7 +193,7 @@ test("a whole-account website filters to running campaigns and includes narrower
       if (url.searchParams.get("level") === "account") {
         scopes.push(url.searchParams.get("filtering"));
         const ids = JSON.parse(url.searchParams.get("filtering")!)[0].value;
-        return response({ data: [{ unique_ctr: ids.length === 1 ? "5" : "8", unique_clicks: "8", reach: "100" }] });
+        return response({ data: [{ unique_link_clicks_ctr: ids.length === 1 ? "5" : "8", reach: "100" }] });
       }
       return response({ currency: "EUR", account_status: 1 });
     }
@@ -205,10 +205,11 @@ test("a whole-account website filters to running campaigns and includes narrower
   assert.deepEqual(scopes.map((scope) => JSON.parse(scope!)[0].value), [["1"], ["1", "2"]]);
 });
 
-test("missing unique metrics never fall back to ordinary CTR or break Facebook spend", async () => {
+test("missing unique link metrics never fall back to all-click CTR or break Facebook spend", async () => {
   for (const uniqueResponse of [
+    { data: [{ reach: "100", unique_ctr: "10", unique_clicks: "10", ctr: "20", clicks: "20" }] },
     { data: [{ reach: "100", unique_clicks: "10" }] },
-    { data: [{ reach: "100", unique_clicks: "10", unique_ctr: "10" }], paging: { next: "https://example.com/next" } },
+    { data: [{ reach: "100", unique_link_clicks_ctr: "10" }], paging: { next: "https://example.com/next" } },
     { error: "private-provider-response" }
   ]) {
     const result = await getCampaignPerformance(dashboard(), {
@@ -232,10 +233,10 @@ test("missing unique metrics never fall back to ordinary CTR or break Facebook s
 
 test("unique CTR preserves Meta's rate, shows no rate without reach and rejects incomplete totals", () => {
   assert.equal(summarizeUniqueCtr([]).ctr, null);
-  assert.equal(summarizeUniqueCtr([connected({ accountId: "123", uniqueClicks: 0, reach: 0, ctr: null })]).ctr, null);
-  assert.equal(summarizeUniqueCtr([connected({ accountId: "123", uniqueClicks: 1, reach: 3, ctr: 33.333333 })]).ctr, 33.333333);
+  assert.equal(summarizeUniqueCtr([connected({ accountId: "123", reach: 0, ctr: null })]).ctr, null);
+  assert.equal(summarizeUniqueCtr([connected({ accountId: "123", reach: 3, ctr: 33.333333 })]).ctr, 33.333333);
   assert.equal(summarizeUniqueCtr([
-    connected({ accountId: "123", uniqueClicks: 10, reach: 100, ctr: 10 }),
+    connected({ accountId: "123", reach: 100, ctr: 10 }),
     { state: "unavailable", data: null, message: "Unavailable" }
   ]).ctr, null);
 });
@@ -297,7 +298,7 @@ test("unavailable campaign status blocks unique CTR instead of including unrelat
         : response({ data: [{ id: "1", effective_status: "ACTIVE" }] });
       if (url.searchParams.get("level") === "account") {
         assert.ok(url.pathname.includes("act_123"), "Unknown status must not trigger a unique CTR request");
-        return response({ data: [{ unique_ctr: "10", unique_clicks: "10", reach: "100" }] });
+        return response({ data: [{ unique_link_clicks_ctr: "10", reach: "100" }] });
       }
       if (url.searchParams.get("level") === "campaign") return response({ data: [] });
       return response({ currency: "EUR", account_status: 1 });
