@@ -89,7 +89,7 @@ test("Facebook follows cursors on a fixed host, filters campaigns and honors sch
   const visited: string[] = [];
   const result = await getCampaignPerformance(dashboard(), {
     now: new Date("2026-09-14T12:00:00Z"),
-    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123", campaignIds: ["1", "2"] } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123", campaignIds: ["1", "2", "4", "5"] } }], { META_ADS_ACCESS_TOKEN: "secret" }),
     fetchImpl: async (input, init) => {
       const url = new URL(String(input));
       visited.push(url.toString());
@@ -99,14 +99,16 @@ test("Facebook follows cursors on a fixed host, filters campaigns and honors sch
       if (url.pathname.endsWith("/campaigns")) return response({ data: [
         { id: "1", effective_status: "ACTIVE" },
         { id: "2", effective_status: "ACTIVE", start_time: "2026-09-15T00:00:00Z" },
-        { id: "3", effective_status: "ACTIVE" }
+        { id: "3", effective_status: "ACTIVE" },
+        { id: "4", effective_status: "PAUSED" },
+        { id: "5", effective_status: "ACTIVE", stop_time: "2026-09-13T00:00:00Z" }
       ] });
       if (url.pathname.endsWith("/insights")) {
         assert.deepEqual(JSON.parse(url.searchParams.get("time_range")!), { since: period.start, until: period.end });
         if (url.searchParams.get("level") === "account") {
           assert.equal(url.searchParams.get("time_increment"), "all_days");
           assert.equal(url.searchParams.get("fields"), "unique_ctr,unique_clicks,reach");
-          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!), [{ field: "campaign.id", operator: "IN", value: ["1", "2"] }]);
+          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!), [{ field: "campaign.id", operator: "IN", value: ["1"] }]);
           return response({ data: [{ unique_ctr: "10", unique_clicks: "20", reach: "200" }] });
         }
         if (!url.searchParams.has("after")) return response({ data: [
@@ -131,27 +133,30 @@ test("Facebook follows cursors on a fixed host, filters campaigns and honors sch
   assert.equal(visited.filter((url) => url.includes("after=second")).length, 1);
 });
 
-test("unique CTR totals use Meta's union of overlapping campaigns and weight distinct accounts by reach", async () => {
+test("unique CTR totals union only running campaigns across overlapping sites and weight distinct accounts by reach", async () => {
   const selections: string[] = [];
   const result = await getCampaignPerformance(dashboard(["a", "b", "c", "duplicate"]), {
     env: environment([
-      { siteId: "a", facebook: { adAccountId: "123", campaignIds: ["1", "2"] } },
-      { siteId: "b", facebook: { adAccountId: "123", campaignIds: ["2", "3"] } },
+      { siteId: "a", facebook: { adAccountId: "123", campaignIds: ["1", "2", "4"] } },
+      { siteId: "b", facebook: { adAccountId: "123", campaignIds: ["2", "3", "4"] } },
       { siteId: "c", facebook: { adAccountId: "456" } },
-      { siteId: "duplicate", facebook: { adAccountId: "123", campaignIds: ["2", "1"] } }
+      { siteId: "duplicate", facebook: { adAccountId: "123", campaignIds: ["4", "2", "1"] } }
     ], { META_ADS_ACCESS_TOKEN: "secret" }),
     fetchImpl: async (input) => {
       const url = new URL(String(input));
-      if (url.pathname.endsWith("/campaigns")) return response({ data: ["1", "2", "3"].map((id) => ({ id, effective_status: "ACTIVE" })) });
+      if (url.pathname.endsWith("/campaigns")) return response({ data: url.pathname.includes("act_456")
+        ? [{ id: "9", effective_status: "ACTIVE" }]
+        : [...["1", "2", "3"].map((id) => ({ id, effective_status: "ACTIVE" })), { id: "4", effective_status: "PAUSED" }] });
       if (url.searchParams.get("level") === "campaign") return response({ data: [] });
       if (url.searchParams.get("level") === "account") {
-        const ids = url.searchParams.has("filtering") ? JSON.parse(url.searchParams.get("filtering")!)[0].value.join(",") : "all";
+        assert.ok(url.searchParams.has("filtering"), "Every unique CTR query must select running campaign IDs");
+        const ids = JSON.parse(url.searchParams.get("filtering")!)[0].value.join(",");
         selections.push(`${url.pathname}:${ids}`);
         const metrics = {
           "1,2": { unique_ctr: "20", unique_clicks: "30", reach: "150" },
           "2,3": { unique_ctr: "20", unique_clicks: "40", reach: "200" },
           "1,2,3": { unique_ctr: "15", unique_clicks: "45", reach: "300" },
-          all: { unique_ctr: "10", unique_clicks: "5", reach: "50" }
+          "9": { unique_ctr: "10", unique_clicks: "5", reach: "50" }
         };
         return response({ data: [metrics[ids as keyof typeof metrics]] });
       }
@@ -167,7 +172,7 @@ test("unique CTR totals use Meta's union of overlapping campaigns and weight dis
   assert.ok(selections.some((selection) => selection.endsWith(":1,2,3")));
 });
 
-test("a whole-account website includes narrower scopes once in the unique CTR total", async () => {
+test("a whole-account website filters to running campaigns and includes narrower scopes only once", async () => {
   const scopes: (string | null)[] = [];
   const result = await getCampaignPerformance(dashboard(["filtered", "all"]), {
     env: environment([
@@ -176,11 +181,14 @@ test("a whole-account website includes narrower scopes once in the unique CTR to
     ], { META_ADS_ACCESS_TOKEN: "secret" }),
     fetchImpl: async (input) => {
       const url = new URL(String(input));
-      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", effective_status: "ACTIVE" }] });
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [
+        { id: "1", effective_status: "ACTIVE" }, { id: "2", effective_status: "ACTIVE" }, { id: "3", effective_status: "PAUSED" }
+      ] });
       if (url.searchParams.get("level") === "campaign") return response({ data: [] });
       if (url.searchParams.get("level") === "account") {
         scopes.push(url.searchParams.get("filtering"));
-        return response({ data: [{ unique_ctr: url.searchParams.has("filtering") ? "5" : "8", unique_clicks: "8", reach: "100" }] });
+        const ids = JSON.parse(url.searchParams.get("filtering")!)[0].value;
+        return response({ data: [{ unique_ctr: ids.length === 1 ? "5" : "8", unique_clicks: "8", reach: "100" }] });
       }
       return response({ currency: "EUR", account_status: 1 });
     }
@@ -188,7 +196,8 @@ test("a whole-account website includes narrower scopes once in the unique CTR to
   assert.equal(result.facebookUniqueCtr.ctr, 8);
   assert.equal(result.facebookUniqueCtr.accounts, 1);
   assert.equal(scopes.length, 2);
-  assert.equal(scopes.filter((scope) => scope === null).length, 1);
+  assert.ok(scopes.every((scope) => scope !== null));
+  assert.deepEqual(scopes.map((scope) => JSON.parse(scope!)[0].value), [["1"], ["1", "2"]]);
 });
 
 test("missing unique metrics never fall back to ordinary CTR or break Facebook spend", async () => {
@@ -227,15 +236,74 @@ test("unique CTR preserves Meta's rate, shows no rate without reach and rejects 
 });
 
 test("Meta can return no insights for a connected account without inventing a zero unique CTR", async () => {
+  let uniqueRequests = 0;
   const result = await getCampaignPerformance(dashboard(), {
     env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
-    fetchImpl: async (input) => response(String(input).includes("/insights?") || String(input).includes("/campaigns?")
-      ? { data: [] } : { currency: "EUR", account_status: 1 })
+    fetchImpl: async (input) => {
+      if (new URL(String(input)).searchParams.get("level") === "account") uniqueRequests++;
+      return response(String(input).includes("/insights?") || String(input).includes("/campaigns?")
+        ? { data: [] } : { currency: "EUR", account_status: 1 });
+    }
   });
   assert.equal(result.rows[0].facebookUniqueCtr.state, "connected");
   assert.equal(result.rows[0].facebookUniqueCtr.data?.ctr, null);
   assert.equal(result.facebookUniqueCtr.unavailable, false);
   assert.equal(result.facebookUniqueCtr.ctr, null);
+  assert.equal(result.rows[0].facebookUniqueCtr.message, "Geen lopende campagne");
+  assert.equal(uniqueRequests, 0);
+});
+
+test("no running campaigns never triggers an unfiltered unique CTR query, even with historical clicks", async () => {
+  for (const scenario of [
+    { account_status: 1, campaign: { id: "1", effective_status: "PAUSED" } },
+    { account_status: 1, campaign: { id: "1", effective_status: "ACTIVE", start_time: "2026-09-15T00:00:00Z" } },
+    { account_status: 1, campaign: { id: "1", effective_status: "ACTIVE", stop_time: "2026-09-13T00:00:00Z" } },
+    { account_status: 2, campaign: { id: "1", effective_status: "ACTIVE" } }
+  ]) {
+    const result = await getCampaignPerformance(dashboard(), {
+      now: new Date("2026-09-14T12:00:00Z"),
+      env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+      fetchImpl: async (input) => {
+        const url = new URL(String(input));
+        assert.notEqual(url.searchParams.get("level"), "account", "An empty running selection must not fetch account insights");
+        if (url.pathname.endsWith("/campaigns")) return response({ data: [scenario.campaign] });
+        if (url.pathname.endsWith("/insights")) return response({ data: [{ campaign_id: "1", clicks: "500", impressions: "1000", spend: "50" }] });
+        return response({ currency: "EUR", account_status: scenario.account_status });
+      }
+    });
+    assert.equal(result.rows[0].facebookUniqueCtr.state, "connected");
+    assert.equal(result.rows[0].facebookUniqueCtr.data?.ctr, null);
+    assert.equal(result.rows[0].facebookUniqueCtr.message, "Geen lopende campagne");
+    assert.equal(result.facebookUniqueCtr.ctr, null);
+    assert.equal(result.facebookUniqueCtr.unavailable, false);
+  }
+});
+
+test("unavailable campaign status blocks unique CTR instead of including unrelated account campaigns", async () => {
+  const result = await getCampaignPerformance(dashboard(["known", "unknown"]), {
+    env: environment([
+      { siteId: "known", facebook: { adAccountId: "123", campaignIds: ["1"] } },
+      { siteId: "unknown", facebook: { adAccountId: "456" } }
+    ], { META_ADS_ACCESS_TOKEN: "secret" }),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/campaigns")) return url.pathname.includes("act_456")
+        ? new Response("private-provider-error", { status: 503 })
+        : response({ data: [{ id: "1", effective_status: "ACTIVE" }] });
+      if (url.searchParams.get("level") === "account") {
+        assert.ok(url.pathname.includes("act_123"), "Unknown status must not trigger a unique CTR request");
+        return response({ data: [{ unique_ctr: "10", unique_clicks: "10", reach: "100" }] });
+      }
+      if (url.searchParams.get("level") === "campaign") return response({ data: [] });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.rows[0].facebookUniqueCtr.data?.ctr, 10);
+  assert.equal(result.rows[1].facebookUniqueCtr.state, "unavailable");
+  assert.equal(result.facebookUniqueCtr.accounts, 2);
+  assert.equal(result.facebookUniqueCtr.ctr, null);
+  assert.equal(result.facebookUniqueCtr.unavailable, true);
+  assert.doesNotMatch(JSON.stringify(result), /private-provider-error/);
 });
 
 test("provider failures are isolated and upstream secrets never reach the dashboard", async () => {

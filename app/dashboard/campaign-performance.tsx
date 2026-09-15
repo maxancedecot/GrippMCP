@@ -61,7 +61,8 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
                 <th scope="row"><span className="row-title">{row.name}</span><span className="cell-muted">{displayHost(row.url)}</span></th>
                 <td><CampaignStatus sources={[row.google]} /></td><td><CampaignStatus sources={[row.facebook]} /></td>
                 <td><CrmValue source={row.leads} /></td><td><CrmValue source={row.appointments} /></td>
-                <td><DataValue source={row.facebookUniqueCtr}>{percentage(row.facebookUniqueCtr.data?.ctr ?? null)}</DataValue></td>
+                <td><DataValue source={row.facebookUniqueCtr}>{percentage(row.facebookUniqueCtr.data?.ctr ?? null)}</DataValue>
+                  {row.facebookUniqueCtr.data && row.facebookUniqueCtr.message ? <span className="cell-muted">{row.facebookUniqueCtr.message}</span> : null}</td>
                 <td><AdValue source={row.facebook} metric="spend" /></td>
                 <td><AdValue source={row.google} metric="ctr" /></td><td><AdValue source={row.google} metric="spend" /></td>
                 <td><strong className="campaign-cvr-value">{percentage(row.websiteCvr)}</strong>{row.websiteCvr === null ? <span className="cell-muted">Geen metingen</span> : null}</td>
@@ -78,7 +79,7 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
 
       <p className="campaign-method-note">
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
-        Facebook unieke CTR (alle) = unieke klikkers ÷ uniek bereik, over de volledige gekozen periode.
+        Facebook unieke CTR (alle) = unieke klikkers ÷ uniek bereik van de momenteel lopende campagnes, binnen de gekozen periode.
         Facebook-cijfers omvatten de plaatsingen van het Meta-advertentieaccount, inclusief Instagram.
         Leads en afspraken komen uit de gekoppelde CRM-locatie en zijn niet uitsluitend aan advertenties toegeschreven.
         CRM en website gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
@@ -104,6 +105,7 @@ function ChannelPanel({ name, sources, uniqueCtr }: { name: string; sources: Cam
     <p className="campaign-channel-description">{summary.connected > 0
       ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary)}`
       : coverage(summary)}</p>
+    {uniqueCtr ? <p className="campaign-channel-description">Unieke CTR: alleen lopende campagnes in de gekozen periode.</p> : null}
     <dl className="campaign-channel-metrics">
       <div><dt>{uniqueCtr ? `Facebook unieke CTR${uniqueCtr.accounts > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
         <dd>{percentage(uniqueCtr ? uniqueCtr.ctr : summary.ctr)}</dd></div>

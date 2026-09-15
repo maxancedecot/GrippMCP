@@ -42,6 +42,7 @@ const mappingSchema = z.object({
   ghl: z.object({ locationId: id, installId: id.optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
+type FacebookUniqueScope = { adAccountId: string; campaignIds: string[] };
 type Env = Record<string, string | undefined>;
 type Options = {
   env?: Env;
@@ -119,8 +120,9 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   for (let offset = 0; offset < sites.length; offset += 3) {
     rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
       const mapping = mappings.find((item) => item.siteId === site.id);
+      const facebookRequest = loadFacebook(mapping?.facebook);
       const [google, facebook, facebookUniqueCtr, crm] = await Promise.all([
-        loadGoogle(mapping?.google), loadFacebook(mapping?.facebook), loadFacebookUniqueCtr(mapping?.facebook), loadCrm(mapping?.ghl)
+        loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookUniqueCtr), loadCrm(mapping?.ghl)
       ]);
       return {
         siteId: site.id, name: site.name, url: site.url, google, facebook, facebookUniqueCtr, ...crm,
@@ -130,19 +132,21 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     })));
   }
   // Unique people cannot be added across campaigns or overlapping website scopes.
-  // Ask Meta for each account's union of the visible campaign selections instead.
-  const accountScopes = new Map<string, NonNullable<CampaignSiteMapping["facebook"]>>();
-  for (const site of sites) {
-    const config = mappings.find((mapping) => mapping.siteId === site.id)?.facebook;
+  // Ask Meta for each account's union of currently running, visible campaigns.
+  const accountScopes = new Map<string, FacebookUniqueScope & { unavailable: boolean }>();
+  for (const row of rows) {
+    const config = mappings.find((mapping) => mapping.siteId === row.siteId)?.facebook;
     if (!config || !env.META_ADS_ACCESS_TOKEN) continue;
     const existing = accountScopes.get(config.adAccountId);
-    accountScopes.set(config.adAccountId, !existing ? config : {
+    accountScopes.set(config.adAccountId, {
       adAccountId: config.adAccountId,
-      ...(existing.campaignIds && config.campaignIds
-        ? { campaignIds: [...new Set([...existing.campaignIds, ...config.campaignIds])] } : {})
+      campaignIds: [...new Set([...(existing?.campaignIds ?? []), ...currentFacebookCampaignIds(row.facebook)])],
+      unavailable: !!existing?.unavailable || row.facebook.state !== "connected"
     });
   }
-  const facebookUniqueCtr = summarizeUniqueCtr(await Promise.all([...accountScopes.values()].map(loadFacebookUniqueCtr)));
+  const facebookUniqueCtr = summarizeUniqueCtr(await Promise.all([...accountScopes.values()].map((scope) => scope.unavailable
+    ? Promise.resolve<CampaignSource<UniqueCtrPerformance>>({ state: "unavailable", data: null, message: "De lopende Facebook-campagnes konden niet worden bepaald." })
+    : loadFacebookUniqueCtr(scope))));
   return {
     rows, facebookUniqueCtr,
     message: dashboard.source.mode === "demo"
@@ -150,9 +154,23 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       : ""
   };
 
-  function loadFacebookUniqueCtr(config: CampaignSiteMapping["facebook"]): Promise<CampaignSource<UniqueCtrPerformance>> {
-    if (!config || !env.META_ADS_ACCESS_TOKEN) return Promise.resolve(missing("Facebook Ads is nog niet gekoppeld."));
-    const campaignIds = config.campaignIds ? [...new Set(config.campaignIds)].sort() : undefined;
+  function currentFacebookCampaignIds(source: CampaignSource<AdPerformance>): string[] {
+    return source.data?.campaigns.filter((campaign) => campaign.live === true).map((campaign) => campaign.id) ?? [];
+  }
+
+  function loadCurrentFacebookUniqueCtr(source: CampaignSource<AdPerformance>): Promise<CampaignSource<UniqueCtrPerformance>> {
+    if (!source.data) return Promise.resolve({ state: source.state, data: null, message: source.message });
+    return loadFacebookUniqueCtr({ adAccountId: source.data.accountId, campaignIds: currentFacebookCampaignIds(source) });
+  }
+
+  function loadFacebookUniqueCtr(config: FacebookUniqueScope): Promise<CampaignSource<UniqueCtrPerformance>> {
+    if (!env.META_ADS_ACCESS_TOKEN) return Promise.resolve(missing("Facebook Ads is nog niet gekoppeld."));
+    const campaignIds = [...new Set(config.campaignIds)].sort();
+    // An empty live selection must never become an unfiltered account query.
+    if (campaignIds.length === 0) return Promise.resolve({
+      state: "connected", data: { accountId: config.adAccountId, uniqueClicks: 0, reach: 0, ctr: null },
+      message: "Geen lopende campagne"
+    });
     const key = JSON.stringify([config.adAccountId, campaignIds]);
     let pending = uniqueCtrRequests.get(key);
     if (!pending) {
@@ -161,7 +179,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         const params = new URLSearchParams({
           fields: "unique_ctr,unique_clicks,reach", level: "account", time_increment: "all_days",
           time_range: JSON.stringify({ since: dashboard.period.start, until: dashboard.period.end }),
-          ...(campaignIds ? { filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }]) } : {})
+          filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }])
         });
         const result = z.object({ data: z.array(metaUniqueInsight).max(1), paging: graphPaging }).parse(await request(
           `https://graph.facebook.com/${version}/act_${config.adAccountId}/insights?${params}`,
