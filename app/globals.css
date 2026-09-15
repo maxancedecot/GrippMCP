@@ -280,6 +280,36 @@ select {
   color: var(--background);
 }
 
+.crm-tracking-copy {
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.crm-tracking-copy:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: -3px;
+}
+
+.crm-tracking-copy:disabled {
+  cursor: wait;
+}
+
+.crm-tracking-fallback {
+  flex-basis: 100%;
+  text-align: left;
+}
+
+.crm-tracking-fallback textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
 .source-badge {
   color: var(--ink);
   font-weight: 700;

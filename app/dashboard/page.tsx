@@ -18,6 +18,7 @@ import { CvrMappingBoard } from "./cvr-mapping-board.js";
 import { CvrTrendChart } from "./cvr-trend-chart.js";
 import { CampaignPerformance } from "./campaign-performance.js";
 import { SortableTable } from "./sortable-table.js";
+import { CrmTrackingCopy } from "./crm-tracking-copy.js";
 import { dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
 export const dynamic = "force-dynamic";
@@ -99,6 +100,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <a className="header-meta-link" href="/api/site-analytics/plugin" download>
               WordPress-plugin
             </a>
+            <CrmTrackingCopy />
             <span className={`source-badge source-badge--${dashboard.source.mode}`}>
               {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}
             </span>

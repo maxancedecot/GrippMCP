@@ -1,5 +1,7 @@
 # CRM-websites via de header meten
 
+Klik bovenaan het dashboard op **CRM tracking code**, naast **WordPress-plugin**, om de code automatisch te kopiëren. De knop toont **Code gekopieerd!** zodra dit gelukt is. Als de browser kopiëren blokkeert, verschijnt de code om zelf te selecteren en kopiëren.
+
 Plak op iedere gepubliceerde CRM-website in **Head tracking code**:
 
 ```html
