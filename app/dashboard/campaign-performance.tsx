@@ -5,6 +5,8 @@ import {
 } from "../../src/campaignPerformance.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import type { CampaignProjectRow, UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
+import { highestSortValue, liveSortValue } from "../../src/tableSorting.js";
+import { SortableTable } from "./sortable-table.js";
 
 const number = new Intl.NumberFormat("nl-BE");
 const percent = new Intl.NumberFormat("nl-BE", { maximumFractionDigits: 2 });
@@ -55,13 +57,21 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         </div>
         {projects.length === 0 ? <p className="empty-state">Er zijn nog geen projectpagina’s gekoppeld.</p> : (
           <div className="table-wrap campaign-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
-            <table className="campaign-project-table">
-              <thead><tr>
-                <th scope="col">Projectpagina</th><th scope="col">Facebook CTR (link)</th>
-                <th scope="col">Facebook spend</th><th scope="col">Facebook live</th>
-                <th scope="col">Bezoekers</th><th scope="col">Brochure</th><th scope="col">Afspraak</th><th scope="col">Project CVR</th>
-              </tr></thead>
-              <tbody>{projects.map((project) => <tr key={project.key} data-project-key={project.key}>
+            <SortableTable className="campaign-project-table" columns={[
+              { key: "title", label: "Projectpagina", text: true },
+              { key: "ctr", label: "Facebook CTR (link)", description: "Hoogste CTR binnen het project" },
+              { key: "spend", label: "Facebook spend", description: "Totale spend van de campagnes binnen het project" },
+              { key: "live", label: "Facebook live" }, { key: "visitors", label: "Bezoekers" },
+              { key: "leads", label: "Brochure" }, { key: "appointments", label: "Afspraak" }, { key: "cvr", label: "Project CVR" }
+            ]} rows={projects.map((project) => ({
+              key: project.key,
+              sortValues: {
+                title: project.title, ctr: highestSortValue(project.campaigns.map((campaign) => campaign.ctr)),
+                spend: project.campaigns.length ? project.campaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
+                live: liveSortValue(project.campaigns.map((campaign) => campaign.live)),
+                visitors: project.visitors, leads: project.leads, appointments: project.appointments, cvr: project.cvr
+              },
+              content: <tr key={project.key} data-project-key={project.key}>
                 <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
                   <span className="cell-muted">{project.siteName}</span><span className="cell-muted">{project.sourcePath}</span></th>
                 <td data-metric="ctr"><ProjectCampaignMetric project={project} metric="ctr" /></td>
@@ -72,8 +82,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
                 <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
                 <td><strong className="campaign-cvr-value">{percentage(project.cvr)}</strong>
                   {!project.hasConversionMapping ? <span className="cell-muted">Bedankpagina nog niet gekoppeld</span> : null}</td>
-              </tr>)}</tbody>
-            </table>
+              </tr>
+            }))} />
           </div>
         )}
         <p className="campaign-method-note">Beweeg over de CTR voor de campagnenaam. Spend geldt voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
@@ -93,13 +103,13 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         </div>
         {rows.length === 0 ? <p className="empty-state">Er zijn nog geen gekoppelde websites met campagnegegevens.</p> : (
           <div className="table-wrap campaign-table-wrap" role="region" aria-label="Campagneperformance per website" tabIndex={0}>
-            <table className="campaign-table">
-              <thead><tr>
-                <th scope="col">Website</th><th scope="col">Google live</th><th scope="col">Facebook live</th>
-                <th scope="col">Leads</th><th scope="col">Afspraken</th><th scope="col">Facebook link-CTR</th>
-                <th scope="col">Facebook spend</th><th scope="col">Google CTR</th><th scope="col">Google spend</th><th scope="col">Website CVR</th>
-              </tr></thead>
-              <tbody>{rows.map((row) => <tr key={row.siteId}>
+            <SortableTable className="campaign-table" columns={[
+              { key: "name", label: "Website", text: true }, { key: "googleLive", label: "Google live" },
+              { key: "facebookLive", label: "Facebook live" }, { key: "leads", label: "Leads" },
+              { key: "appointments", label: "Afspraken" }, { key: "facebookCtr", label: "Facebook link-CTR", description: "Hoogste CTR binnen de website" },
+              { key: "facebookSpend", label: "Facebook spend" }, { key: "googleCtr", label: "Google CTR" },
+              { key: "googleSpend", label: "Google spend" }, { key: "cvr", label: "Website CVR" }
+            ]} rows={rows.map((row) => ({ key: row.siteId, sortValues: websiteSortValues(row), content: <tr key={row.siteId}>
                 <th scope="row"><span className="row-title">{row.name}</span><span className="cell-muted">{displayHost(row.url)}</span></th>
                 <td><CampaignStatus sources={[row.google]} /></td><td><CampaignStatus sources={[row.facebook]} /></td>
                 <td><ConversionValue source={row.leads} /></td><td><ConversionValue source={row.appointments} /></td>
@@ -107,8 +117,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
                 <td><AdValue source={row.facebook} metric="spend" /></td>
                 <td><AdValue source={row.google} metric="ctr" /></td><td><AdValue source={row.google} metric="spend" /></td>
                 <td><strong className="campaign-cvr-value">{percentage(row.websiteCvr)}</strong>{row.websiteCvr === null ? <span className="cell-muted">Geen metingen</span> : null}</td>
-              </tr>)}</tbody>
-            </table>
+              </tr> }))} />
           </div>
         )}
       </details>
@@ -130,6 +139,19 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       </p>
     </div>
   );
+}
+
+function websiteSortValues(row: CampaignPerformanceRow) {
+  const spend = (source: CampaignSource<AdPerformance>) => source.data
+    ? source.data.campaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null;
+  const live = (source: CampaignSource<AdPerformance>) => source.data
+    ? source.data.campaigns.length ? liveSortValue(source.data.campaigns.map((campaign) => campaign.live)) : 0 : null;
+  return {
+    name: row.name, googleLive: live(row.google), facebookLive: live(row.facebook),
+    leads: row.leads.data?.count ?? null, appointments: row.appointments.data?.count ?? null,
+    facebookCtr: highestSortValue(row.facebookLinkCtr.data?.campaigns.map((campaign) => campaign.ctr) ?? []),
+    facebookSpend: spend(row.facebook), googleCtr: summarizeAds([row.google]).ctr, googleSpend: spend(row.google), cvr: row.websiteCvr
+  };
 }
 
 function ProjectCampaignMetric({ project, metric }: { project: CampaignProjectRow; metric: "ctr" | "spend" | "status" }) {

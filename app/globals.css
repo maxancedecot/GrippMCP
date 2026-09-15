@@ -1381,6 +1381,45 @@ th {
   text-transform: uppercase;
 }
 
+th.sortable-column {
+  padding: 0;
+}
+
+.table-sort-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 13px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.table-sort-button:hover,
+th[aria-sort="ascending"] .table-sort-button,
+th[aria-sort="descending"] .table-sort-button {
+  color: var(--ink);
+}
+
+.table-sort-button:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: -3px;
+}
+
+.table-sort-indicator {
+  flex-shrink: 0;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
 td {
   background: var(--surface);
   font-size: 14px;

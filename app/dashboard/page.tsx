@@ -17,6 +17,7 @@ import { DashboardFrame } from "../dashboard-frame.js";
 import { CvrMappingBoard } from "./cvr-mapping-board.js";
 import { CvrTrendChart } from "./cvr-trend-chart.js";
 import { CampaignPerformance } from "./campaign-performance.js";
+import { SortableTable } from "./sortable-table.js";
 import { dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
 export const dynamic = "force-dynamic";
@@ -257,20 +258,16 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
 
   return (
     <div className="table-wrap">
-      <table className="cvr-overview-table">
-        <thead>
-          <tr>
-            <th>Projectpagina</th>
-            <th>Bezoekers</th>
-            <th>Brochure</th>
-            <th>Afspraak</th>
-            <th>CVR</th>
-          </tr>
-        </thead>
-        <tbody>
-          {projectRows.map((row) => {
-            return (
-              <tr key={row.key}>
+      <SortableTable className="cvr-overview-table" columns={[
+        { key: "title", label: "Projectpagina", text: true }, { key: "visitors", label: "Bezoekers" },
+        { key: "brochure", label: "Brochure" }, { key: "appointment", label: "Afspraak" }, { key: "cvr", label: "CVR" }
+      ]} rows={projectRows.map((row) => ({
+        key: row.key,
+        sortValues: {
+          title: row.sourceTitle, visitors: row.sourceVisitors, brochure: row.brochure.visitors, appointment: row.appointment.visitors,
+          cvr: row.sourceVisitors > 0 ? (row.brochure.visitors + row.appointment.visitors) / row.sourceVisitors * 100 : 0
+        },
+        content: <tr key={row.key}>
                 <td>
                   <span className="row-title">{row.sourceTitle}</span>
                   <span className="cell-muted">{row.sourcePath}</span>
@@ -288,10 +285,7 @@ function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
                   <CvrOverviewTotalCell row={row} />
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      }))} />
     </div>
   );
 }

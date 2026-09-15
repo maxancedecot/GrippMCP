@@ -2,6 +2,12 @@
 
 Open `/dashboard?tab=campaigns`. De tab deelt de periodefilters (7, 14, 30 en 90 dagen, of een eigen begin- en einddatum) en sitefilters met Websiteprestaties. De hoofdtafel toont één rij per projectpagina, met Facebook CTR (link), Facebook spend, Facebook live, bezoekers, Brochure, Afspraak en project-CVR. De campagnenaam staat in de tooltip van het CTR-percentage en in het toegankelijke label. Bij meerdere campagnes staan CTR, spend en status in dezelfde volgorde onder elkaar. De account- en websitetotalen staan in een uitklapbaar overzicht. Alleen deze tab vraagt advertentiedata op. Alle requests gebeuren op de server; de browser ontvangt geen API-tokens.
 
+## Tabellen sorteren
+
+Klik op een kolomkop om eerst van hoog naar laag te sorteren; nogmaals klikken draait dit om. Een andere kolom begint opnieuw van hoog naar laag. Het pijltje en `aria-sort` geven de huidige richting aan. Dit werkt direct in de browser, zonder nieuwe API-aanvragen, in de projecttabel, de uitklapbare websitetotalen en het conversieoverzicht in Websiteprestaties. De gekozen datums en site blijven behouden.
+
+Getallen worden numeriek gesorteerd, op de onderliggende waarde vóór afronding. Ontbrekende metingen blijven in beide richtingen onderaan; nul is een geldige waarde. Gelijke waarden behouden hun oorspronkelijke volgorde. Voor projecten met meerdere campagnes gebruikt CTR de hoogste beschikbare campagne-CTR en spend de som van de getoonde campagnebedragen; deze keuze staat ook in de tooltip van de kolomkop. De campagnewaarden binnen één project blijven samen uitgelijnd. Live komt boven Niet live bij aflopend sorteren. Project- en websitenamen sorteren van Z naar A en vervolgens van A naar Z.
+
 ## Een periode kiezen
 
 Gebruik **Van**, **Tot en met** en **Toepassen** om dezelfde kalenderdatums als in Ads Manager te kiezen. Beide dagen tellen mee; een eigen periode mag maximaal 90 dagen omvatten en kan in het verleden liggen. De URL bewaart dit als `start=YYYY-MM-DD&end=YYYY-MM-DD`. De periode blijft behouden bij wisselen van website, tab of conversiekoppeling. Een preset (7d, 14d, 30d, 90d) verwijdert de eigen datums en eindigt vandaag in Brussel.
