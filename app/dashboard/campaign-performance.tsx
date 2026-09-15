@@ -57,13 +57,16 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
           <div className="table-wrap campaign-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
             <table className="campaign-project-table">
               <thead><tr>
-                <th scope="col">Projectpagina</th><th scope="col">Facebook campagne · CTR (link)</th>
+                <th scope="col">Projectpagina</th><th scope="col">Facebook CTR (link)</th>
+                <th scope="col">Facebook spend</th><th scope="col">Facebook live</th>
                 <th scope="col">Bezoekers</th><th scope="col">Brochure</th><th scope="col">Afspraak</th><th scope="col">Project CVR</th>
               </tr></thead>
               <tbody>{projects.map((project) => <tr key={project.key} data-project-key={project.key}>
                 <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
                   <span className="cell-muted">{project.siteName}</span><span className="cell-muted">{project.sourcePath}</span></th>
-                <td><ProjectCampaigns project={project} /></td>
+                <td data-metric="ctr"><ProjectCampaignMetric project={project} metric="ctr" /></td>
+                <td data-metric="spend"><ProjectCampaignMetric project={project} metric="spend" /></td>
+                <td data-metric="status"><ProjectCampaignMetric project={project} metric="status" /></td>
                 <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
                 <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
                 <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
@@ -73,7 +76,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
             </table>
           </div>
         )}
-        <p className="campaign-method-note">Brochure, Afspraak en CVR komen van deze projectpagina in Websiteprestaties. Bij meerdere campagnes blijven de projectcijfers één keer staan.</p>
+        <p className="campaign-method-note">Beweeg over de CTR voor de campagnenaam. Spend geldt voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
         {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
           <h3>Nog aan een projectpagina te koppelen</h3>
           <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.siteId}:${campaign.campaignId}`}>
@@ -129,16 +132,31 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   );
 }
 
-function ProjectCampaigns({ project }: { project: CampaignProjectRow }) {
-  if (project.campaigns.length === 0) return <span className="cell-muted">{project.facebookState === "not_configured" ? "Niet gekoppeld"
-    : project.facebookState === "unavailable" ? "Campagnes niet beschikbaar" : "Geen lopende Ledoux-campagne"}</span>;
-  return <ul className="campaign-ctr-list">
-    {project.campaigns.map((campaign) => <li key={`${campaign.accountId}:${campaign.id}`} data-campaign-id={campaign.id}>
-      <span>{campaign.name}</span><strong>{percentage(campaign.ctr)}</strong>
-      {campaign.ctr === null ? <span className="cell-muted">{campaign.unavailable ? "CTR niet beschikbaar" : "Geen vertoningen in deze periode"}</span> : null}
-      {campaign.projectCount > 1 ? <span className="cell-muted">Campagne-CTR voor {campaign.projectCount} projectpagina’s samen</span> : null}
-    </li>)}
+function ProjectCampaignMetric({ project, metric }: { project: CampaignProjectRow; metric: "ctr" | "spend" | "status" }) {
+  if (project.campaigns.length === 0) return metric === "status"
+    ? <span className="cell-muted">{project.facebookState === "not_configured" ? "Niet gekoppeld"
+      : project.facebookState === "unavailable" ? "Niet beschikbaar" : "Geen campagne"}</span>
+    : <strong>—</strong>;
+  return <ul className="campaign-project-values">
+    {project.campaigns.map((campaign) => {
+      const shared = campaign.projectCount > 1 ? `CTR en spend voor ${campaign.projectCount} projectpagina’s samen.` : "";
+      const status = campaign.live === true ? "Live" : campaign.live === false ? "Niet live" : "Onbekend";
+      const ctrDetail = campaign.live !== true ? "CTR wordt alleen voor lopende campagnes getoond."
+        : campaign.unavailable ? "CTR niet beschikbaar." : campaign.ctr === null ? "Geen vertoningen in deze periode." : "";
+      return <li key={`${campaign.accountId}:${campaign.id}`} data-campaign-id={campaign.id}>
+        {metric === "ctr" ? <CampaignCtr name={campaign.name} ctr={campaign.ctr} detail={`${status}. ${ctrDetail} ${shared}`.trim()} />
+          : metric === "spend" ? <strong title={`${campaign.name}${shared ? `\n${shared}` : ""}`}>{formatSpend([{ amount: campaign.spend, currency: campaign.currency }])}</strong>
+          : <span className={`campaign-status campaign-status--${campaign.live === true ? "live" : campaign.live === false ? "offline" : "unknown"}`} title={campaign.name}>
+            <i aria-hidden="true" />{status}
+          </span>}
+      </li>;
+    })}
   </ul>;
+}
+
+function CampaignCtr({ name, ctr, detail = "" }: { name: string; ctr: number | null; detail?: string }) {
+  return <strong className="campaign-ctr-trigger" tabIndex={0} title={`${name}${detail ? `\n${detail}` : ""}`}
+    aria-label={`${name}: ${percentage(ctr)}${detail ? `. ${detail}` : ""}`}>{percentage(ctr)}</strong>;
 }
 
 function CampaignMetric({ label, value, detail, availability }: { label: string; value: string; detail: string; availability: string }) {
@@ -180,7 +198,7 @@ function FacebookCampaignCtr({ row }: { row: CampaignPerformanceRow }) {
     {source.data.campaigns.map((campaign) => {
       const pages = row.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
       return <li key={campaign.id} data-campaign-id={campaign.id}>
-        <span>{campaign.name}</span><strong>{percentage(campaign.ctr)}</strong>
+        <CampaignCtr name={campaign.name} ctr={campaign.ctr} />
         {campaign.ctr === null ? <span className="cell-muted">Geen vertoningen in deze periode</span> : null}
         {pages.map((page) => <a key={page.path} className="campaign-project-link" href={page.url} target="_blank" rel="noreferrer">
           {page.title}{page.hasConversionMapping ? <span className="cell-muted">Gekoppeld aan Websiteprestaties</span> : null}

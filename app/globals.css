@@ -1631,6 +1631,32 @@ td .inline-bar {
   font-variant-numeric: tabular-nums;
 }
 
+.campaign-project-values {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campaign-project-values li {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  white-space: nowrap;
+}
+
+.campaign-ctr-trigger {
+  cursor: help;
+  text-decoration: underline dotted var(--muted);
+  text-underline-offset: 4px;
+}
+
+.campaign-ctr-trigger:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: 4px;
+}
+
 .campaign-unmatched {
   margin-top: 20px;
 }

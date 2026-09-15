@@ -140,7 +140,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         } : source))
       ]);
       const siteProjects = conversionRows.filter((project) => project.siteId === site.id);
-      const explicitPages = explicitMatches.filter((match) => facebook.data?.campaigns.some((campaign) => campaign.id === match.campaignId && campaign.live === true))
+      const explicitPages = explicitMatches.filter((match) => facebook.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
         .map((match) => ({ campaignId: match.campaignId,
           pages: matchCampaignPages(site.url, match.sourcePaths.map((path) => new URL(path, site.url).toString()), siteProjects) }));
       const facebookCampaignPages: CampaignSource<CampaignPageMatch[]> = destinations.data || explicitPages.length ? {

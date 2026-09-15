@@ -34,6 +34,9 @@ export type ProjectCampaign = {
   accountId: string;
   name: string;
   ctr: number | null;
+  spend: number;
+  currency: string;
+  live: boolean | null;
   unavailable: boolean;
   projectCount: number;
 };
@@ -73,27 +76,29 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         title: metrics?.sourceTitle || candidate?.title || title || (path === "/" ? site.name : path),
         visitors, leads: metrics?.brochure.visitors ?? null, appointments: metrics?.appointment.visitors ?? null,
         cvr: metrics ? (metrics.sourceVisitors > 0 ? (metrics.brochure.visitors + metrics.appointment.visitors) / metrics.sourceVisitors * 100 : 0) : null,
-        hasConversionMapping: !!metrics, facebookState: site.facebookLinkCtr.state, campaigns: []
+        hasConversionMapping: !!metrics, facebookState: site.facebook.state, campaigns: []
       };
       projects.set(key, row);
       return row;
     };
     for (const project of conversions.filter((row) => row.siteId === site.siteId)) ensureProject(project.sourcePath, project.sourceTitle);
-    const active = site.facebookLinkCtr.data?.campaigns
-      ?? site.facebook.data?.campaigns.filter((campaign) => campaign.live === true).map((campaign) => ({ ...campaign, ctr: null })) ?? [];
-    for (const campaign of active) {
+    // Keep saved matches for stopped campaigns so their period spend and current
+    // status remain visible. CTR still uses only the currently running selection.
+    for (const campaign of site.facebook.data?.campaigns ?? []) {
       const pages = site.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
       const uniquePages = [...new Map(pages.map((page) => [normalizeProjectPath(page.path), page])).values()];
       if (uniquePages.length === 0) {
-        unmatchedCampaigns.push({ siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
+        if (campaign.live === true) unmatchedCampaigns.push({ siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
         continue;
       }
       for (const page of uniquePages) {
         const project = ensureProject(page.path, page.title);
         const accountId = site.facebook.data!.accountId;
         if (project.campaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
-        project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr: campaign.ctr,
-          unavailable: site.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
+        const ctr = campaign.live === true ? site.facebookLinkCtr.data?.campaigns.find((metric) => metric.id === campaign.id)?.ctr ?? null : null;
+        project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr,
+          spend: campaign.spend, currency: site.facebook.data!.currency, live: campaign.live,
+          unavailable: campaign.live === true && site.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
       }
     }
   }

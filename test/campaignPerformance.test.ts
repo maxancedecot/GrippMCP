@@ -681,7 +681,7 @@ test("saved campaign matches join the exact project counters and keep shared cam
   assert.equal(result.projects.reduce((sum, project) => sum + (project.leads ?? 0), 0), 21);
 });
 
-test("homepage aliases persist by campaign ID without guessing other projects or using paused campaigns", async () => {
+test("homepage aliases keep paused matches and never include paused campaigns in current CTR", async () => {
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt", 3, "/home"), conversionLink("site-a", "/bedankt", 0, "/other-project")];
   const result = await getCampaignPerformance(data, {
@@ -701,7 +701,8 @@ test("homepage aliases persist by campaign ID without guessing other projects or
     }
   });
   assert.equal(result.projects.find((project) => project.key === "site-a:/home")?.campaigns[0].id, "1");
-  assert.deepEqual(result.projects.find((project) => project.key === "site-a:/other-project")?.campaigns, []);
+  assert.deepEqual(result.projects.find((project) => project.key === "site-a:/other-project")?.campaigns.map(({ id, live, ctr }) => ({ id, live, ctr })), [{ id: "2", live: false, ctr: null }]);
+  assert.deepEqual(result.rows[0].facebookLinkCtr.data?.campaigns.map((campaign) => campaign.id), ["1", "3"]);
   assert.deepEqual(result.unmatchedCampaigns.map((campaign) => campaign.campaignId), ["3"]);
 });
 
@@ -770,5 +771,53 @@ test("Ads Manager link CTR and both ad providers use the exact custom date range
     assert.equal(result.facebookLinkCtr.ctr, 1.694141);
     assert.equal(summarizeAds([result.rows[0].google]).ctr, 10);
     assert.deepEqual(checked.sort(), ["facebook-link-ctr", "facebook-spend", "google"]);
+  }
+});
+
+
+test("project campaign spend and live status stay scoped by ID and survive a CTR failure", async () => {
+  for (const ctrFailure of [false, true]) {
+    const data = dashboard();
+    data.cvrLinks = [conversionLink("site-a", "/bedankt", 5, "/project-one"), conversionLink("site-a", "/bedankt", 2, "/project-two")];
+    const result = await getCampaignPerformance(data, {
+      env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+      projectMatches: [
+        { siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/project-one", "/project-two"] },
+        { siteId: "site-a", accountId: "123", campaignId: "2", sourcePaths: ["/project-one"] },
+        { siteId: "site-a", accountId: "123", campaignId: "3", sourcePaths: ["/project-two"] }
+      ],
+      fetchImpl: async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/campaigns")) return response({ data: ["1", "2", "3", "4"].map((id) => ({
+          id, name: "Ledoux same campaign name", effective_status: id === "2" || id === "4" ? "PAUSED" : "ACTIVE"
+        })) });
+        if (isLinkCtrRequest(url)) {
+          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!)[0].value, ["1", "3"]);
+          if (ctrFailure) return new Response("Unavailable", { status: 503 });
+          return response({ data: ["3", "1"].map((id) => ({ campaign_id: id, campaign_name: "Ledoux same campaign name", inline_link_click_ctr: id, impressions: "100" })) });
+        }
+        if (url.pathname.endsWith("/insights")) return response({ data: [
+          { campaign_id: "1", campaign_name: "Ledoux same campaign name", impressions: "100", spend: "12.34" },
+          { campaign_id: "2", campaign_name: "Ledoux same campaign name", impressions: "200", spend: "45.67" },
+          { campaign_id: "3", campaign_name: "Ledoux same campaign name", impressions: "100", spend: "0" },
+          { campaign_id: "4", campaign_name: "Ledoux same campaign name", impressions: "9000", spend: "999" }
+        ] });
+        if (url.pathname.endsWith("/ads")) assert.fail("Saved matches must not fetch ad destinations");
+        return response({ currency: "USD", account_status: 1 });
+      }
+    });
+    const first = result.projects.find((project) => project.key === "site-a:/project-one")!;
+    const second = result.projects.find((project) => project.key === "site-a:/project-two")!;
+    const values = (project: typeof first) => project.campaigns.map(({ id, spend, currency, live }) => ({ id, spend, currency, live }));
+    assert.deepEqual(values(first), [{ id: "1", spend: 12.34, currency: "USD", live: true }, { id: "2", spend: 45.67, currency: "USD", live: false }]);
+    assert.deepEqual(values(second), [{ id: "1", spend: 12.34, currency: "USD", live: true }, { id: "3", spend: 0, currency: "USD", live: true }]);
+    assert.equal(first.campaigns[0].projectCount, 2);
+    assert.equal(first.campaigns[0].ctr, ctrFailure ? null : 1);
+    assert.equal(first.campaigns[0].unavailable, ctrFailure);
+    assert.equal(first.campaigns[1].ctr, null);
+    assert.equal(first.campaigns[1].unavailable, false);
+    assert.equal(first.facebookState, "connected");
+    assert.equal((first.leads ?? 0) + (first.appointments ?? 0), 5);
+    assert.deepEqual(result.unmatchedCampaigns, []);
   }
 });
