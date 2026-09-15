@@ -61,8 +61,7 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
                 <th scope="row"><span className="row-title">{row.name}</span><span className="cell-muted">{displayHost(row.url)}</span></th>
                 <td><CampaignStatus sources={[row.google]} /></td><td><CampaignStatus sources={[row.facebook]} /></td>
                 <td><ConversionValue source={row.leads} /></td><td><ConversionValue source={row.appointments} /></td>
-                <td><DataValue source={row.facebookUniqueCtr}>{percentage(row.facebookUniqueCtr.data?.ctr ?? null)}</DataValue>
-                  {row.facebookUniqueCtr.data && row.facebookUniqueCtr.message ? <span className="cell-muted">{row.facebookUniqueCtr.message}</span> : null}</td>
+                <td><FacebookCampaignCtr row={row} /></td>
                 <td><AdValue source={row.facebook} metric="spend" /></td>
                 <td><AdValue source={row.google} metric="ctr" /></td><td><AdValue source={row.google} metric="spend" /></td>
                 <td><strong className="campaign-cvr-value">{percentage(row.websiteCvr)}</strong>{row.websiteCvr === null ? <span className="cell-muted">Geen metingen</span> : null}</td>
@@ -79,8 +78,9 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
 
       <p className="campaign-method-note">
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
-        Facebook unieke link-CTR = unieke linkklikkers ÷ uniek bereik van de momenteel lopende campagnes, binnen de gekozen periode.
+        Facebook unieke link-CTR wordt per campagne getoond: unieke linkklikkers ÷ uniek bereik van die campagne, binnen de gekozen periode.
         Facebook-cijfers tellen alleen campagnes met “Ledoux” in de naam, inclusief hun Instagram-plaatsingen.
+        Projectpagina’s worden gekoppeld via de bestemmingslink van de advertenties binnen elke campagne.
         Leads = Brochure en Afspraken = Afspraak uit Websiteprestaties, voor dezelfde website en periode.
         Dit zijn bezoekers van gekoppelde bedankpagina’s; ze zijn niet uitsluitend aan advertenties toegeschreven.
         Websitemetingen gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
@@ -106,17 +106,40 @@ function ChannelPanel({ name, sources, uniqueCtr }: { name: string; sources: Cam
     <p className="campaign-channel-description">{summary.connected > 0
       ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary)}`
       : coverage(summary)}</p>
-    {uniqueCtr ? <p className="campaign-channel-description">Alleen campagnes met “Ledoux” in de naam. Unieke link-CTR: alleen lopende campagnes in de gekozen periode.</p> : null}
+    {uniqueCtr ? <p className="campaign-channel-description">Alleen campagnes met “Ledoux” in de naam. Unieke link-CTR per lopende campagne in de gekozen periode.</p> : null}
     <dl className="campaign-channel-metrics">
-      <div><dt>{uniqueCtr ? `Facebook unieke link-CTR${uniqueCtr.accounts > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
+      <div><dt>{uniqueCtr ? `Facebook unieke link-CTR${uniqueCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
         <dd>{percentage(uniqueCtr ? uniqueCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
-    {uniqueCtr?.accounts && uniqueCtr.accounts > 1 ? <p className="campaign-method-note">
-      Gewogen op bereik per advertentieaccount. Personen die via meerdere accounts zijn bereikt, kunnen meermaals meetellen.
+    {uniqueCtr && uniqueCtr.campaigns > 1 ? <p className="campaign-method-note">
+      Gemiddelde gewogen op bereik per campagne. Dezelfde persoon kan in meerdere campagnes meetellen. Hieronder zie je de CTR per campagne.
     </p> : null}
-    {uniqueCtr?.unavailable ? <p className="cell-muted">Unieke link-CTR niet beschikbaar voor alle gekoppelde accounts.</p> : null}
+    {uniqueCtr?.unavailable ? <p className="cell-muted">Unieke link-CTR niet beschikbaar voor alle gekoppelde campagnes.</p> : null}
   </article>;
+}
+
+function FacebookCampaignCtr({ row }: { row: CampaignPerformanceRow }) {
+  const source = row.facebookUniqueCtr;
+  if (!source.data || source.data.campaigns.length === 0) return <>
+    <DataValue source={source}>—</DataValue>
+    {source.data && source.message ? <span className="cell-muted">{source.message}</span> : null}
+  </>;
+  return <ul className="campaign-ctr-list" aria-label="Unieke link-CTR per Facebook-campagne">
+    {source.data.campaigns.map((campaign) => {
+      const pages = row.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
+      return <li key={campaign.id} data-campaign-id={campaign.id}>
+        <span>{campaign.name}</span><strong>{percentage(campaign.ctr)}</strong>
+        {campaign.ctr === null ? <span className="cell-muted">Geen bereik in deze periode</span> : null}
+        {pages.map((page) => <a key={page.path} className="campaign-project-link" href={page.url} target="_blank" rel="noreferrer">
+          {page.title}{page.hasConversionMapping ? <span className="cell-muted">Gekoppeld aan Websiteprestaties</span> : null}
+        </a>)}
+        {pages.length > 1 ? <span className="cell-muted">Campagne-CTR voor deze pagina’s samen</span> : null}
+        {pages.length === 0 ? <span className="cell-muted">{row.facebookCampaignPages.state === "unavailable"
+          ? "Projectpagina kon niet worden gecontroleerd" : "Geen projectpagina op deze website gevonden"}</span> : null}
+      </li>;
+    })}
+  </ul>;
 }
 
 function CampaignStatus({ sources }: { sources: CampaignSource<AdPerformance>[] }) {

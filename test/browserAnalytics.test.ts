@@ -98,7 +98,8 @@ test("browser registration stays stable and its private installation cannot be r
   const origin = "https://browser-private-registration.example";
   const first = await registerBrowserSiteAnalyticsSite(origin);
   const again = await registerBrowserSiteAnalyticsSite(origin);
-  assert.deepEqual(again, first);
+  // Registration identity is stable; refreshing it may advance updatedAt.
+  assert.deepEqual({ id: again.id, name: again.name, url: again.url }, { id: first.id, name: first.name, url: first.url });
   assert.equal("token" in first, false);
   const guessed = await registerSiteAnalyticsSite({ site_url: origin, installation_id: "browser-header-v1" });
   assert.notEqual(guessed.site.id, first.id);

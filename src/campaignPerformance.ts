@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
-import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
+import { cvrOverviewRowsFromLinks, type CvrOverviewRow } from "./siteAnalyticsConversions.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -8,14 +8,20 @@ export type CampaignSource<T> =
 
 export type AdCampaign = {
   id: string;
+  name?: string;
   live: boolean | null;
   clicks: number;
   impressions: number;
   spend: number;
 };
 export type AdPerformance = { accountId: string; currency: string; campaigns: AdCampaign[] };
-export type UniqueCtrPerformance = { accountId: string; reach: number; ctr: number | null };
-export type UniqueCtrSummary = { ctr: number | null; accounts: number; unavailable: boolean };
+export type CampaignUniqueCtr = { id: string; name: string; reach: number; ctr: number | null };
+export type UniqueCtrPerformance = { accountId: string; campaigns: CampaignUniqueCtr[]; ctr: number | null };
+export type UniqueCtrSummary = { ctr: number | null; campaigns: number; unavailable: boolean };
+export type CampaignPageMatch = {
+  campaignId: string;
+  pages: { url: string; path: string; title: string; hasConversionMapping: boolean }[];
+};
 export type WebsiteConversionPerformance = { siteId: string; count: number };
 export type CampaignPerformanceRow = {
   siteId: string;
@@ -24,6 +30,7 @@ export type CampaignPerformanceRow = {
   google: CampaignSource<AdPerformance>;
   facebook: CampaignSource<AdPerformance>;
   facebookUniqueCtr: CampaignSource<UniqueCtrPerformance>;
+  facebookCampaignPages: CampaignSource<CampaignPageMatch[]>;
   leads: CampaignSource<WebsiteConversionPerformance>;
   appointments: CampaignSource<WebsiteConversionPerformance>;
   websiteCvr: number | null;
@@ -42,7 +49,7 @@ const mappingSchema = z.object({
   ghl: z.object({ locationId: id, installId: id.optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
-type FacebookUniqueScope = { adAccountId: string; campaignIds: string[] };
+type FacebookUniqueScope = { adAccountId: string; campaigns: AdCampaign[] };
 type Env = Record<string, string | undefined>;
 type Options = {
   env?: Env;
@@ -58,7 +65,7 @@ const googleRow = z.object({
 });
 const metaCampaign = z.object({ id, name: id, effective_status: id, start_time: id.optional(), stop_time: id.optional() });
 const metaInsight = z.object({ campaign_id: id, campaign_name: id, clicks: numeric.optional(), impressions: numeric, spend: numeric });
-const metaUniqueInsight = z.object({ unique_link_clicks_ctr: numeric, reach: numeric });
+const metaUniqueInsight = z.object({ campaign_id: id, campaign_name: id, unique_link_clicks_ctr: numeric, reach: numeric });
 const graphPaging = z.object({ next: z.string().optional(), cursors: z.object({ after: id.optional() }).optional() }).optional();
 const MAX_PAGES = 100;
 
@@ -107,38 +114,42 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   const conversionRows = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
   const rows: CampaignPerformanceRow[] = [];
   const uniqueCtrRequests = new Map<string, Promise<CampaignSource<UniqueCtrPerformance>>>();
+  const destinationRequests = new Map<string, Promise<CampaignSource<{ campaignId: string; urls: string[] }[]>>>();
   // Bound concurrency across sites; each site's providers load independently.
   for (let offset = 0; offset < sites.length; offset += 3) {
     rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
       const mapping = mappings.find((item) => item.siteId === site.id);
       const facebookRequest = loadFacebook(mapping?.facebook);
-      const [google, facebook, facebookUniqueCtr] = await Promise.all([
-        loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookUniqueCtr)
+      const [google, facebook, facebookUniqueCtr, destinations] = await Promise.all([
+        loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookUniqueCtr), facebookRequest.then(loadFacebookDestinations)
       ]);
+      const facebookCampaignPages: CampaignSource<CampaignPageMatch[]> = destinations.data ? {
+        state: "connected", message: "",
+        data: destinations.data.map((campaign) => ({ campaignId: campaign.campaignId,
+          pages: matchCampaignPages(site.url, campaign.urls, conversionRows.filter((project) => project.siteId === site.id)) }))
+      } : destinations;
+      // A verified destination on another website must not inherit this site's
+      // CTR merely because both campaigns share an advertising account.
+      const otherSiteCampaigns = new Set(destinations.data?.filter((campaign) => campaign.urls.length > 0
+        && !facebookCampaignPages.data?.find((match) => match.campaignId === campaign.campaignId)?.pages.length).map((campaign) => campaign.campaignId));
+      const scopedCampaigns = facebookUniqueCtr.data?.campaigns.filter((campaign) => !otherSiteCampaigns.has(campaign.id));
+      const scopedUniqueCtr = facebookUniqueCtr.data && scopedCampaigns ? {
+        ...facebookUniqueCtr,
+        data: { ...facebookUniqueCtr.data, campaigns: scopedCampaigns, ctr: weightedCampaignCtr(scopedCampaigns) },
+        message: facebookUniqueCtr.data.campaigns.length > 0 && scopedCampaigns.length === 0 ? "Geen lopende Ledoux-campagne voor deze website" : facebookUniqueCtr.message
+      } : facebookUniqueCtr;
       return {
-        siteId: site.id, name: site.name, url: site.url, google, facebook, facebookUniqueCtr,
+        siteId: site.id, name: site.name, url: site.url, google, facebook, facebookUniqueCtr: scopedUniqueCtr, facebookCampaignPages,
         leads: websiteConversions(site.id, "brochure"), appointments: websiteConversions(site.id, "appointment"),
         websiteCvr: site.cvrLinkCount > 0 && site.cvrSourceVisitors > 0 ? site.conversionRatePercent : null,
         websiteVisitors: site.cvrSourceVisitors, websiteConversions: site.cvrConversionVisitors
       };
     })));
   }
-  // Unique people cannot be added across campaigns or overlapping website scopes.
-  // Ask Meta for each account's union of currently running, visible campaigns.
-  const accountScopes = new Map<string, FacebookUniqueScope & { unavailable: boolean }>();
-  for (const row of rows) {
-    const config = mappings.find((mapping) => mapping.siteId === row.siteId)?.facebook;
-    if (!config || !env.META_ADS_ACCESS_TOKEN) continue;
-    const existing = accountScopes.get(config.adAccountId);
-    accountScopes.set(config.adAccountId, {
-      adAccountId: config.adAccountId,
-      campaignIds: [...new Set([...(existing?.campaignIds ?? []), ...currentFacebookCampaignIds(row.facebook)])],
-      unavailable: !!existing?.unavailable || row.facebook.state !== "connected"
-    });
-  }
-  const facebookUniqueCtr = summarizeUniqueCtr(await Promise.all([...accountScopes.values()].map((scope) => scope.unavailable
-    ? Promise.resolve<CampaignSource<UniqueCtrPerformance>>({ state: "unavailable", data: null, message: "De lopende Facebook-campagnes konden niet worden bepaald." })
-    : loadFacebookUniqueCtr(scope))));
+  // Use the same campaign measurements for website rows and totals. Deduplicate
+  // campaign IDs across overlapping website mappings; never request account CTR.
+  const facebookUniqueCtr = summarizeUniqueCtr(rows.map((row) => row.facebookUniqueCtr)
+    .filter((source) => source.state !== "not_configured"));
   return {
     rows, facebookUniqueCtr,
     message: dashboard.source.mode === "demo"
@@ -146,21 +157,55 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       : ""
   };
 
-  function currentFacebookCampaignIds(source: CampaignSource<AdPerformance>): string[] {
-    return source.data?.campaigns.filter((campaign) => campaign.live === true).map((campaign) => campaign.id) ?? [];
-  }
-
   function loadCurrentFacebookUniqueCtr(source: CampaignSource<AdPerformance>): Promise<CampaignSource<UniqueCtrPerformance>> {
     if (!source.data) return Promise.resolve({ state: source.state, data: null, message: source.message });
-    return loadFacebookUniqueCtr({ adAccountId: source.data.accountId, campaignIds: currentFacebookCampaignIds(source) });
+    return loadFacebookUniqueCtr({ adAccountId: source.data.accountId, campaigns: source.data.campaigns.filter((campaign) => campaign.live === true) });
+  }
+
+  function loadFacebookDestinations(source: CampaignSource<AdPerformance>): Promise<CampaignSource<{ campaignId: string; urls: string[] }[]>> {
+    if (!source.data) return Promise.resolve({ state: source.state, data: null, message: source.message });
+    const campaignIds = source.data.campaigns.filter((campaign) => campaign.live === true).map((campaign) => campaign.id).sort();
+    if (campaignIds.length === 0) return Promise.resolve({ state: "connected", data: [], message: "" });
+    const key = JSON.stringify([source.data.accountId, campaignIds]);
+    let pending = destinationRequests.get(key);
+    if (!pending) {
+      const accountId = source.data.accountId;
+      pending = safely(async () => {
+        const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
+        const params = new URLSearchParams({
+          fields: "campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}", limit: "25",
+          filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }])
+        });
+        const destinations = new Map(campaignIds.map((id) => [id, new Set<string>()]));
+        for (let page = 0; ; page++) {
+          if (page === MAX_PAGES) throw new Error("Pagination limit");
+          const result = z.object({ data: z.array(z.object({ campaign_id: id, creative: z.unknown().optional() })), paging: graphPaging }).parse(await request(
+            `https://graph.facebook.com/${version}/act_${accountId}/ads?${params}`,
+            { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
+          ));
+          for (const ad of result.data) {
+            const urls = destinations.get(ad.campaign_id);
+            if (!urls) throw new Error("Unexpected campaign destination");
+            for (const url of facebookDestinationUrls(ad.creative)) urls.add(url);
+          }
+          if (!result.paging?.next) break;
+          const after = result.paging.cursors?.after;
+          if (!after || after === params.get("after")) throw new Error("Incomplete pagination");
+          params.set("after", after);
+        }
+        return [...destinations].map(([campaignId, urls]) => ({ campaignId, urls: [...urls] }));
+      }, "De projectpagina van de campagne kon niet worden gecontroleerd.");
+      destinationRequests.set(key, pending);
+    }
+    return pending;
   }
 
   function loadFacebookUniqueCtr(config: FacebookUniqueScope): Promise<CampaignSource<UniqueCtrPerformance>> {
     if (!env.META_ADS_ACCESS_TOKEN) return Promise.resolve(missing("Facebook Ads is nog niet gekoppeld."));
-    const campaignIds = [...new Set(config.campaignIds)].sort();
+    const campaignIds = [...new Set(config.campaigns.map((campaign) => campaign.id))].sort();
     // An empty live selection must never become an unfiltered account query.
     if (campaignIds.length === 0) return Promise.resolve({
-      state: "connected", data: { accountId: config.adAccountId, reach: 0, ctr: null },
+      state: "connected", data: { accountId: config.adAccountId, campaigns: [], ctr: null },
       message: "Geen lopende Ledoux-campagne"
     });
     const key = JSON.stringify([config.adAccountId, campaignIds]);
@@ -169,18 +214,33 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       pending = safely(async () => {
         const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
         const params = new URLSearchParams({
-          fields: "unique_link_clicks_ctr,reach", level: "account", time_increment: "all_days",
+          fields: "campaign_id,campaign_name,unique_link_clicks_ctr,reach", level: "campaign", time_increment: "all_days", limit: "100",
           time_range: JSON.stringify({ since: dashboard.period.start, until: dashboard.period.end }),
           filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }])
         });
-        const result = z.object({ data: z.array(metaUniqueInsight).max(1), paging: graphPaging }).parse(await request(
-          `https://graph.facebook.com/${version}/act_${config.adAccountId}/insights?${params}`,
-          { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
-        ));
-        if (result.paging?.next) throw new Error("Unique metrics must cover the whole selection in one row");
-        const row = result.data[0];
-        return { accountId: config.adAccountId, reach: row?.reach ?? 0,
-          ctr: row && row.reach > 0 ? row.unique_link_clicks_ctr : null };
+        const insights = new Map<string, z.infer<typeof metaUniqueInsight>>();
+        for (let page = 0; ; page++) {
+          if (page === MAX_PAGES) throw new Error("Pagination limit");
+          const result = z.object({ data: z.array(metaUniqueInsight), paging: graphPaging }).parse(await request(
+            `https://graph.facebook.com/${version}/act_${config.adAccountId}/insights?${params}`,
+            { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
+          ));
+          for (const row of result.data) {
+            if (!campaignIds.includes(row.campaign_id) || insights.has(row.campaign_id)) throw new Error("Unexpected or repeated campaign insight");
+            insights.set(row.campaign_id, row);
+          }
+          if (!result.paging?.next) break;
+          const after = result.paging.cursors?.after;
+          if (!after || after === params.get("after")) throw new Error("Incomplete pagination");
+          params.set("after", after);
+        }
+        const campaigns = config.campaigns.map((campaign): CampaignUniqueCtr => {
+          const row = insights.get(campaign.id);
+          if (!campaign.name || (!row && campaign.impressions > 0)) throw new Error("Missing campaign measurement");
+          return { id: campaign.id, name: campaign.name, reach: row?.reach ?? 0,
+            ctr: row && row.reach > 0 ? row.unique_link_clicks_ctr : null };
+        });
+        return { accountId: config.adAccountId, campaigns, ctr: weightedCampaignCtr(campaigns) };
       }, "Facebook unieke link-CTR kon niet worden geladen. Probeer opnieuw of kies een kortere periode.");
       uniqueCtrRequests.set(key, pending);
     }
@@ -276,7 +336,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         const end = campaign.stop_time ? Date.parse(campaign.stop_time) : Infinity;
         if (Number.isNaN(start) || Number.isNaN(end)) throw new Error("Invalid campaign schedule");
         campaigns.set(campaign.id, {
-          id: campaign.id, live: account.account_status === 1 && campaign.effective_status === "ACTIVE" && start <= now.getTime() && end > now.getTime(),
+          id: campaign.id, name: campaign.name, live: account.account_status === 1 && campaign.effective_status === "ACTIVE" && start <= now.getTime() && end > now.getTime(),
           clicks: 0, impressions: 0, spend: 0
         });
       }
@@ -284,7 +344,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         if (config.campaignIds && !config.campaignIds.includes(row.campaign_id)) continue;
         // Current names take precedence; historical-only rows must also identify a Ledoux campaign.
         if (!isLedouxCampaign(currentNames.get(row.campaign_id) ?? row.campaign_name)) continue;
-        const campaign = campaigns.get(row.campaign_id) ?? { id: row.campaign_id, live: false, clicks: 0, impressions: 0, spend: 0 };
+        const campaign = campaigns.get(row.campaign_id) ?? { id: row.campaign_id, name: row.campaign_name, live: false, clicks: 0, impressions: 0, spend: 0 };
         campaign.clicks += row.clicks ?? 0;
         campaign.impressions += row.impressions;
         campaign.spend += row.spend;
@@ -307,6 +367,41 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
 
 function isLedouxCampaign(name: string) {
   return name.toLowerCase().includes("ledoux");
+}
+
+function facebookDestinationUrls(creative: unknown): string[] {
+  if (!creative || typeof creative !== "object" || Array.isArray(creative)) return [];
+  const record = creative as Record<string, unknown>;
+  const urls = ["link", "website_url", "object_url", "link_url"].flatMap((key) => typeof record[key] === "string" ? [record[key] as string] : []);
+  // Read only destination fields, never match against ad copy or image URLs.
+  for (const key of ["object_story_spec", "link_data", "video_data", "template_data", "call_to_action", "value", "child_attachments", "asset_feed_spec", "link_urls"]) {
+    const value = record[key];
+    for (const child of Array.isArray(value) ? value : [value]) urls.push(...facebookDestinationUrls(child));
+  }
+  return urls;
+}
+
+function matchCampaignPages(siteUrl: string, destinations: string[], projects: CvrOverviewRow[]): CampaignPageMatch["pages"] {
+  const site = new URL(siteUrl);
+  const host = (url: URL) => url.hostname.toLowerCase().replace(/^www\./, "");
+  const pagePath = (url: URL) => (url.pathname.replace(/\/+$/, "") || "/")
+    + (url.searchParams.has("p_slug") ? `?${new URLSearchParams({ p_slug: url.searchParams.get("p_slug")! })}` : "");
+  const pages = new Map<string, CampaignPageMatch["pages"][number]>();
+  const sitePath = site.pathname.replace(/\/+$/, "");
+  for (const destination of destinations) {
+    let url: URL;
+    try { url = new URL(destination); } catch { continue; }
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port !== site.port || host(url) !== host(site)) continue;
+    if (sitePath && url.pathname !== sitePath && !url.pathname.startsWith(`${sitePath}/`)) continue;
+    const path = pagePath(url);
+    const project = projects.find((candidate) => pagePath(new URL(candidate.sourcePath, site)) === path);
+    // Keep project selectors; remove tracking parameters and URL fragments.
+    url.search = "";
+    if (path.includes("?")) url.search = path.slice(path.indexOf("?"));
+    url.hash = "";
+    pages.set(path, { url: url.toString(), path, title: project?.sourceTitle || path, hasConversionMapping: !!project });
+  }
+  return [...pages.values()];
 }
 
 function missing<T>(message: string): CampaignSource<T> {
@@ -364,15 +459,25 @@ export function summarizeWebsiteConversions(sources: CampaignSource<WebsiteConve
   return { connected, total: sources.length, count: connected > 0 ? [...sites.values()].reduce((sum, count) => sum + count, 0) : null };
 }
 
-// Each input covers one account's complete selection, deduplicated by Meta.
-// Across accounts this is a weighted rate, not a globally deduplicated audience.
+function weightedCampaignCtr(campaigns: CampaignUniqueCtr[]): number | null {
+  const measured = campaigns.filter((campaign) => campaign.reach > 0);
+  if (measured.length === 0 || measured.some((campaign) => campaign.ctr === null)) return null;
+  if (measured.length === 1) return measured[0].ctr;
+  const reach = measured.reduce((sum, campaign) => sum + campaign.reach, 0);
+  return measured.reduce((sum, campaign) => sum + campaign.ctr! * campaign.reach, 0) / reach;
+}
+
+// Campaign rates are weighted by campaign reach, not a deduplicated audience.
+// The same campaign appearing under multiple websites contributes only once.
 export function summarizeUniqueCtr(sources: CampaignSource<UniqueCtrPerformance>[]): UniqueCtrSummary {
   const unavailable = sources.some((source) => source.state !== "connected");
-  const values = sources.flatMap((source) => source.data ? [source.data] : []);
-  const reach = values.reduce((sum, value) => sum + value.reach, 0);
-  const weightedCtr = values.reduce((sum, value) => sum + (value.ctr ?? 0) * value.reach, 0);
+  const campaigns = new Map<string, CampaignUniqueCtr>();
+  for (const source of sources) {
+    if (!source.data) continue;
+    for (const campaign of source.data.campaigns) campaigns.set(`${source.data.accountId}:${campaign.id}`, campaign);
+  }
   return {
-    accounts: sources.length, unavailable,
-    ctr: unavailable || reach === 0 ? null : values.length === 1 ? values[0].ctr : weightedCtr / reach
+    campaigns: campaigns.size, unavailable,
+    ctr: unavailable ? null : weightedCampaignCtr([...campaigns.values()])
   };
 }
