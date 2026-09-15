@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  campaignPeriodBounds, getCampaignPerformance, parseCampaignSiteMappings, summarizeAds, summarizeCrm,
+  campaignPeriodBounds, getCampaignPerformance, parseCampaignSiteMappings, summarizeAds, summarizeCrm, summarizeUniqueCtr,
   type AdPerformance, type CampaignSiteMapping, type CampaignSource
 } from "../src/campaignPerformance.js";
 import type { SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
@@ -103,6 +103,12 @@ test("Facebook follows cursors on a fixed host, filters campaigns and honors sch
       ] });
       if (url.pathname.endsWith("/insights")) {
         assert.deepEqual(JSON.parse(url.searchParams.get("time_range")!), { since: period.start, until: period.end });
+        if (url.searchParams.get("level") === "account") {
+          assert.equal(url.searchParams.get("time_increment"), "all_days");
+          assert.equal(url.searchParams.get("fields"), "unique_ctr,unique_clicks,reach");
+          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!), [{ field: "campaign.id", operator: "IN", value: ["1", "2"] }]);
+          return response({ data: [{ unique_ctr: "10", unique_clicks: "20", reach: "200" }] });
+        }
         if (!url.searchParams.has("after")) return response({ data: [
           { campaign_id: "1", clicks: "10", impressions: "100", spend: "5" }
         ], paging: { next: "https://unexpected.example/steal?access_token=secret", cursors: { after: "second" } } });
@@ -118,8 +124,118 @@ test("Facebook follows cursors on a fixed host, filters campaigns and honors sch
   const summary = summarizeAds([result.rows[0].facebook]);
   assert.equal(summary.liveCount, 1);
   assert.equal(summary.ctr, 3);
+  assert.equal(result.rows[0].facebookUniqueCtr.data?.ctr, 10);
+  assert.equal(result.facebookUniqueCtr.ctr, 10);
+  assert.equal(visited.filter((url) => new URL(url).searchParams.get("level") === "account").length, 1);
   assert.deepEqual(summary.spend, [{ currency: "EUR", amount: 20 }]);
   assert.equal(visited.filter((url) => url.includes("after=second")).length, 1);
+});
+
+test("unique CTR totals use Meta's union of overlapping campaigns and weight distinct accounts by reach", async () => {
+  const selections: string[] = [];
+  const result = await getCampaignPerformance(dashboard(["a", "b", "c", "duplicate"]), {
+    env: environment([
+      { siteId: "a", facebook: { adAccountId: "123", campaignIds: ["1", "2"] } },
+      { siteId: "b", facebook: { adAccountId: "123", campaignIds: ["2", "3"] } },
+      { siteId: "c", facebook: { adAccountId: "456" } },
+      { siteId: "duplicate", facebook: { adAccountId: "123", campaignIds: ["2", "1"] } }
+    ], { META_ADS_ACCESS_TOKEN: "secret" }),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/campaigns")) return response({ data: ["1", "2", "3"].map((id) => ({ id, effective_status: "ACTIVE" })) });
+      if (url.searchParams.get("level") === "campaign") return response({ data: [] });
+      if (url.searchParams.get("level") === "account") {
+        const ids = url.searchParams.has("filtering") ? JSON.parse(url.searchParams.get("filtering")!)[0].value.join(",") : "all";
+        selections.push(`${url.pathname}:${ids}`);
+        const metrics = {
+          "1,2": { unique_ctr: "20", unique_clicks: "30", reach: "150" },
+          "2,3": { unique_ctr: "20", unique_clicks: "40", reach: "200" },
+          "1,2,3": { unique_ctr: "15", unique_clicks: "45", reach: "300" },
+          all: { unique_ctr: "10", unique_clicks: "5", reach: "50" }
+        };
+        return response({ data: [metrics[ids as keyof typeof metrics]] });
+      }
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.rows[0].facebookUniqueCtr.data?.ctr, 20);
+  assert.equal(result.rows[1].facebookUniqueCtr.data?.ctr, 20);
+  assert.equal(result.facebookUniqueCtr.ctr, 50 / 350 * 100);
+  assert.equal(result.facebookUniqueCtr.accounts, 2);
+  assert.equal(result.facebookUniqueCtr.unavailable, false);
+  assert.equal(selections.length, 4); // Duplicate and account-total scopes reuse the same requests.
+  assert.ok(selections.some((selection) => selection.endsWith(":1,2,3")));
+});
+
+test("a whole-account website includes narrower scopes once in the unique CTR total", async () => {
+  const scopes: (string | null)[] = [];
+  const result = await getCampaignPerformance(dashboard(["filtered", "all"]), {
+    env: environment([
+      { siteId: "filtered", facebook: { adAccountId: "123", campaignIds: ["1"] } },
+      { siteId: "all", facebook: { adAccountId: "123" } }
+    ], { META_ADS_ACCESS_TOKEN: "secret" }),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", effective_status: "ACTIVE" }] });
+      if (url.searchParams.get("level") === "campaign") return response({ data: [] });
+      if (url.searchParams.get("level") === "account") {
+        scopes.push(url.searchParams.get("filtering"));
+        return response({ data: [{ unique_ctr: url.searchParams.has("filtering") ? "5" : "8", unique_clicks: "8", reach: "100" }] });
+      }
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.facebookUniqueCtr.ctr, 8);
+  assert.equal(result.facebookUniqueCtr.accounts, 1);
+  assert.equal(scopes.length, 2);
+  assert.equal(scopes.filter((scope) => scope === null).length, 1);
+});
+
+test("missing unique metrics never fall back to ordinary CTR or break Facebook spend", async () => {
+  for (const uniqueResponse of [
+    { data: [{ reach: "100", unique_clicks: "10" }] },
+    { data: [{ reach: "100", unique_clicks: "10", unique_ctr: "10" }], paging: { next: "https://example.com/next" } },
+    { error: "private-provider-response" }
+  ]) {
+    const result = await getCampaignPerformance(dashboard(), {
+      env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+      fetchImpl: async (input) => {
+        const url = new URL(String(input));
+        if (url.searchParams.get("level") === "account") return response(uniqueResponse);
+        if (url.searchParams.get("level") === "campaign") return response({ data: [{ campaign_id: "1", clicks: "15", impressions: "100", spend: "20" }] });
+        if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", effective_status: "ACTIVE" }] });
+        return response({ currency: "EUR", account_status: 1 });
+      }
+    });
+    assert.equal(result.rows[0].facebook.state, "connected");
+    assert.deepEqual(summarizeAds([result.rows[0].facebook]).spend, [{ currency: "EUR", amount: 20 }]);
+    assert.equal(result.rows[0].facebookUniqueCtr.state, "unavailable");
+    assert.equal(result.facebookUniqueCtr.ctr, null);
+    assert.equal(result.facebookUniqueCtr.unavailable, true);
+    assert.doesNotMatch(JSON.stringify(result), /private-provider-response|secret/);
+  }
+});
+
+test("unique CTR preserves Meta's rate, shows no rate without reach and rejects incomplete totals", () => {
+  assert.equal(summarizeUniqueCtr([]).ctr, null);
+  assert.equal(summarizeUniqueCtr([connected({ accountId: "123", uniqueClicks: 0, reach: 0, ctr: null })]).ctr, null);
+  assert.equal(summarizeUniqueCtr([connected({ accountId: "123", uniqueClicks: 1, reach: 3, ctr: 33.333333 })]).ctr, 33.333333);
+  assert.equal(summarizeUniqueCtr([
+    connected({ accountId: "123", uniqueClicks: 10, reach: 100, ctr: 10 }),
+    { state: "unavailable", data: null, message: "Unavailable" }
+  ]).ctr, null);
+});
+
+test("Meta can return no insights for a connected account without inventing a zero unique CTR", async () => {
+  const result = await getCampaignPerformance(dashboard(), {
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+    fetchImpl: async (input) => response(String(input).includes("/insights?") || String(input).includes("/campaigns?")
+      ? { data: [] } : { currency: "EUR", account_status: 1 })
+  });
+  assert.equal(result.rows[0].facebookUniqueCtr.state, "connected");
+  assert.equal(result.rows[0].facebookUniqueCtr.data?.ctr, null);
+  assert.equal(result.facebookUniqueCtr.unavailable, false);
+  assert.equal(result.facebookUniqueCtr.ctr, null);
 });
 
 test("provider failures are isolated and upstream secrets never reach the dashboard", async () => {

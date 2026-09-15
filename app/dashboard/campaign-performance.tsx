@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import {
   getCampaignPerformance, summarizeAds, summarizeCrm,
-  type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type CrmPerformance
+  type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type CrmPerformance, type UniqueCtrSummary
 } from "../../src/campaignPerformance.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 
@@ -10,11 +10,11 @@ const percent = new Intl.NumberFormat("nl-BE", { maximumFractionDigits: 2 });
 const percentage = (value: number | null) => value === null ? "—" : `${percent.format(value)}%`;
 
 export async function CampaignPerformance({ dashboard }: { dashboard: SiteAnalyticsDashboardData }) {
-  const { rows, message } = await getCampaignPerformance(dashboard);
-  return <CampaignPerformanceView rows={rows} message={message} />;
+  const { rows, message, facebookUniqueCtr } = await getCampaignPerformance(dashboard);
+  return <CampaignPerformanceView rows={rows} message={message} facebookUniqueCtr={facebookUniqueCtr} />;
 }
 
-export function CampaignPerformanceView({ rows, message }: { rows: CampaignPerformanceRow[]; message: string }) {
+export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { rows: CampaignPerformanceRow[]; message: string; facebookUniqueCtr: UniqueCtrSummary }) {
   const leads = summarizeCrm(rows.map((row) => row.leads));
   const appointments = summarizeCrm(rows.map((row) => row.appointments));
   const measuredSites = rows.filter((row) => row.websiteCvr !== null);
@@ -23,7 +23,9 @@ export function CampaignPerformanceView({ rows, message }: { rows: CampaignPerfo
   const cvr = visitors > 0 ? conversions / visitors * 100 : null;
   const issues = rows.flatMap((row) => (["google", "facebook", "leads", "appointments"] as const)
     .filter((key) => row[key].state !== "connected")
-    .map((key) => ({ key: `${row.siteId}:${key}`, site: row.name, message: row[key].message })));
+    .map((key) => ({ key: `${row.siteId}:${key}`, site: row.name, message: row[key].message }))
+    .concat(row.facebookUniqueCtr.state === "unavailable"
+      ? [{ key: `${row.siteId}:facebookUniqueCtr`, site: row.name, message: row.facebookUniqueCtr.message }] : []));
 
   return (
     <div className="campaign-performance">
@@ -39,7 +41,7 @@ export function CampaignPerformanceView({ rows, message }: { rows: CampaignPerfo
 
       <section className="campaign-channel-grid" aria-label="Advertentiekanalen">
         <ChannelPanel name="Google" sources={rows.map((row) => row.google)} />
-        <ChannelPanel name="Facebook" sources={rows.map((row) => row.facebook)} />
+        <ChannelPanel name="Facebook" sources={rows.map((row) => row.facebook)} uniqueCtr={facebookUniqueCtr} />
       </section>
 
       <section className="panel campaign-overview" aria-labelledby="campaign-overview-title">
@@ -52,14 +54,15 @@ export function CampaignPerformanceView({ rows, message }: { rows: CampaignPerfo
             <table className="campaign-table">
               <thead><tr>
                 <th scope="col">Website</th><th scope="col">Google live</th><th scope="col">Facebook live</th>
-                <th scope="col">Leads</th><th scope="col">Afspraken</th><th scope="col">Facebook CTR</th>
+                <th scope="col">Leads</th><th scope="col">Afspraken</th><th scope="col">Facebook unieke CTR</th>
                 <th scope="col">Facebook spend</th><th scope="col">Google CTR</th><th scope="col">Google spend</th><th scope="col">Website CVR</th>
               </tr></thead>
               <tbody>{rows.map((row) => <tr key={row.siteId}>
                 <th scope="row"><span className="row-title">{row.name}</span><span className="cell-muted">{displayHost(row.url)}</span></th>
                 <td><CampaignStatus sources={[row.google]} /></td><td><CampaignStatus sources={[row.facebook]} /></td>
                 <td><CrmValue source={row.leads} /></td><td><CrmValue source={row.appointments} /></td>
-                <td><AdValue source={row.facebook} metric="ctr" /></td><td><AdValue source={row.facebook} metric="spend" /></td>
+                <td><DataValue source={row.facebookUniqueCtr}>{percentage(row.facebookUniqueCtr.data?.ctr ?? null)}</DataValue></td>
+                <td><AdValue source={row.facebook} metric="spend" /></td>
                 <td><AdValue source={row.google} metric="ctr" /></td><td><AdValue source={row.google} metric="spend" /></td>
                 <td><strong className="campaign-cvr-value">{percentage(row.websiteCvr)}</strong>{row.websiteCvr === null ? <span className="cell-muted">Geen metingen</span> : null}</td>
               </tr>)}</tbody>
@@ -74,7 +77,8 @@ export function CampaignPerformanceView({ rows, message }: { rows: CampaignPerfo
       </details> : null}
 
       <p className="campaign-method-note">
-        Live = momenteel actief volgens het advertentieplatform. CTR = alle klikken ÷ vertoningen.
+        Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
+        Facebook unieke CTR (alle) = unieke klikkers ÷ uniek bereik, over de volledige gekozen periode.
         Facebook-cijfers omvatten de plaatsingen van het Meta-advertentieaccount, inclusief Instagram.
         Leads en afspraken komen uit de gekoppelde CRM-locatie en zijn niet uitsluitend aan advertenties toegeschreven.
         CRM en website gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
@@ -90,7 +94,7 @@ function CampaignMetric({ label, value, detail, availability }: { label: string;
   </article>;
 }
 
-function ChannelPanel({ name, sources }: { name: string; sources: CampaignSource<AdPerformance>[] }) {
+function ChannelPanel({ name, sources, uniqueCtr }: { name: string; sources: CampaignSource<AdPerformance>[]; uniqueCtr?: UniqueCtrSummary }) {
   const summary = summarizeAds(sources);
   return <article className="panel campaign-channel-panel">
     <div className="panel-heading">
@@ -101,9 +105,14 @@ function ChannelPanel({ name, sources }: { name: string; sources: CampaignSource
       ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary)}`
       : coverage(summary)}</p>
     <dl className="campaign-channel-metrics">
-      <div><dt>{name} CTR</dt><dd>{percentage(summary.ctr)}</dd></div>
+      <div><dt>{uniqueCtr ? `Facebook unieke CTR${uniqueCtr.accounts > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
+        <dd>{percentage(uniqueCtr ? uniqueCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
+    {uniqueCtr?.accounts && uniqueCtr.accounts > 1 ? <p className="campaign-method-note">
+      Gewogen op bereik per advertentieaccount. Personen die via meerdere accounts zijn bereikt, kunnen meermaals meetellen.
+    </p> : null}
+    {uniqueCtr?.unavailable ? <p className="cell-muted">Unieke CTR niet beschikbaar voor alle gekoppelde accounts.</p> : null}
   </article>;
 }
 

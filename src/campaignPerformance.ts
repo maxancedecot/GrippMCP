@@ -15,6 +15,8 @@ export type AdCampaign = {
   spend: number;
 };
 export type AdPerformance = { accountId: string; currency: string; campaigns: AdCampaign[] };
+export type UniqueCtrPerformance = { accountId: string; uniqueClicks: number; reach: number; ctr: number | null };
+export type UniqueCtrSummary = { ctr: number | null; accounts: number; unavailable: boolean };
 export type CrmPerformance = { locationId: string; ids: string[] };
 export type CampaignPerformanceRow = {
   siteId: string;
@@ -22,6 +24,7 @@ export type CampaignPerformanceRow = {
   url: string;
   google: CampaignSource<AdPerformance>;
   facebook: CampaignSource<AdPerformance>;
+  facebookUniqueCtr: CampaignSource<UniqueCtrPerformance>;
   leads: CampaignSource<CrmPerformance>;
   appointments: CampaignSource<CrmPerformance>;
   websiteCvr: number | null;
@@ -55,6 +58,7 @@ const googleRow = z.object({
 });
 const metaCampaign = z.object({ id, effective_status: id, start_time: id.optional(), stop_time: id.optional() });
 const metaInsight = z.object({ campaign_id: id, clicks: numeric.optional(), impressions: numeric, spend: numeric });
+const metaUniqueInsight = z.object({ unique_ctr: numeric, unique_clicks: numeric, reach: numeric });
 const graphPaging = z.object({ next: z.string().optional(), cursors: z.object({ after: id.optional() }).optional() }).optional();
 const MAX_PAGES = 100;
 
@@ -72,7 +76,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   try {
     mappings = parseCampaignSiteMappings(env.CAMPAIGN_PERFORMANCE_SITES);
   } catch {
-    return { rows: [] as CampaignPerformanceRow[], message: "De accountkoppelingen zijn ongeldig. Laat de dashboardbeheerder de configuratie nakijken." };
+    return { rows: [] as CampaignPerformanceRow[], facebookUniqueCtr: summarizeUniqueCtr([]), message: "De accountkoppelingen zijn ongeldig. Laat de dashboardbeheerder de configuratie nakijken." };
   }
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? new Date();
@@ -110,26 +114,68 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   // Do not mix real account data with the WordPress demo sites.
   const sites = dashboard.source.mode === "live" ? dashboard.sites : [];
   const rows: CampaignPerformanceRow[] = [];
+  const uniqueCtrRequests = new Map<string, Promise<CampaignSource<UniqueCtrPerformance>>>();
   // Bound concurrency across sites; each site's providers load independently.
   for (let offset = 0; offset < sites.length; offset += 3) {
     rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
       const mapping = mappings.find((item) => item.siteId === site.id);
-      const [google, facebook, crm] = await Promise.all([
-        loadGoogle(mapping?.google), loadFacebook(mapping?.facebook), loadCrm(mapping?.ghl)
+      const [google, facebook, facebookUniqueCtr, crm] = await Promise.all([
+        loadGoogle(mapping?.google), loadFacebook(mapping?.facebook), loadFacebookUniqueCtr(mapping?.facebook), loadCrm(mapping?.ghl)
       ]);
       return {
-        siteId: site.id, name: site.name, url: site.url, google, facebook, ...crm,
+        siteId: site.id, name: site.name, url: site.url, google, facebook, facebookUniqueCtr, ...crm,
         websiteCvr: site.cvrLinkCount > 0 && site.cvrSourceVisitors > 0 ? site.conversionRatePercent : null,
         websiteVisitors: site.cvrSourceVisitors, websiteConversions: site.cvrConversionVisitors
       };
     })));
   }
+  // Unique people cannot be added across campaigns or overlapping website scopes.
+  // Ask Meta for each account's union of the visible campaign selections instead.
+  const accountScopes = new Map<string, NonNullable<CampaignSiteMapping["facebook"]>>();
+  for (const site of sites) {
+    const config = mappings.find((mapping) => mapping.siteId === site.id)?.facebook;
+    if (!config || !env.META_ADS_ACCESS_TOKEN) continue;
+    const existing = accountScopes.get(config.adAccountId);
+    accountScopes.set(config.adAccountId, !existing ? config : {
+      adAccountId: config.adAccountId,
+      ...(existing.campaignIds && config.campaignIds
+        ? { campaignIds: [...new Set([...existing.campaignIds, ...config.campaignIds])] } : {})
+    });
+  }
+  const facebookUniqueCtr = summarizeUniqueCtr(await Promise.all([...accountScopes.values()].map(loadFacebookUniqueCtr)));
   return {
-    rows,
+    rows, facebookUniqueCtr,
     message: dashboard.source.mode === "demo"
       ? "Verbind eerst een website via de WordPress-plugin en koppel daarna de advertentieaccounts en CRM-locatie."
       : ""
   };
+
+  function loadFacebookUniqueCtr(config: CampaignSiteMapping["facebook"]): Promise<CampaignSource<UniqueCtrPerformance>> {
+    if (!config || !env.META_ADS_ACCESS_TOKEN) return Promise.resolve(missing("Facebook Ads is nog niet gekoppeld."));
+    const campaignIds = config.campaignIds ? [...new Set(config.campaignIds)].sort() : undefined;
+    const key = JSON.stringify([config.adAccountId, campaignIds]);
+    let pending = uniqueCtrRequests.get(key);
+    if (!pending) {
+      pending = safely(async () => {
+        const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
+        const params = new URLSearchParams({
+          fields: "unique_ctr,unique_clicks,reach", level: "account", time_increment: "all_days",
+          time_range: JSON.stringify({ since: dashboard.period.start, until: dashboard.period.end }),
+          ...(campaignIds ? { filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }]) } : {})
+        });
+        const result = z.object({ data: z.array(metaUniqueInsight).max(1), paging: graphPaging }).parse(await request(
+          `https://graph.facebook.com/${version}/act_${config.adAccountId}/insights?${params}`,
+          { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
+        ));
+        if (result.paging?.next) throw new Error("Unique metrics must cover the whole selection in one row");
+        const row = result.data[0];
+        return { accountId: config.adAccountId, uniqueClicks: row?.unique_clicks ?? 0, reach: row?.reach ?? 0,
+          ctr: row && row.reach > 0 ? row.unique_ctr : null };
+      }, "Facebook unieke CTR kon niet worden geladen. Probeer opnieuw of kies een kortere periode.");
+      uniqueCtrRequests.set(key, pending);
+    }
+    return pending;
+  }
 
   async function loadGoogle(config: CampaignSiteMapping["google"]): Promise<CampaignSource<AdPerformance>> {
     if (!config || !env.GOOGLE_ADS_CLIENT_ID || !env.GOOGLE_ADS_CLIENT_SECRET || !env.GOOGLE_ADS_REFRESH_TOKEN) {
@@ -365,4 +411,17 @@ export function summarizeCrm(sources: CampaignSource<CrmPerformance>[]) {
     source.data.ids.forEach((item) => ids.add(`${source.data.locationId}:${item}`));
   }
   return { connected, total: sources.length, count: connected > 0 ? ids.size : null };
+}
+
+// Each input covers one account's complete selection, deduplicated by Meta.
+// Across accounts this is a weighted rate, not a globally deduplicated audience.
+export function summarizeUniqueCtr(sources: CampaignSource<UniqueCtrPerformance>[]): UniqueCtrSummary {
+  const unavailable = sources.some((source) => source.state !== "connected");
+  const values = sources.flatMap((source) => source.data ? [source.data] : []);
+  const reach = values.reduce((sum, value) => sum + value.reach, 0);
+  const uniqueClicks = values.reduce((sum, value) => sum + value.uniqueClicks, 0);
+  return {
+    accounts: sources.length, unavailable,
+    ctr: unavailable || reach === 0 ? null : values.length === 1 ? values[0].ctr : uniqueClicks / reach * 100
+  };
 }
