@@ -1,4 +1,5 @@
 import test from "node:test";
+import { dashboardToday } from "../src/dashboardPeriod.js";
 import assert from "node:assert/strict";
 import { getCampaignPerformance } from "../src/campaignPerformance.js";
 import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
@@ -312,3 +313,28 @@ async function withSiteAnalyticsMemory<T>(callback: () => T | Promise<T>): Promi
     }
   }
 }
+
+
+test("custom website periods filter visitors and project conversions at inclusive date boundaries", async () => {
+  const siteId = `custom-period-${Date.now()}`;
+  await withSiteAnalyticsEnv(siteId, "event-token", async () => {
+    const now = new Date();
+    const today = dashboardToday(now);
+    const yesterday = new Date(Date.parse(today) - 86_400_000).toISOString().slice(0, 10);
+    for (const path of ["/project", "/bedankt-brochure"]) {
+      await recordSiteAnalyticsEvent({ site_id: siteId, event_type: "page_view", visitor_id: "date-visitor", session_id: "date-session",
+        page_view_id: `view-${path}`, page_url: `https://example.com${path}`, path, page_title: path });
+    }
+    await upsertSiteAnalyticsCvrLink({ site_id: siteId, source_path: "/project", target_path: "/bedankt-brochure" });
+    const current = await getSiteAnalyticsDashboardData({ siteId, start: today, end: today, now });
+    const historical = await getSiteAnalyticsDashboardData({ siteId, start: yesterday, end: yesterday, now });
+    const inclusive = await getSiteAnalyticsDashboardData({ siteId, start: yesterday, end: today, now });
+    assert.equal(current.totals.uniqueVisitors, 1);
+    assert.equal(historical.totals.uniqueVisitors, 0);
+    assert.equal(inclusive.totals.uniqueVisitors, 1);
+    assert.deepEqual(historical.dailyRows.map((row) => row.date), [yesterday]);
+    assert.deepEqual(inclusive.dailyRows.map((row) => row.date), [yesterday, today]);
+    assert.equal(cvrOverviewRowsFromLinks(current.cvrLinks)[0].brochure.visitors, 1);
+    assert.equal(cvrOverviewRowsFromLinks(historical.cvrLinks)[0].brochure.visitors, 0);
+  });
+});

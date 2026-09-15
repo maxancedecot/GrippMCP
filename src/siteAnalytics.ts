@@ -1,5 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readJsonCache, writeJsonCache } from "./jsonCache.js";
+import { siteAnalyticsPeriod, type SiteAnalyticsPeriod } from "./dashboardPeriod.js";
+export type { SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 
 export type SiteAnalyticsConfiguredSite = {
   id: string;
@@ -18,13 +20,6 @@ export type SiteAnalyticsRegistrationResult = {
 export type SiteAnalyticsSource = {
   mode: "live" | "demo";
   message: string;
-};
-
-export type SiteAnalyticsPeriod = {
-  days: number;
-  start: string;
-  end: string;
-  label: string;
 };
 
 export type SiteAnalyticsMetricSummary = {
@@ -126,6 +121,8 @@ export type SiteAnalyticsDashboardData = {
 
 export type SiteAnalyticsDashboardOptions = {
   days?: number;
+  start?: string;
+  end?: string;
   siteId?: string;
   now?: Date;
 };
@@ -238,8 +235,6 @@ const SITE_ANALYTICS_VERSION = 1;
 const SITE_ANALYTICS_CACHE_PREFIX = `site-analytics:v${SITE_ANALYTICS_VERSION}`;
 const SITE_ANALYTICS_REGISTRY_CACHE_KEY = `${SITE_ANALYTICS_CACHE_PREFIX}:registry`;
 const SITE_ANALYTICS_CVR_LINKS_CACHE_KEY = `${SITE_ANALYTICS_CACHE_PREFIX}:cvr-links`;
-const DEFAULT_DASHBOARD_DAYS = 30;
-const MAX_DASHBOARD_DAYS = 90;
 const MAX_STRING_LENGTH = 300;
 const MAX_TITLE_LENGTH = 180;
 const MAX_ENGAGEMENT_DELTA_MS = 60 * 60 * 1000;
@@ -461,8 +456,7 @@ export async function recordSiteAnalyticsEvent(payload: unknown): Promise<{ acce
 
 export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashboardOptions = {}): Promise<SiteAnalyticsDashboardData> {
   const now = options.now ?? new Date();
-  const days = normalizeDashboardDays(options.days);
-  const period = siteAnalyticsPeriod(days, now);
+  const period = siteAnalyticsPeriod(options, now);
   const configuredSites = await getSiteAnalyticsSites();
   const publicSites = configuredSites.map(({ token: _token, ...site }) => site);
   const selectedSiteId = normalizeOptionalIdentifier(options.siteId);
@@ -1342,17 +1336,6 @@ function createDemoSiteAnalyticsDashboardData(
   };
 }
 
-function siteAnalyticsPeriod(days: number, now: Date): SiteAnalyticsPeriod {
-  const end = dateKeyForDate(now);
-  const start = dateKeyForDate(addDays(now, -(days - 1)));
-  return {
-    days,
-    start,
-    end,
-    label: `Laatste ${days} dagen`
-  };
-}
-
 function dateKeysForPeriod(period: SiteAnalyticsPeriod) {
   const keys: string[] = [];
   let cursor = dateFromKey(period.start);
@@ -1364,14 +1347,6 @@ function dateKeysForPeriod(period: SiteAnalyticsPeriod) {
   }
 
   return keys;
-}
-
-function normalizeDashboardDays(days: number | undefined) {
-  if (!days || !Number.isFinite(days)) {
-    return DEFAULT_DASHBOARD_DAYS;
-  }
-
-  return Math.max(1, Math.min(MAX_DASHBOARD_DAYS, Math.round(days)));
 }
 
 function normalizeEventType(value: string | undefined): SiteAnalyticsEventType | "" {

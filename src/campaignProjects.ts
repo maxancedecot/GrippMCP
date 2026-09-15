@@ -73,13 +73,13 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         title: metrics?.sourceTitle || candidate?.title || title || (path === "/" ? site.name : path),
         visitors, leads: metrics?.brochure.visitors ?? null, appointments: metrics?.appointment.visitors ?? null,
         cvr: metrics ? (metrics.sourceVisitors > 0 ? (metrics.brochure.visitors + metrics.appointment.visitors) / metrics.sourceVisitors * 100 : 0) : null,
-        hasConversionMapping: !!metrics, facebookState: site.facebookUniqueCtr.state, campaigns: []
+        hasConversionMapping: !!metrics, facebookState: site.facebookLinkCtr.state, campaigns: []
       };
       projects.set(key, row);
       return row;
     };
     for (const project of conversions.filter((row) => row.siteId === site.siteId)) ensureProject(project.sourcePath, project.sourceTitle);
-    const active = site.facebookUniqueCtr.data?.campaigns
+    const active = site.facebookLinkCtr.data?.campaigns
       ?? site.facebook.data?.campaigns.filter((campaign) => campaign.live === true).map((campaign) => ({ ...campaign, ctr: null })) ?? [];
     for (const campaign of active) {
       const pages = site.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
@@ -93,7 +93,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         const accountId = site.facebook.data!.accountId;
         if (project.campaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
         project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr: campaign.ctr,
-          unavailable: site.facebookUniqueCtr.state === "unavailable", projectCount: uniquePages.length });
+          unavailable: site.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
       }
     }
   }

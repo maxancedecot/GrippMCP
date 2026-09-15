@@ -17,6 +17,7 @@ import { DashboardFrame } from "../dashboard-frame.js";
 import { CvrMappingBoard } from "./cvr-mapping-board.js";
 import { CvrTrendChart } from "./cvr-trend-chart.js";
 import { CampaignPerformance } from "./campaign-performance.js";
+import { dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +26,9 @@ export const metadata: Metadata = {
   description: "Websiteprestaties en campagneperformance uit Google Ads, Facebook Ads en websiteconversies."
 };
 
-type DashboardSearchParams = Record<string, string | string[] | undefined>;
 type DashboardFormValue = FormDataEntryValue | null;
 
-const periodOptions = [7, 14, 30, 90];
+const periodOptions = DASHBOARD_PERIOD_OPTIONS;
 
 const numberFormatter = new Intl.NumberFormat("nl-BE");
 const percentFormatter = new Intl.NumberFormat("nl-BE", {
@@ -66,11 +66,15 @@ async function deleteCvrLinkAction(formData: FormData) {
 
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
-  const days = dashboardDaysFromParams(params);
+  const now = new Date();
+  const selection = dashboardPeriodSelection(params, now);
+  const { days } = selection.period;
+  const customPeriod = selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined;
+  const analyticsOptions = { days, ...customPeriod, now };
   const siteId = firstParam(params.site);
   const view = firstParam(params.tab) === "campaigns" ? "campaigns" : "website";
-  const dashboardPromise = getSiteAnalyticsDashboardData({ days, siteId });
-  const connectedDashboardPromise = siteId ? getSiteAnalyticsDashboardData({ days }) : dashboardPromise;
+  const dashboardPromise = getSiteAnalyticsDashboardData({ ...analyticsOptions, siteId });
+  const connectedDashboardPromise = siteId ? getSiteAnalyticsDashboardData(analyticsOptions) : dashboardPromise;
   const [dashboard, connectedDashboard, configuredSites] = await Promise.all([
     dashboardPromise,
     connectedDashboardPromise,
@@ -107,7 +111,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <a
               key={tab}
               className={`dashboard-tab ${view === tab ? "dashboard-tab--active" : ""}`}
-              href={dashboardHref({ params: { ...params, tab: tab === "campaigns" ? tab : undefined }, days, siteId: dashboard.selectedSiteId })}
+              href={dashboardHref({ params: { ...params, tab: tab === "campaigns" ? tab : undefined }, days, siteId: dashboard.selectedSiteId, customPeriod })}
               aria-current={view === tab ? "page" : undefined}
             >
               {tab === "campaigns" ? "Campagneperformance" : "Websiteprestaties"}
@@ -117,24 +121,35 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
 
         {view === "website" && dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 
+        {selection.error ? <p className="data-notice" role="alert">{selection.error}</p> : null}
+
         <div className="site-analytics-controls">
           <nav className="dashboard-tabs" aria-label="Periode">
             {periodOptions.map((periodDays) => (
               <a
                 key={periodDays}
-                className={`dashboard-tab ${dashboard.period.days === periodDays ? "dashboard-tab--active" : ""}`}
+                className={`dashboard-tab ${!selection.custom && dashboard.period.days === periodDays ? "dashboard-tab--active" : ""}`}
                 href={dashboardHref({ params, days: periodDays, siteId: dashboard.selectedSiteId })}
-                aria-current={dashboard.period.days === periodDays ? "page" : undefined}
+                aria-current={!selection.custom && dashboard.period.days === periodDays ? "page" : undefined}
               >
                 {periodDays}d
               </a>
             ))}
           </nav>
 
+          <form className="period-form dashboard-date-range" action="/dashboard" method="get" aria-label="Eigen periode kiezen">
+            {view === "campaigns" ? <input type="hidden" name="tab" value="campaigns" /> : null}
+            {dashboard.selectedSiteId ? <input type="hidden" name="site" value={dashboard.selectedSiteId} /> : null}
+            <label>Van<input type="date" name="start" required defaultValue={dashboard.period.start} max={dashboardToday(now)} /></label>
+            <label>Tot en met<input type="date" name="end" required defaultValue={dashboard.period.end} max={dashboardToday(now)} /></label>
+            <button type="submit">Toepassen</button>
+            <span>Max. {MAX_DASHBOARD_DAYS} dagen per periode</span>
+          </form>
+
           <nav className="dashboard-tabs site-analytics-site-tabs" aria-label="Sites">
             <a
               className={`dashboard-tab ${!dashboard.selectedSiteId ? "dashboard-tab--active" : ""}`}
-              href={dashboardHref({ params, days: dashboard.period.days })}
+              href={dashboardHref({ params, days: dashboard.period.days, customPeriod })}
               aria-current={!dashboard.selectedSiteId ? "page" : undefined}
             >
               Alle
@@ -143,7 +158,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               <a
                 key={site.id}
                 className={`dashboard-tab ${dashboard.selectedSiteId === site.id ? "dashboard-tab--active" : ""}`}
-                href={dashboardHref({ params, days: dashboard.period.days, siteId: site.id })}
+                href={dashboardHref({ params, days: dashboard.period.days, siteId: site.id, customPeriod })}
                 aria-current={dashboard.selectedSiteId === site.id ? "page" : undefined}
               >
                 {site.name}
@@ -203,7 +218,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           pages={dashboard.cvrPageCandidates}
           links={dashboard.cvrLinks}
           selectedSiteId={dashboard.selectedSiteId}
-          returnTo={dashboardHref({ params, days: dashboard.period.days, siteId: dashboard.selectedSiteId })}
+          returnTo={dashboardHref({ params, days: dashboard.period.days, siteId: dashboard.selectedSiteId, customPeriod })}
           createAction={createCvrLinkAction}
           deleteAction={deleteCvrLinkAction}
         />
@@ -342,47 +357,12 @@ function ScrollBar({ value }: { value: number }) {
   );
 }
 
-function dashboardDaysFromParams(params: DashboardSearchParams) {
-  const value = Number(firstParam(params.days));
-  return periodOptions.includes(value) ? value : 30;
-}
-
-function dashboardHref({ params, days, siteId }: { params: DashboardSearchParams; days: number; siteId?: string }) {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (key === "days" || key === "site") {
-      continue;
-    }
-    for (const item of paramValues(value)) {
-      search.append(key, item);
-    }
-  }
-
-  if (days !== 30) {
-    search.set("days", String(days));
-  }
-  if (siteId) {
-    search.set("site", siteId);
-  }
-
-  const query = search.toString();
-  return query ? `/dashboard?${query}` : "/dashboard";
-}
-
 function periodLabel(period: SiteAnalyticsPeriod) {
   return `${formatDate(period.start)} - ${formatDate(period.end)}`;
 }
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
-}
-
-function paramValues(value: string | string[] | undefined) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  return value ? [value] : [];
 }
 
 function stringFromFormValue(value: DashboardFormValue) {
