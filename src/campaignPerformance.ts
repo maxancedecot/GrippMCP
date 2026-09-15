@@ -142,7 +142,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   return {
     rows, facebookUniqueCtr,
     message: dashboard.source.mode === "demo"
-      ? "Verbind eerst een website via de WordPress-plugin en koppel daarna de advertentieaccounts."
+      ? "Verbind eerst een website via de trackingcode of WordPress-plugin en koppel daarna de advertentieaccounts."
       : ""
   };
 

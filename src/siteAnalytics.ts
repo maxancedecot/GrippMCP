@@ -322,9 +322,24 @@ export function verifySiteAnalyticsRegistrationToken(token: string) {
 
 export async function registerSiteAnalyticsSite(payload: unknown, options: { now?: Date } = {}): Promise<SiteAnalyticsRegistrationResult> {
   const registration = normalizeSiteAnalyticsRegistration(payload);
+  return saveSiteAnalyticsRegistration(registration, options);
+}
+
+export async function registerBrowserSiteAnalyticsSite(origin: string): Promise<SiteAnalyticsPublicSite> {
+  const registration = normalizeSiteAnalyticsRegistration({
+    site_url: origin, installation_id: randomBytes(32).toString("hex")
+  });
+  // Stable identity for simultaneous first visits; no guessable installation ID can retrieve its private token via /register.
+  registration.id = `browser-${createHash("sha256").update(registration.url).digest("hex").slice(0, 24)}`;
+  return (await saveSiteAnalyticsRegistration(registration)).site;
+}
+
+async function saveSiteAnalyticsRegistration(
+  registration: ReturnType<typeof normalizeSiteAnalyticsRegistration>, options: { now?: Date } = {}
+): Promise<SiteAnalyticsRegistrationResult> {
   const now = (options.now ?? new Date()).toISOString();
   const registry = await readSiteAnalyticsRegistry();
-  const existingIndex = registry.sites.findIndex((site) => site.installationHash === registration.installationHash);
+  const existingIndex = registry.sites.findIndex((site) => site.id === registration.id || site.installationHash === registration.installationHash);
   const existingSite = existingIndex >= 0 ? registry.sites[existingIndex] : undefined;
   const site: SiteAnalyticsRegisteredSite = existingSite
     ? {

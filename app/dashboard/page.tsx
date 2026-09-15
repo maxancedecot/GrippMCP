@@ -87,7 +87,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
       <main className="dashboard-shell site-analytics-shell">
         <header className="dashboard-header">
           <div>
-            <p className="eyebrow">{view === "campaigns" ? "Marketingoverzicht" : "WordPress-analyse"}</p>
+            <p className="eyebrow">{view === "campaigns" ? "Marketingoverzicht" : "Website-analyse"}</p>
             <h1>{view === "campaigns" ? "Campagneperformance" : "Websiteprestaties"}</h1>
           </div>
           <div className="header-meta">
@@ -95,7 +95,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               WordPress-plugin
             </a>
             <span className={`source-badge source-badge--${dashboard.source.mode}`}>
-              {dashboard.source.mode === "live" ? "WordPress verbonden" : "WordPress-demo"}
+              {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}
             </span>
             <span>{dashboard.period.label}</span>
             <span>Bijgewerkt {dashboard.lastUpdated}</span>
@@ -157,7 +157,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <CampaignPerformance dashboard={dashboard} />
           </Suspense>
         ) : <>
-        <section className="metric-grid site-analytics-metric-grid" aria-label="WordPress KPI's">
+        <section className="metric-grid site-analytics-metric-grid" aria-label="Website KPI's">
           <MetricCard label="CVR" value={`${formatConversionRate(overallConversionRatePercent)}%`} detail="Conversieratio" tone="good" />
           <MetricCard label="Bezoekers" value={formatNumber(dashboard.totals.uniqueVisitors)} detail="Unieke bezoekers" tone="blue" />
           <MetricCard label="Sessies" value={formatNumber(dashboard.totals.sessions)} detail="Unieke sessies" tone="neutral" />
