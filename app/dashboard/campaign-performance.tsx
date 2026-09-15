@@ -12,6 +12,15 @@ const number = new Intl.NumberFormat("nl-BE");
 const percent = new Intl.NumberFormat("nl-BE", { maximumFractionDigits: 2 });
 const percentage = (value: number | null) => value === null ? "—" : `${percent.format(value)}%`;
 
+function ctrColor(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return undefined;
+  const belowTarget = value < 1;
+  // Pale near 1%; increase the colour continuously to full red at 0% or green at 3%.
+  const distance = Math.min(1, belowTarget ? 1 - value : (value - 1) / 2);
+  const intensity = (40 + distance * 60).toFixed(2);
+  return `color-mix(in srgb, var(--${belowTarget ? "danger" : "green"}) ${intensity}%, var(--ink))`;
+}
+
 export async function CampaignPerformance({ dashboard }: { dashboard: SiteAnalyticsDashboardData }) {
   const { rows, message, facebookLinkCtr, projects, unmatchedCampaigns } = await getCampaignPerformance(dashboard);
   return <CampaignPerformanceView rows={rows} message={message} facebookLinkCtr={facebookLinkCtr} projects={projects} unmatchedCampaigns={unmatchedCampaigns} />;
@@ -86,7 +95,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
             }))} />
           </div>
         )}
-        <p className="campaign-method-note">Beweeg over de CTR voor de campagnenaam. Spend geldt voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
+        <p className="campaign-method-note">CTR onder 1% is rood, vanaf 1% groen; de kleur wordt sterker naarmate de waarde verder van 1% ligt. Beweeg over de CTR voor de campagnenaam. Spend geldt voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
         {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
           <h3>Nog aan een projectpagina te koppelen</h3>
           <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.siteId}:${campaign.campaignId}`}>
@@ -177,7 +186,7 @@ function ProjectCampaignMetric({ project, metric }: { project: CampaignProjectRo
 }
 
 function CampaignCtr({ name, ctr, detail = "" }: { name: string; ctr: number | null; detail?: string }) {
-  return <strong className="campaign-ctr-trigger" tabIndex={0} title={`${name}${detail ? `\n${detail}` : ""}`}
+  return <strong className="campaign-ctr-trigger" style={{ color: ctrColor(ctr) }} tabIndex={0} title={`${name}${detail ? `\n${detail}` : ""}`}
     aria-label={`${name}: ${percentage(ctr)}${detail ? `. ${detail}` : ""}`}>{percentage(ctr)}</strong>;
 }
 
@@ -200,7 +209,7 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
     {linkCtr ? <p className="campaign-channel-description">CTR (taux de clics sur le lien) uit Ads Manager, per lopende Ledoux-campagne in de gekozen periode.</p> : null}
     <dl className="campaign-channel-metrics">
       <div><dt>{linkCtr ? `Facebook link-CTR${linkCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
-        <dd>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
+        <dd style={{ color: ctrColor(linkCtr ? linkCtr.ctr : summary.ctr) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
     {linkCtr && linkCtr.campaigns > 1 ? <p className="campaign-method-note">
@@ -253,7 +262,9 @@ function ConversionValue({ source }: { source: CampaignSource<WebsiteConversionP
 
 function AdValue({ source, metric }: { source: CampaignSource<AdPerformance>; metric: "ctr" | "spend" }) {
   const summary = summarizeAds([source]);
-  return <DataValue source={source}>{metric === "ctr" ? percentage(summary.ctr) : formatSpend(summary.spend)}</DataValue>;
+  return <DataValue source={source}>{metric === "ctr"
+    ? <span style={{ color: ctrColor(summary.ctr) }}>{percentage(summary.ctr)}</span>
+    : formatSpend(summary.spend)}</DataValue>;
 }
 
 function DataValue({ source, children }: { source: CampaignSource<unknown>; children: ReactNode }) {
