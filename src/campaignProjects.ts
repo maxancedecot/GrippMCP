@@ -1,0 +1,104 @@
+import { z } from "zod";
+import type { CampaignPerformanceRow, CampaignSource } from "./campaignPerformance.js";
+import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
+import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
+
+export const CAMPAIGN_PROJECT_MATCHES_KEY = "campaign-project-matches:v1";
+const identifier = z.string().trim().min(1);
+const projectPath = identifier.refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"), "Use a local project path")
+  .transform(normalizeProjectPath);
+const matchSchema = z.object({
+  siteId: identifier,
+  accountId: identifier.regex(/^\d+$/),
+  campaignId: identifier.regex(/^\d+$/),
+  sourcePaths: z.array(projectPath).min(1).transform((paths) => [...new Set(paths)])
+}).strict();
+export type CampaignProjectMatch = z.infer<typeof matchSchema>;
+
+export function parseCampaignProjectMatches(value: unknown): CampaignProjectMatch[] {
+  const matches = z.array(matchSchema).parse(value ?? []);
+  const keys = matches.map((match) => `${match.siteId}:${match.accountId}:${match.campaignId}`);
+  if (new Set(keys).size !== keys.length) throw new Error("Duplicate campaign/project mapping");
+  return matches;
+}
+
+export function normalizeProjectPath(value: string): string {
+  const url = new URL(value, "https://project.local");
+  const path = url.pathname.replace(/\/+$/, "") || "/";
+  const slug = url.searchParams.get("p_slug");
+  return path + (slug !== null ? `?${new URLSearchParams({ p_slug: slug })}` : "");
+}
+
+export type ProjectCampaign = {
+  id: string;
+  accountId: string;
+  name: string;
+  ctr: number | null;
+  unavailable: boolean;
+  projectCount: number;
+};
+export type CampaignProjectRow = {
+  key: string;
+  siteId: string;
+  siteName: string;
+  sourcePath: string;
+  url: string;
+  title: string;
+  visitors: number | null;
+  leads: number | null;
+  appointments: number | null;
+  cvr: number | null;
+  hasConversionMapping: boolean;
+  facebookState: CampaignSource<unknown>["state"];
+  campaigns: ProjectCampaign[];
+};
+export type UnmatchedProjectCampaign = { siteId: string; siteName: string; campaignId: string; campaignName: string };
+
+export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, sites: CampaignPerformanceRow[]) {
+  const projects = new Map<string, CampaignProjectRow>();
+  const unmatchedCampaigns: UnmatchedProjectCampaign[] = [];
+  const conversions = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
+  for (const site of sites) {
+    const ensureProject = (sourcePath: string, title = ""): CampaignProjectRow => {
+      const path = normalizeProjectPath(sourcePath);
+      const key = `${site.siteId}:${path}`;
+      const existing = projects.get(key);
+      if (existing) return existing;
+      const metrics = conversions.find((row) => row.siteId === site.siteId && normalizeProjectPath(row.sourcePath) === path);
+      const candidate = dashboard.cvrPageCandidates?.find((row) => row.siteId === site.siteId && normalizeProjectPath(row.path) === path);
+      const visitors = metrics?.sourceVisitors ?? candidate?.uniqueVisitors ?? null;
+      const row: CampaignProjectRow = {
+        key, siteId: site.siteId, siteName: site.name, sourcePath: metrics?.sourcePath ?? sourcePath,
+        url: new URL(metrics?.sourcePath ?? sourcePath, site.url).toString(),
+        title: metrics?.sourceTitle || candidate?.title || title || (path === "/" ? site.name : path),
+        visitors, leads: metrics?.brochure.visitors ?? null, appointments: metrics?.appointment.visitors ?? null,
+        cvr: metrics ? (metrics.sourceVisitors > 0 ? (metrics.brochure.visitors + metrics.appointment.visitors) / metrics.sourceVisitors * 100 : 0) : null,
+        hasConversionMapping: !!metrics, facebookState: site.facebookUniqueCtr.state, campaigns: []
+      };
+      projects.set(key, row);
+      return row;
+    };
+    for (const project of conversions.filter((row) => row.siteId === site.siteId)) ensureProject(project.sourcePath, project.sourceTitle);
+    const active = site.facebookUniqueCtr.data?.campaigns
+      ?? site.facebook.data?.campaigns.filter((campaign) => campaign.live === true).map((campaign) => ({ ...campaign, ctr: null })) ?? [];
+    for (const campaign of active) {
+      const pages = site.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
+      const uniquePages = [...new Map(pages.map((page) => [normalizeProjectPath(page.path), page])).values()];
+      if (uniquePages.length === 0) {
+        unmatchedCampaigns.push({ siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
+        continue;
+      }
+      for (const page of uniquePages) {
+        const project = ensureProject(page.path, page.title);
+        const accountId = site.facebook.data!.accountId;
+        if (project.campaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
+        project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr: campaign.ctr,
+          unavailable: site.facebookUniqueCtr.state === "unavailable", projectCount: uniquePages.length });
+      }
+    }
+  }
+  return {
+    projects: [...projects.values()].sort((a, b) => a.siteName.localeCompare(b.siteName) || a.title.localeCompare(b.title)),
+    unmatchedCampaigns
+  };
+}

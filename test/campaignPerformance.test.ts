@@ -5,6 +5,7 @@ import {
   type AdPerformance, type CampaignSiteMapping, type CampaignSource
 } from "../src/campaignPerformance.js";
 import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
+import { parseCampaignProjectMatches } from "../src/campaignProjects.js";
 import type { SiteAnalyticsCvrLinkRow, SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
 
 const period = { days: 7, start: "2026-09-08", end: "2026-09-14", label: "Laatste 7 dagen" };
@@ -42,6 +43,16 @@ test("campaign mappings reject ambiguous sites, empty scopes and unsafe IDs", ()
   assert.throws(() => parseCampaignSiteMappings('[{"siteId":"a","google":{"customerId":"123 OR 1=1"}}]'));
   assert.throws(() => parseCampaignSiteMappings('[{"siteId":"a","facebook":{"adAccountId":"123","campaignIds":[]}}]'));
   assert.equal(parseCampaignSiteMappings('[{"siteId":"a","google":{"customerId":"123-456-7890"}}]')[0].google?.customerId, "1234567890");
+});
+
+test("saved project matches require scoped campaign IDs and local project paths", () => {
+  const match = { siteId: "site-a", accountId: "123", campaignId: "456", sourcePaths: ["/home/?utm_source=facebook&p_slug=one", "/home?p_slug=one"] };
+  assert.deepEqual(parseCampaignProjectMatches([match])[0].sourcePaths, ["/home?p_slug=one"]);
+  assert.throws(() => parseCampaignProjectMatches([match, match]));
+  for (const sourcePaths of [[], ["https://other.example/home"], ["//other.example/home"], ["/\\other.example/home"]]) {
+    assert.throws(() => parseCampaignProjectMatches([{ ...match, sourcePaths }]));
+  }
+  assert.equal(parseCampaignProjectMatches([match, { ...match, siteId: "site-b" }]).length, 2);
 });
 
 test("unconfigured providers never fetch and do not invent zeros or live statuses", async () => {
@@ -626,4 +637,93 @@ test("cached project destinations survive a temporary Meta failure while CTR and
     if (previousStore === undefined) delete process.env.JSON_CACHE_STORE;
     else process.env.JSON_CACHE_STORE = previousStore;
   }
+});
+
+test("saved campaign matches join the exact project counters and keep shared campaigns from duplicating project totals", async () => {
+  const data = dashboard(["site-a", "site-b"]);
+  data.cvrLinks = [
+    conversionLink("site-a", "/bedankt-brochure", 10, "/project-one/"),
+    conversionLink("site-a", "/bedankt-afspraak", 3, "/project-one/"),
+    conversionLink("site-a", "/bedankt-brochure", 2, "/project-two/"),
+    conversionLink("site-a", "/bedankt-afspraak", 1, "/project-two/"),
+    conversionLink("site-b", "/bedankt-brochure", 9, "/project-one/")
+  ];
+  let adRequests = 0;
+  const result = await getCampaignPerformance(data, {
+    env: environment([
+      { siteId: "site-a", facebook: { adAccountId: "123", campaignIds: ["1", "2", "3"] } },
+      { siteId: "site-b", facebook: { adAccountId: "456", campaignIds: ["1"] } }
+    ], { META_ADS_ACCESS_TOKEN: "secret" }),
+    projectMatches: [
+      { siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/project-one"] },
+      { siteId: "site-a", accountId: "123", campaignId: "2", sourcePaths: ["/project-one/"] },
+      { siteId: "site-a", accountId: "123", campaignId: "3", sourcePaths: ["/project-one/", "/project-two/"] },
+      { siteId: "site-b", accountId: "456", campaignId: "1", sourcePaths: ["/project-one/"] },
+      { siteId: "invisible-site", accountId: "123", campaignId: "1", sourcePaths: ["/wrong-project/"] }
+    ],
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      const ids = url.pathname.includes("act_456") ? ["1"] : ["1", "2", "3"];
+      if (url.pathname.endsWith("/campaigns")) return response({ data: ids.map((id) => ({ id, name: `Ledoux ${id}`, effective_status: "ACTIVE" })) });
+      if (isUniqueRequest(url)) return response({ data: ids.map((id) => ({ campaign_id: id, campaign_name: `Ledoux ${id}`, unique_link_clicks_ctr: Number(id) * 2.123456, reach: "100" })) });
+      if (url.pathname.endsWith("/insights")) return response({ data: [] });
+      if (url.pathname.endsWith("/ads")) { adRequests++; return new Response("Meta unavailable", { status: 503 }); }
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(adRequests, 0, "Saved project matches do not depend on another ad-link request");
+  assert.deepEqual(result.unmatchedCampaigns, []);
+  assert.equal(result.projects.length, 3);
+  const first = result.projects.find((project) => project.key === "site-a:/project-one")!;
+  assert.deepEqual([first.visitors, first.leads, first.appointments, first.cvr], [50, 10, 3, 26]);
+  assert.deepEqual(first.campaigns.map((campaign) => [campaign.id, campaign.ctr, campaign.projectCount]), [["1", 2.123456, 1], ["2", 4.246912, 1], ["3", 6.370368, 2]]);
+  assert.equal(result.projects.find((project) => project.key === "site-b:/project-one")?.leads, 9);
+  assert.equal(result.projects.reduce((sum, project) => sum + (project.leads ?? 0), 0), 21);
+});
+
+test("homepage aliases persist by campaign ID without guessing other projects or using paused campaigns", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt", 3, "/home"), conversionLink("site-a", "/bedankt", 0, "/other-project")];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+    projectMatches: [
+      { siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/home"] },
+      { siteId: "site-a", accountId: "123", campaignId: "2", sourcePaths: ["/other-project"] },
+      { siteId: "site-a", accountId: "999", campaignId: "3", sourcePaths: ["/other-project"] }
+    ],
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/campaigns")) return response({ data: ["1", "2", "3"].map((id) => ({ id, name: "Ledoux same project name", effective_status: id === "2" ? "PAUSED" : "ACTIVE" })) });
+      if (isUniqueRequest(url)) return response({ data: ["1", "3"].map((id) => ({ campaign_id: id, campaign_name: "Ledoux", unique_link_clicks_ctr: "5.5", reach: "100" })) });
+      if (url.pathname.endsWith("/ads")) { assert.match(url.pathname, /\/3\/ads$/); return response({ data: [] }); }
+      if (url.pathname.endsWith("/insights")) return response({ data: [] });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.projects.find((project) => project.key === "site-a:/home")?.campaigns[0].id, "1");
+  assert.deepEqual(result.projects.find((project) => project.key === "site-a:/other-project")?.campaigns, []);
+  assert.deepEqual(result.unmatchedCampaigns.map((campaign) => campaign.campaignId), ["3"]);
+});
+
+test("a linked landing page without conversion setup does not inherit website leads, appointments or CVR", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 25, "/existing-project")];
+  data.cvrPageCandidates = [{ siteId: "site-a", siteName: "site-a", path: "/new-project/", title: "New project", uniqueVisitors: 12, pageViews: 30 }];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+    projectMatches: [{ siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/new-project/"] }],
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", name: "Ledoux new project", effective_status: "ACTIVE" }] });
+      if (isUniqueRequest(url)) return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux new project", unique_link_clicks_ctr: "2", reach: "100" }] });
+      if (url.pathname.endsWith("/insights")) return response({ data: [] });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  const project = result.projects.find((project) => project.key === "site-a:/new-project")!;
+  assert.equal(project.title, "New project");
+  assert.equal(project.visitors, 12);
+  assert.deepEqual([project.leads, project.appointments, project.cvr], [null, null, null]);
+  assert.equal(project.campaigns[0].ctr, 2);
+  assert.equal(result.rows[0].leads.data?.count, 25);
 });

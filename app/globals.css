@@ -1595,6 +1595,26 @@ td .inline-bar {
   min-width: 1240px;
 }
 
+.campaign-project-table {
+  min-width: 1000px;
+}
+
+.campaign-project-table tbody th {
+  max-width: 320px;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.campaign-project-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.campaign-unmatched {
+  margin-top: 20px;
+}
+
 .campaign-table tbody th {
   text-transform: none;
   letter-spacing: 0;

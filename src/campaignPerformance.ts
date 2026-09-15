@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
 import { cvrOverviewRowsFromLinks, type CvrOverviewRow } from "./siteAnalyticsConversions.js";
 import { readJsonCache, writeJsonCache } from "./jsonCache.js";
+import { CAMPAIGN_PROJECT_MATCHES_KEY, campaignProjectOverview, parseCampaignProjectMatches, type CampaignProjectMatch } from "./campaignProjects.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -59,6 +60,7 @@ type Options = {
   fetchImpl?: typeof fetch;
   now?: Date;
   cacheCampaignPages?: boolean;
+  projectMatches?: CampaignProjectMatch[];
 };
 
 const numeric = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/)]).transform(Number).pipe(z.number().finite().nonnegative());
@@ -87,7 +89,13 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   try {
     mappings = parseCampaignSiteMappings(env.CAMPAIGN_PERFORMANCE_SITES);
   } catch {
-    return { rows: [] as CampaignPerformanceRow[], facebookUniqueCtr: summarizeUniqueCtr([]), message: "De accountkoppelingen zijn ongeldig. Laat de dashboardbeheerder de configuratie nakijken." };
+    return { rows: [] as CampaignPerformanceRow[], ...campaignProjectOverview(dashboard, []), facebookUniqueCtr: summarizeUniqueCtr([]), message: "De accountkoppelingen zijn ongeldig. Laat de dashboardbeheerder de configuratie nakijken." };
+  }
+  let projectMatches: CampaignProjectMatch[] = [], projectMessage = "";
+  try {
+    projectMatches = parseCampaignProjectMatches(options.projectMatches ?? (options.fetchImpl ? [] : await readJsonCache(CAMPAIGN_PROJECT_MATCHES_KEY)));
+  } catch {
+    projectMessage = "De opgeslagen projectkoppelingen konden niet worden geladen. Alleen gecontroleerde advertentielinks worden gebruikt.";
   }
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? new Date();
@@ -123,14 +131,22 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   for (let offset = 0; offset < sites.length; offset += 3) {
     rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
       const mapping = mappings.find((item) => item.siteId === site.id);
+      const explicitMatches = projectMatches.filter((match) => match.siteId === site.id && match.accountId === mapping?.facebook?.adAccountId);
       const facebookRequest = loadFacebook(mapping?.facebook);
       const [google, facebook, facebookUniqueCtr, destinations] = await Promise.all([
-        loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookUniqueCtr), facebookRequest.then(loadFacebookDestinations)
+        loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookUniqueCtr),
+        facebookRequest.then((source) => loadFacebookDestinations(source.data ? {
+          ...source, data: { ...source.data, campaigns: source.data.campaigns.filter((campaign) => !explicitMatches.some((match) => match.campaignId === campaign.id)) }
+        } : source))
       ]);
-      const facebookCampaignPages: CampaignSource<CampaignPageMatch[]> = destinations.data ? {
-        state: "connected", message: destinations.message,
-        data: destinations.data.map((campaign) => ({ campaignId: campaign.campaignId,
-          pages: matchCampaignPages(site.url, campaign.urls, conversionRows.filter((project) => project.siteId === site.id)) }))
+      const siteProjects = conversionRows.filter((project) => project.siteId === site.id);
+      const explicitPages = explicitMatches.filter((match) => facebook.data?.campaigns.some((campaign) => campaign.id === match.campaignId && campaign.live === true))
+        .map((match) => ({ campaignId: match.campaignId,
+          pages: matchCampaignPages(site.url, match.sourcePaths.map((path) => new URL(path, site.url).toString()), siteProjects) }));
+      const facebookCampaignPages: CampaignSource<CampaignPageMatch[]> = destinations.data || explicitPages.length ? {
+        state: "connected", message: destinations.state === "unavailable" ? "Niet alle nieuwe campagnes konden aan een projectpagina worden gekoppeld." : destinations.message,
+        data: [...explicitPages, ...(destinations.data ?? []).map((campaign) => ({ campaignId: campaign.campaignId,
+          pages: matchCampaignPages(site.url, campaign.urls, siteProjects) }))]
       } : destinations;
       // A verified destination on another website must not inherit this site's
       // CTR merely because both campaigns share an advertising account.
@@ -155,10 +171,10 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   const facebookUniqueCtr = summarizeUniqueCtr(rows.map((row) => row.facebookUniqueCtr)
     .filter((source) => source.state !== "not_configured"));
   return {
-    rows, facebookUniqueCtr,
+    rows, facebookUniqueCtr, ...campaignProjectOverview(dashboard, rows),
     message: dashboard.source.mode === "demo"
       ? "Verbind eerst een website via de trackingcode of WordPress-plugin en koppel daarna de advertentieaccounts."
-      : ""
+      : projectMessage
   };
 
   function loadCurrentFacebookUniqueCtr(source: CampaignSource<AdPerformance>): Promise<CampaignSource<UniqueCtrPerformance>> {

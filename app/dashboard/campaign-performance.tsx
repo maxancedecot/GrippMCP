@@ -4,17 +4,21 @@ import {
   type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type WebsiteConversionPerformance, type UniqueCtrSummary
 } from "../../src/campaignPerformance.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
+import type { CampaignProjectRow, UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
 
 const number = new Intl.NumberFormat("nl-BE");
 const percent = new Intl.NumberFormat("nl-BE", { maximumFractionDigits: 2 });
 const percentage = (value: number | null) => value === null ? "—" : `${percent.format(value)}%`;
 
 export async function CampaignPerformance({ dashboard }: { dashboard: SiteAnalyticsDashboardData }) {
-  const { rows, message, facebookUniqueCtr } = await getCampaignPerformance(dashboard);
-  return <CampaignPerformanceView rows={rows} message={message} facebookUniqueCtr={facebookUniqueCtr} />;
+  const { rows, message, facebookUniqueCtr, projects, unmatchedCampaigns } = await getCampaignPerformance(dashboard);
+  return <CampaignPerformanceView rows={rows} message={message} facebookUniqueCtr={facebookUniqueCtr} projects={projects} unmatchedCampaigns={unmatchedCampaigns} />;
 }
 
-export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { rows: CampaignPerformanceRow[]; message: string; facebookUniqueCtr: UniqueCtrSummary }) {
+export function CampaignPerformanceView({ rows, message, facebookUniqueCtr, projects, unmatchedCampaigns }: {
+  rows: CampaignPerformanceRow[]; message: string; facebookUniqueCtr: UniqueCtrSummary;
+  projects: CampaignProjectRow[]; unmatchedCampaigns: UnmatchedProjectCampaign[];
+}) {
   const leads = summarizeWebsiteConversions(rows.map((row) => row.leads));
   const appointments = summarizeWebsiteConversions(rows.map((row) => row.appointments));
   const measuredSites = rows.filter((row) => row.websiteCvr !== null);
@@ -44,7 +48,42 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
         <ChannelPanel name="Facebook" sources={rows.map((row) => row.facebook)} uniqueCtr={facebookUniqueCtr} />
       </section>
 
-      <section className="panel campaign-overview" aria-labelledby="campaign-overview-title">
+      <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
+        <div className="panel-heading">
+          <div><p className="eyebrow">Campagnes gekoppeld aan projecten</p><h2 id="campaign-projects-title">Performance per projectpagina</h2></div>
+          <span className="panel-total">{number.format(projects.length)} projectpagina’s</span>
+        </div>
+        {projects.length === 0 ? <p className="empty-state">Er zijn nog geen projectpagina’s gekoppeld.</p> : (
+          <div className="table-wrap campaign-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
+            <table className="campaign-project-table">
+              <thead><tr>
+                <th scope="col">Projectpagina</th><th scope="col">Facebook campagne · unieke link-CTR</th>
+                <th scope="col">Bezoekers</th><th scope="col">Brochure</th><th scope="col">Afspraak</th><th scope="col">Project CVR</th>
+              </tr></thead>
+              <tbody>{projects.map((project) => <tr key={project.key} data-project-key={project.key}>
+                <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
+                  <span className="cell-muted">{project.siteName}</span><span className="cell-muted">{project.sourcePath}</span></th>
+                <td><ProjectCampaigns project={project} /></td>
+                <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
+                <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
+                <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
+                <td><strong className="campaign-cvr-value">{percentage(project.cvr)}</strong>
+                  {!project.hasConversionMapping ? <span className="cell-muted">Bedankpagina nog niet gekoppeld</span> : null}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        <p className="campaign-method-note">Brochure, Afspraak en CVR komen van deze projectpagina in Websiteprestaties. Bij meerdere campagnes blijven de projectcijfers één keer staan.</p>
+        {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
+          <h3>Nog aan een projectpagina te koppelen</h3>
+          <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.siteId}:${campaign.campaignId}`}>
+            {campaign.siteName} — {campaign.campaignName}
+          </li>)}</ul>
+        </div> : null}
+      </section>
+
+      <details className="panel campaign-overview campaign-connection-details">
+        <summary>Totalen per website en advertentieaccount</summary>
         <div className="panel-heading">
           <div><p className="eyebrow">Alle kanalen samen</p><h2 id="campaign-overview-title">Performance per website</h2></div>
           <span className="panel-total">{number.format(rows.length)} {rows.length === 1 ? "site" : "sites"}</span>
@@ -69,7 +108,7 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
             </table>
           </div>
         )}
-      </section>
+      </details>
 
       {issues.length > 0 ? <details className="panel campaign-connection-details" open>
         <summary>Koppelingen aanvullen <span>{issues.length}</span></summary>
@@ -80,7 +119,7 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
         Facebook unieke link-CTR wordt per campagne getoond: unieke linkklikkers ÷ uniek bereik van die campagne, binnen de gekozen periode.
         Facebook-cijfers tellen alleen campagnes met “Ledoux” in de naam, inclusief hun Instagram-plaatsingen.
-        Projectpagina’s worden gekoppeld via de bestemmingslink van de advertenties binnen elke campagne.
+        Projectpagina’s worden gekoppeld via vastgelegde campagnekoppelingen of de bestemmingslink van de advertenties.
         Leads = Brochure en Afspraken = Afspraak uit Websiteprestaties, voor dezelfde website en periode.
         Dit zijn bezoekers van gekoppelde bedankpagina’s; ze zijn niet uitsluitend aan advertenties toegeschreven.
         Websitemetingen gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
@@ -88,6 +127,18 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
       </p>
     </div>
   );
+}
+
+function ProjectCampaigns({ project }: { project: CampaignProjectRow }) {
+  if (project.campaigns.length === 0) return <span className="cell-muted">{project.facebookState === "not_configured" ? "Niet gekoppeld"
+    : project.facebookState === "unavailable" ? "Campagnes niet beschikbaar" : "Geen lopende Ledoux-campagne"}</span>;
+  return <ul className="campaign-ctr-list">
+    {project.campaigns.map((campaign) => <li key={`${campaign.accountId}:${campaign.id}`} data-campaign-id={campaign.id}>
+      <span>{campaign.name}</span><strong>{percentage(campaign.ctr)}</strong>
+      {campaign.ctr === null ? <span className="cell-muted">{campaign.unavailable ? "CTR niet beschikbaar" : "Geen bereik in deze periode"}</span> : null}
+      {campaign.projectCount > 1 ? <span className="cell-muted">Campagne-CTR voor {campaign.projectCount} projectpagina’s samen</span> : null}
+    </li>)}
+  </ul>;
 }
 
 function CampaignMetric({ label, value, detail, availability }: { label: string; value: string; detail: string; availability: string }) {
