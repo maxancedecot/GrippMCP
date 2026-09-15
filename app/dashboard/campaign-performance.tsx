@@ -135,6 +135,7 @@ function FacebookCampaignCtr({ row }: { row: CampaignPerformanceRow }) {
           {page.title}{page.hasConversionMapping ? <span className="cell-muted">Gekoppeld aan Websiteprestaties</span> : null}
         </a>)}
         {pages.length > 1 ? <span className="cell-muted">Campagne-CTR voor deze pagina’s samen</span> : null}
+        {row.facebookCampaignPages.message && pages.length > 0 ? <span className="cell-muted">{row.facebookCampaignPages.message}</span> : null}
         {pages.length === 0 ? <span className="cell-muted">{row.facebookCampaignPages.state === "unavailable"
           ? "Projectpagina kon niet worden gecontroleerd" : "Geen projectpagina op deze website gevonden"}</span> : null}
       </li>;

@@ -585,3 +585,45 @@ test("unavailable ad destinations leave campaign CTR available without inventing
   assert.equal(result.rows[0].facebookCampaignPages.data, null);
   assert.doesNotMatch(JSON.stringify(result), /private-destination-error/);
 });
+
+test("cached project destinations survive a temporary Meta failure while CTR and status stay live", async () => {
+  const previousStore = process.env.JSON_CACHE_STORE;
+  process.env.JSON_CACHE_STORE = "memory";
+  try {
+    let adRequests = 0, metricRequests = 0, active = true;
+    const base = Date.parse("2026-09-15T12:00:00Z");
+    const load = (minutes: number) => getCampaignPerformance(dashboard(), {
+      now: new Date(base + minutes * 60_000), cacheCampaignPages: true,
+      env: environment([{ siteId: "site-a", facebook: { adAccountId: "998877" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+      fetchImpl: async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "9988771", name: "Ledoux project", effective_status: active ? "ACTIVE" : "PAUSED" }] });
+        if (isUniqueRequest(url)) return response({ data: [{ campaign_id: "9988771", campaign_name: "Ledoux project", unique_link_clicks_ctr: ++metricRequests, reach: "100" }] });
+        if (url.pathname.endsWith("/ads")) return ++adRequests === 1
+          ? response({ data: [{ campaign_id: "9988771", creative: { link_url: "https://site-a.example/project/" } }] })
+          : new Response("temporary-provider-error", { status: 503 });
+        if (url.pathname.endsWith("/insights")) return response({ data: [] });
+        return response({ currency: "EUR", account_status: 1 });
+      }
+    });
+    const first = (await load(0)).rows[0];
+    const fresh = (await load(5)).rows[0];
+    assert.equal(adRequests, 1);
+    assert.equal(fresh.facebookUniqueCtr.data?.ctr, 2);
+    assert.deepEqual(fresh.facebookCampaignPages.data, first.facebookCampaignPages.data);
+    const fallback = (await load(16)).rows[0];
+    assert.equal(adRequests, 2);
+    assert.equal(fallback.facebookUniqueCtr.data?.ctr, 3);
+    assert.deepEqual(fallback.facebookCampaignPages.data, first.facebookCampaignPages.data);
+    assert.match(fallback.facebookCampaignPages.message, /laatst geslaagde controle/);
+    assert.equal((await load(24 * 60 + 1)).rows[0].facebookCampaignPages.state, "unavailable");
+    active = false;
+    const paused = (await load(6)).rows[0];
+    assert.deepEqual(paused.facebookUniqueCtr.data?.campaigns, []);
+    assert.deepEqual(paused.facebookCampaignPages.data, []);
+    assert.equal(paused.facebookUniqueCtr.data?.ctr, null);
+  } finally {
+    if (previousStore === undefined) delete process.env.JSON_CACHE_STORE;
+    else process.env.JSON_CACHE_STORE = previousStore;
+  }
+});

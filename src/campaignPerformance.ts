@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
 import { cvrOverviewRowsFromLinks, type CvrOverviewRow } from "./siteAnalyticsConversions.js";
+import { readJsonCache, writeJsonCache } from "./jsonCache.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -50,11 +51,14 @@ const mappingSchema = z.object({
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
 type FacebookUniqueScope = { adAccountId: string; campaigns: AdCampaign[] };
+type CampaignDestinations = { campaignId: string; urls: string[] }[];
+type CachedCampaignDestinations = { checkedAt: number; data: CampaignDestinations };
 type Env = Record<string, string | undefined>;
 type Options = {
   env?: Env;
   fetchImpl?: typeof fetch;
   now?: Date;
+  cacheCampaignPages?: boolean;
 };
 
 const numeric = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/)]).transform(Number).pipe(z.number().finite().nonnegative());
@@ -114,7 +118,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   const conversionRows = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
   const rows: CampaignPerformanceRow[] = [];
   const uniqueCtrRequests = new Map<string, Promise<CampaignSource<UniqueCtrPerformance>>>();
-  const destinationRequests = new Map<string, Promise<CampaignSource<{ campaignId: string; urls: string[] }[]>>>();
+  const destinationRequests = new Map<string, Promise<CampaignSource<CampaignDestinations>>>();
   // Bound concurrency across sites; each site's providers load independently.
   for (let offset = 0; offset < sites.length; offset += 3) {
     rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
@@ -124,7 +128,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookUniqueCtr), facebookRequest.then(loadFacebookDestinations)
       ]);
       const facebookCampaignPages: CampaignSource<CampaignPageMatch[]> = destinations.data ? {
-        state: "connected", message: "",
+        state: "connected", message: destinations.message,
         data: destinations.data.map((campaign) => ({ campaignId: campaign.campaignId,
           pages: matchCampaignPages(site.url, campaign.urls, conversionRows.filter((project) => project.siteId === site.id)) }))
       } : destinations;
@@ -162,43 +166,56 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     return loadFacebookUniqueCtr({ adAccountId: source.data.accountId, campaigns: source.data.campaigns.filter((campaign) => campaign.live === true) });
   }
 
-  function loadFacebookDestinations(source: CampaignSource<AdPerformance>): Promise<CampaignSource<{ campaignId: string; urls: string[] }[]>> {
+  function loadFacebookDestinations(source: CampaignSource<AdPerformance>): Promise<CampaignSource<CampaignDestinations>> {
     if (!source.data) return Promise.resolve({ state: source.state, data: null, message: source.message });
     const campaignIds = source.data.campaigns.filter((campaign) => campaign.live === true).map((campaign) => campaign.id).sort();
     if (campaignIds.length === 0) return Promise.resolve({ state: "connected", data: [], message: "" });
     const key = JSON.stringify([source.data.accountId, campaignIds]);
     let pending = destinationRequests.get(key);
     if (!pending) {
-      pending = safely(async () => {
-        const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
-        const destinations = new Map(campaignIds.map((id) => [id, new Set<string>()]));
-        // Query the campaign node directly: account-wide ad filtering is slow
-        // on large accounts. Bound concurrency and read every campaign page.
-        for (let offset = 0; offset < campaignIds.length; offset += 3) {
-          await Promise.all(campaignIds.slice(offset, offset + 3).map(async (campaignId) => {
-            const params = new URLSearchParams({
-              fields: "campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}", limit: "25",
-              filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }])
-            });
-            for (let page = 0; ; page++) {
-              if (page === MAX_PAGES) throw new Error("Pagination limit");
-              const result = z.object({ data: z.array(z.object({ campaign_id: id, creative: z.unknown().optional() })), paging: graphPaging }).parse(await request(
-                `https://graph.facebook.com/${version}/${campaignId}/ads?${params}`,
-                { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
-              ));
-              for (const ad of result.data) {
-                if (ad.campaign_id !== campaignId) throw new Error("Unexpected campaign destination");
-                for (const url of facebookDestinationUrls(ad.creative)) destinations.get(campaignId)!.add(url);
+      const cacheKey = `campaign-destinations:v1:${source.data.accountId}:${campaignIds.join(",")}`;
+      const useCache = options.cacheCampaignPages ?? !options.fetchImpl;
+      pending = (async () => {
+        const cached = useCache ? await readJsonCache<CachedCampaignDestinations>(cacheKey).catch(() => null) : null;
+        const age = cached ? now.getTime() - cached.checkedAt : Infinity;
+        if (cached && age >= 0 && age < 15 * 60_000) return { state: "connected" as const, data: cached.data, message: "" };
+        const result = await safely(async () => {
+          const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
+          const destinations = new Map(campaignIds.map((id) => [id, new Set<string>()]));
+          // Query the campaign node directly: account-wide ad filtering is slow
+          // on large accounts. Bound concurrency and read every campaign page.
+          for (let offset = 0; offset < campaignIds.length; offset += 3) {
+            await Promise.all(campaignIds.slice(offset, offset + 3).map(async (campaignId) => {
+              const params = new URLSearchParams({
+                fields: "campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}", limit: "25",
+                filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }])
+              });
+              for (let page = 0; ; page++) {
+                if (page === MAX_PAGES) throw new Error("Pagination limit");
+                const result = z.object({ data: z.array(z.object({ campaign_id: id, creative: z.unknown().optional() })), paging: graphPaging }).parse(await request(
+                  `https://graph.facebook.com/${version}/${campaignId}/ads?${params}`,
+                  { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
+                ));
+                for (const ad of result.data) {
+                  if (ad.campaign_id !== campaignId) throw new Error("Unexpected campaign destination");
+                  for (const url of facebookDestinationUrls(ad.creative)) destinations.get(campaignId)!.add(url);
+                }
+                if (!result.paging?.next) break;
+                const after = result.paging.cursors?.after;
+                if (!after || after === params.get("after")) throw new Error("Incomplete pagination");
+                params.set("after", after);
               }
-              if (!result.paging?.next) break;
-              const after = result.paging.cursors?.after;
-              if (!after || after === params.get("after")) throw new Error("Incomplete pagination");
-              params.set("after", after);
-            }
-          }));
-        }
-        return [...destinations].map(([campaignId, urls]) => ({ campaignId, urls: [...urls] }));
-      }, "De projectpagina van de campagne kon niet worden gecontroleerd.");
+            }));
+          }
+          return [...destinations].map(([campaignId, urls]) => ({ campaignId, urls: [...urls] }));
+        }, "De projectpagina van de campagne kon niet worden gecontroleerd.");
+        if (useCache && result.data) await writeJsonCache(cacheKey, { checkedAt: now.getTime(), data: result.data }).catch(() => undefined);
+        if (!result.data && cached && age >= 0 && age < 24 * 60 * 60_000) return {
+          state: "connected" as const, data: cached.data,
+          message: "Projectlinks uit de laatst geslaagde controle; Meta reageert tijdelijk niet."
+        };
+        return result;
+      })();
       destinationRequests.set(key, pending);
     }
     return pending;
