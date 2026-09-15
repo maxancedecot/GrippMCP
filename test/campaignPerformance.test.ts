@@ -542,12 +542,15 @@ test("campaigns match their own landing pages to website projects, stripping tra
       if (url.pathname.endsWith("/campaigns")) return response({ data: ["1", "2", "3"].map((id) => ({ id, name: "Ledoux identical name", effective_status: "ACTIVE" })) });
       if (isUniqueRequest(url)) return response({ data: ["1", "2", "3"].map((id) => ({ campaign_id: id, campaign_name: "Ledoux identical name", reach: "100", unique_link_clicks_ctr: id })) });
       if (url.pathname.endsWith("/ads")) {
-        assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!)[0].value, ["1", "2", "3"]);
-        if (url.searchParams.has("after")) return response({ data: [{ campaign_id: "2", creative: { asset_feed_spec: { link_urls: [{ website_url: "https://site-a.example/?utm_campaign=Ledoux&p_slug=project-two#form" }, { website_url: "https://site-a.example/?p_slug=project-three" }] } } }] });
-        return response({ data: [
-          { campaign_id: "1", creative: { object_story_spec: { link_data: { link: "https://www.site-a.example/project-one/?fbclid=private#form", message: "https://site-a.example/wrong-project", child_attachments: [{ link: "https://site-a.example/project-one/?utm_source=facebook" }] } } } },
-          { campaign_id: "3", creative: { object_story_spec: { video_data: { call_to_action: { value: { link: "https://different-site.example/project-one/" } } } }, link_url: "javascript:alert(1)", object_url: "https://site-a.example.untrusted.example/project-one/" } }
-        ], paging: { next: "https://untrusted.example", cursors: { after: "more-ads" } } });
+        assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!), [{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }]);
+        assert.equal(url.hostname, "graph.facebook.com");
+        const campaignId = url.pathname.split("/")[2];
+        if (campaignId === "2") return response(url.searchParams.has("after")
+          ? { data: [{ campaign_id: "2", creative: { asset_feed_spec: { link_urls: [{ website_url: "https://site-a.example/?utm_campaign=Ledoux&p_slug=project-two#form" }, { website_url: "https://site-a.example/?p_slug=project-three" }] } } }] }
+          : { data: [], paging: { next: "https://untrusted.example", cursors: { after: "more-ads" } } });
+        if (campaignId === "1") return response({ data: [{ campaign_id: "1", creative: { object_story_spec: { link_data: { link: "https://www.site-a.example/project-one/?fbclid=private#form", message: "https://site-a.example/wrong-project", child_attachments: [{ link: "https://site-a.example/project-one/?utm_source=facebook" }] } } } }] });
+        assert.equal(campaignId, "3");
+        return response({ data: [{ campaign_id: "3", creative: { object_story_spec: { video_data: { call_to_action: { value: { link: "https://different-site.example/project-one/" } } } }, link_url: "javascript:alert(1)", object_url: "https://site-a.example.untrusted.example/project-one/" } }] });
       }
       if (url.pathname.endsWith("/insights")) return response({ data: [] });
       return response({ currency: "EUR", account_status: 1 });

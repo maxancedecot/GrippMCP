@@ -169,29 +169,33 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     const key = JSON.stringify([source.data.accountId, campaignIds]);
     let pending = destinationRequests.get(key);
     if (!pending) {
-      const accountId = source.data.accountId;
       pending = safely(async () => {
         const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
-        const params = new URLSearchParams({
-          fields: "campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}", limit: "25",
-          filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: campaignIds }])
-        });
         const destinations = new Map(campaignIds.map((id) => [id, new Set<string>()]));
-        for (let page = 0; ; page++) {
-          if (page === MAX_PAGES) throw new Error("Pagination limit");
-          const result = z.object({ data: z.array(z.object({ campaign_id: id, creative: z.unknown().optional() })), paging: graphPaging }).parse(await request(
-            `https://graph.facebook.com/${version}/act_${accountId}/ads?${params}`,
-            { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
-          ));
-          for (const ad of result.data) {
-            const urls = destinations.get(ad.campaign_id);
-            if (!urls) throw new Error("Unexpected campaign destination");
-            for (const url of facebookDestinationUrls(ad.creative)) urls.add(url);
-          }
-          if (!result.paging?.next) break;
-          const after = result.paging.cursors?.after;
-          if (!after || after === params.get("after")) throw new Error("Incomplete pagination");
-          params.set("after", after);
+        // Query the campaign node directly: account-wide ad filtering is slow
+        // on large accounts. Bound concurrency and read every campaign page.
+        for (let offset = 0; offset < campaignIds.length; offset += 3) {
+          await Promise.all(campaignIds.slice(offset, offset + 3).map(async (campaignId) => {
+            const params = new URLSearchParams({
+              fields: "campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}", limit: "25",
+              filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }])
+            });
+            for (let page = 0; ; page++) {
+              if (page === MAX_PAGES) throw new Error("Pagination limit");
+              const result = z.object({ data: z.array(z.object({ campaign_id: id, creative: z.unknown().optional() })), paging: graphPaging }).parse(await request(
+                `https://graph.facebook.com/${version}/${campaignId}/ads?${params}`,
+                { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
+              ));
+              for (const ad of result.data) {
+                if (ad.campaign_id !== campaignId) throw new Error("Unexpected campaign destination");
+                for (const url of facebookDestinationUrls(ad.creative)) destinations.get(campaignId)!.add(url);
+              }
+              if (!result.paging?.next) break;
+              const after = result.paging.cursors?.after;
+              if (!after || after === params.get("after")) throw new Error("Incomplete pagination");
+              params.set("after", after);
+            }
+          }));
         }
         return [...destinations].map(([campaignId, urls]) => ({ campaignId, urls: [...urls] }));
       }, "De projectpagina van de campagne kon niet worden gecontroleerd.");
