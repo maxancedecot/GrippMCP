@@ -1,6 +1,6 @@
 # Campagneperformance
 
-Open `/dashboard?tab=campaigns`. De tab deelt de periodefilters (7, 14, 30 en 90 dagen) en sitefilters met Websiteprestaties. Alleen deze tab vraagt advertentie- en CRM-data op. Alle requests gebeuren op de server; de browser ontvangt geen API-tokens of contactgegevens.
+Open `/dashboard?tab=campaigns`. De tab deelt de periodefilters (7, 14, 30 en 90 dagen) en sitefilters met Websiteprestaties. Alleen deze tab vraagt advertentiedata op. Alle requests gebeuren op de server; de browser ontvangt geen API-tokens.
 
 ## Accounts koppelen
 
@@ -18,17 +18,12 @@ Configureer `CAMPAIGN_PERFORMANCE_SITES` als JSON in de serveromgeving. `siteId`
     "facebook": {
       "adAccountId": "123456789012345",
       "campaignIds": ["222222222"]
-    },
-    "ghl": {
-      "locationId": "location-id",
-      "installId": "location-id",
-      "calendarIds": ["calendar-id"]
     }
   }
 ]
 ```
 
-`google`, `facebook` en `ghl` zijn afzonderlijk optioneel. Zonder een koppeling verschijnt “Niet gekoppeld”. Laat `campaignIds` weg om alle campagnes van het account te gebruiken. Een lege lijst wordt afgewezen om onbedoeld het hele account in te laden te voorkomen. Gebruik specifieke campagne-ID’s als meerdere websites één advertentieaccount delen. `loginCustomerId` is optioneel en kan ook globaal via `GOOGLE_ADS_LOGIN_CUSTOMER_ID` worden gezet. Google-ID’s mogen streepjes bevatten; Facebook-account-ID’s mogen met `act_` beginnen.
+`google` en `facebook` zijn afzonderlijk optioneel. Zonder een koppeling verschijnt “Niet gekoppeld”. Laat `campaignIds` weg om alle campagnes van het account te gebruiken. Een lege lijst wordt afgewezen om onbedoeld het hele account in te laden te voorkomen. Gebruik specifieke campagne-ID’s als meerdere websites één advertentieaccount delen. `loginCustomerId` is optioneel en kan ook globaal via `GOOGLE_ADS_LOGIN_CUSTOMER_ID` worden gezet. Google-ID’s mogen streepjes bevatten; Facebook-account-ID’s mogen met `act_` beginnen.
 
 ### Google Ads
 
@@ -42,30 +37,28 @@ Zet `META_ADS_ACCESS_TOKEN` op een token met `ads_read` en toegang tot de ingest
 
 Referenties: [Meta’s campagnevelden](https://www.postman.com/meta/facebook-marketing-api/request/45f5yj7/getcampaignsdetails), [Meta’s insightvelden](https://www.postman.com/meta/facebook-marketing-api/request/7mjf11e/getinsightforadsgroup), [officiële SDK-versie](https://github.com/facebook/facebook-nodejs-business-sdk/blob/main/src/api.js).
 
-### GoHighLevel
+### Leads en afspraken uit Websiteprestaties
 
-De bestaande versleutelde OAuth-tokenopslag wordt hergebruikt. Verbind eerst de locatie via de bestaande HighLevel OAuth-flow (`/api/connect/start`, met de bestaande toegangscontrole). Bij een agency-installatie maak je eerst een Location-installatie via `ghl_connect_location`. `installId` is standaard gelijk aan `locationId`; een token voor een andere locatie wordt afgewezen. Het dashboard maakt zelf geen nieuwe agency- of locatie-installaties aan.
+Campagneperformance hergebruikt de kolommen **Brochure** en **Afspraak** uit Websiteprestaties. Beide tabs gebruiken dezelfde gedeelde berekening van de gekoppelde project- en bedankpagina’s. Er is geen CRM-koppeling nodig. Een bestaande `ghl`-configuratie blijft toegestaan, maar wordt voor deze dashboardcijfers niet meer gebruikt; het dashboard vraagt geen contacten, kalenders of CRM-tokens meer op.
 
-De installatie heeft leesrechten nodig voor contacten, kalenders en kalenderafspraken (`contacts.readonly`, `calendars.readonly`, `calendars/events.readonly`). Laat `calendarIds` weg voor alle kalenders van de locatie. `GHL_CAMPAIGN_API_VERSION` is standaard `2021-07-28`, in lijn met de bestaande OAuth-integratie; dit is apart instelbaar bij een API-migratie.
-
-Referenties: [Contacten zoeken](https://marketplace.gohighlevel.com/docs/ghl/contacts/search-contacts-advanced/), [Kalenders](https://marketplace.gohighlevel.com/docs/ghl/calendars/get-calendars/), [Kalenderafspraken](https://marketplace.gohighlevel.com/docs/ghl/calendars/get-calendar-events/).
+De geselecteerde website en periode worden op de WordPress-metingen toegepast voordat de conversies worden opgeteld. Een site zonder paginakoppelingen toont “Niet gekoppeld”. Bij bestaande koppelingen zonder conversies wordt nul getoond, net als in de andere view. De totaalkaarten tellen de zichtbare websites op.
 
 ## Betekenis van de cijfers
 
 - **Google live:** minimaal één ingeschakelde campagne met primary status `ELIGIBLE`, `LIMITED` of `LEARNING`. Dit is de huidige geschiktheid voor weergave, geen garantie op vertoningen op dit moment. Onbekende statussen blijven onbekend.
 - **Facebook live:** een actief advertentieaccount met minimaal één campagne met `effective_status=ACTIVE` waarvan de starttijd is verstreken en de stoptijd nog niet. Dit is de status op campagneniveau.
-- **Leads:** unieke nieuwe contacten op `dateAdded` in de gekoppelde GoHighLevel-locatie binnen de gekozen periode. Ook organische en geïmporteerde contacten kunnen meetellen; er wordt geen advertentieattributie verondersteld.
-- **Afspraken:** unieke afspraken waarvan `startTime` in de periode ligt. Geannuleerde en ongeldige afspraken en geblokkeerde tijdsloten tellen niet mee. De selectie gebruikt de afspraakdatum, niet de boekingsdatum.
+- **Leads:** de som van de kolom Brochure uit Websiteprestaties: bezoekers van gekoppelde bedankpagina’s met “brochure” in het pad of de titel.
+- **Afspraken:** de som van de kolom Afspraak uit Websiteprestaties. Zoals in die view worden de overige gekoppelde bedankpagina’s in deze kolom ingedeeld. Dit meet websiteconversies, niet de status of datum van een afspraak in een agenda.
 - **Google CTR:** totale klikken gedeeld door totale vertoningen × 100; percentages worden niet gemiddeld. Zonder vertoningen is CTR niet beschikbaar.
 - **Facebook unieke CTR (alle):** Meta's `unique_ctr`, gebaseerd op unieke klikkers gedeeld door uniek bereik × 100. Alleen de momenteel lopende campagnes binnen de websitekoppeling tellen mee: actief advertentieaccount, `effective_status=ACTIVE`, starttijd verstreken en stoptijd niet verstreken. We vragen `unique_ctr`, `unique_clicks` en `reach` op accountniveau op, met uitsluitend deze campagne-ID's en `time_increment=all_days` voor de gekozen periode. Ook een koppeling voor een volledig account krijgt deze filter. Zonder lopende campagnes verschijnt “Geen lopende campagne” met een streepje en wordt geen unieke-CTR-request gedaan. Als de lopende campagnes niet betrouwbaar kunnen worden bepaald, verschijnt “Niet beschikbaar”; de selectie valt nooit terug op het volledige account. Unieke cijfers per dag of campagne worden niet opgeteld. Alle Meta-plaatsingen, inclusief Instagram, tellen mee. Zonder bereik verschijnt geen percentage; ontbrekende unieke velden of API-fouten vallen niet terug op gewone CTR.
 - **Gewogen Facebook unieke CTR:** voor het totaal worden uitsluitend de lopende campagnes van zichtbare websites binnen hetzelfde account samengevoegd en nogmaals door Meta ontdubbeld. Het totaal over verschillende accounts is de som van unieke klikken per account gedeeld door de som van bereik per account. Het dashboard benoemt dit als gewogen: personen worden niet tussen advertentieaccounts ontdubbeld. Als een benodigde accountmeting ontbreekt, is dit totaal niet beschikbaar. De unieke CTR kan afzonderlijk uitvallen terwijl spend en campagnestatus wel beschikbaar blijven.
 - **Spend:** uitgaven in de accountvaluta. Google `cost_micros` wordt gedeeld door 1.000.000. Historische kosten van gestopte/verwijderde campagnes blijven meetellen. Bedragen in verschillende valuta worden afzonderlijk getoond.
 - **Website CVR:** bestaande WordPress-CVR: unieke bezoekers aan gekoppelde bedankingspagina’s gedeeld door unieke bezoekers aan gekoppelde bronpagina’s. Per site worden bezoekers ontdubbeld. Een site zonder koppelingen of bronbezoekers krijgt “Geen metingen”.
 
-CRM-datums gebruiken volledige kalenderdagen in `Europe/Brussels`, inclusief zomer-/wintertijd. Google en Meta rapporteren dezelfde kalenderdatums in hun eigen accounttijdzone. Campagnestatussen staan los van het historische datumbereik. De timestamp bovenaan de pagina hoort bij de WordPress-metingen.
+Websitecijfers gebruiken de gekozen kalenderdagen in `Europe/Brussels`. Google en Meta rapporteren dezelfde kalenderdatums in hun eigen accounttijdzone. Campagnestatussen staan los van het historische datumbereik. De timestamp bovenaan de pagina hoort bij de WordPress-metingen.
 
-Totalen ontdubbelen campagnes op account + campagne-ID en CRM-records op locatie + record-ID. Bij gedeelde accounts kunnen site-rijen daarom overlappen, terwijl de totaalkaarten ontdubbeld blijven. Als een bron ontbreekt, toont het subtotaal alleen gekoppelde sites en vermeldt het de dekking. API-fouten leveren “Niet beschikbaar” op, nooit een gefingeerde nul of “Niet live”. Elke provider faalt afzonderlijk. Onvolledige paginering geeft een fout in plaats van een te laag totaal; maximaal 100 pagina’s per lijst, 12 seconden per request en 45 seconden voor de advertentie-/CRM-requests van een dashboardweergave.
+Advertentietotalen ontdubbelen campagnes op account + campagne-ID. Lead- en afspraaktotalen tellen de kolommen van alle zichtbare projectpagina’s op, exact zoals in Websiteprestaties; bezoekers kunnen over meerdere conversiepagina’s meetellen. Deze aantallen zijn niet uitsluitend aan advertenties toegeschreven. Als een bron ontbreekt, toont het subtotaal alleen gekoppelde sites en vermeldt het de dekking. API-fouten leveren “Niet beschikbaar” op, nooit een gefingeerde nul of “Niet live”. Elke advertentieprovider faalt afzonderlijk en beïnvloedt de websitetelling niet. Onvolledige paginering geeft een fout in plaats van een te laag totaal; maximaal 100 pagina’s per lijst, 12 seconden per request en 45 seconden voor de advertentierequests van een dashboardweergave.
 
 ## Verificatie
 
-`npm test` controleert onder meer gewogen CTR, unieke CTR over de volledige selectie, samengevoegde campagnefilters binnen een account, micro-euroconversie, huidige versus historische status, paginering, kalenderuitsluitingen, tijdzones, ontdubbeling en foutisolatie met gesimuleerde API-responses. Live verificatie vereist de echte account-ID's, tokens en een gekoppelde WordPress-site. Vergelijk na configuratie één site en één periode met Google Ads, Meta Ads Manager en GoHighLevel.
+`npm test` controleert onder meer gewogen CTR, unieke CTR over de volledige selectie, samengevoegde campagnefilters binnen een account, micro-euroconversie, huidige versus historische status, paginering en foutisolatie met gesimuleerde API-responses. Conversietests vergelijken Brochure en Afspraak met de campagnetotalen over meerdere projecten, sites en periodes, inclusief nul en ontbrekende koppelingen. Een integratietest controleert de telling vanaf geregistreerde WordPress-bezoeken. Live verificatie vereist de echte account-ID’s, tokens en een gekoppelde WordPress-site. Vergelijk dezelfde site en periode in Websiteprestaties en Campagneperformance, en de advertentiecijfers met Google Ads en Meta Ads Manager.

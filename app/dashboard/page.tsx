@@ -12,6 +12,7 @@ import {
   type SiteAnalyticsPeriod,
   type SiteAnalyticsReferrerRow
 } from "../../src/siteAnalytics.js";
+import { cvrOverviewRowsFromLinks, type CvrOverviewMetric, type CvrOverviewRow } from "../../src/siteAnalyticsConversions.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 import { CvrMappingBoard } from "./cvr-mapping-board.js";
 import { CvrTrendChart } from "./cvr-trend-chart.js";
@@ -21,26 +22,11 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Website- en campagneprestaties | Dashboard",
-  description: "Websiteprestaties en campagneperformance uit Google Ads, Facebook Ads en GoHighLevel."
+  description: "Websiteprestaties en campagneperformance uit Google Ads, Facebook Ads en websiteconversies."
 };
 
 type DashboardSearchParams = Record<string, string | string[] | undefined>;
 type DashboardFormValue = FormDataEntryValue | null;
-type CvrOverviewColumn = "brochure" | "appointment";
-
-type CvrOverviewMetric = {
-  visitors: number;
-};
-
-type CvrOverviewRow = {
-  key: string;
-  siteName: string;
-  sourcePath: string;
-  sourceTitle: string;
-  sourceVisitors: number;
-  brochure: CvrOverviewMetric;
-  appointment: CvrOverviewMetric;
-};
 
 const periodOptions = [7, 14, 30, 90];
 
@@ -167,7 +153,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         </div>
 
         {view === "campaigns" ? (
-          <Suspense fallback={<p className="data-notice" role="status">Campagnegegevens laden uit Google Ads, Facebook Ads en GoHighLevel…</p>}>
+          <Suspense fallback={<p className="data-notice" role="status">Campagnegegevens laden uit Google Ads, Facebook Ads en Websiteprestaties…</p>}>
             <CampaignPerformance dashboard={dashboard} />
           </Suspense>
         ) : <>
@@ -316,55 +302,6 @@ function CvrOverviewMetricCell({ metric, sourceVisitors }: { metric: CvrOverview
       <span>{formatConversionRate(conversionRate)}%</span>
     </span>
   );
-}
-
-function cvrOverviewRowsFromLinks(links: SiteAnalyticsCvrLinkRow[]) {
-  const rowsBySource = new Map<string, CvrOverviewRow>();
-
-  for (const link of links) {
-    const key = `${link.siteId}:${link.sourcePath}`;
-    const row = rowsBySource.get(key) ?? {
-      key,
-      siteName: link.siteName,
-      sourcePath: link.sourcePath,
-      sourceTitle: link.sourceTitle,
-      sourceVisitors: 0,
-      brochure: emptyCvrOverviewMetric(),
-      appointment: emptyCvrOverviewMetric()
-    };
-    const column = cvrOverviewColumnFromLink(link);
-
-    row.sourceVisitors = Math.max(row.sourceVisitors, link.sourceVisitors);
-    row[column].visitors += link.targetVisitors;
-    rowsBySource.set(key, row);
-  }
-
-  return Array.from(rowsBySource.values()).sort((left, right) => {
-    return (
-      left.siteName.localeCompare(right.siteName) ||
-      right.sourceVisitors - left.sourceVisitors ||
-      left.sourceTitle.localeCompare(right.sourceTitle) ||
-      left.sourcePath.localeCompare(right.sourcePath)
-    );
-  });
-}
-
-function cvrOverviewColumnFromLink(link: SiteAnalyticsCvrLinkRow): CvrOverviewColumn {
-  const target = normalizeCvrTargetText(`${link.targetPath} ${link.targetTitle}`);
-  return target.includes("brochure") ? "brochure" : "appointment";
-}
-
-function emptyCvrOverviewMetric(): CvrOverviewMetric {
-  return {
-    visitors: 0
-  };
-}
-
-function normalizeCvrTargetText(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
 }
 
 function ReferrerTable({ rows, totals }: { rows: SiteAnalyticsReferrerRow[]; totals: SiteAnalyticsMetricSummary }) {

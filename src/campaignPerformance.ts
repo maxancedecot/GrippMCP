@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { getFreshGhlTokenRecord } from "./ghl/oauth.js";
-import type { GhlTokenRecord } from "./ghl/types.js";
-import type { SiteAnalyticsDashboardData, SiteAnalyticsPeriod } from "./siteAnalytics.js";
+import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
+import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -17,7 +16,7 @@ export type AdCampaign = {
 export type AdPerformance = { accountId: string; currency: string; campaigns: AdCampaign[] };
 export type UniqueCtrPerformance = { accountId: string; uniqueClicks: number; reach: number; ctr: number | null };
 export type UniqueCtrSummary = { ctr: number | null; accounts: number; unavailable: boolean };
-export type CrmPerformance = { locationId: string; ids: string[] };
+export type WebsiteConversionPerformance = { siteId: string; count: number };
 export type CampaignPerformanceRow = {
   siteId: string;
   name: string;
@@ -25,8 +24,8 @@ export type CampaignPerformanceRow = {
   google: CampaignSource<AdPerformance>;
   facebook: CampaignSource<AdPerformance>;
   facebookUniqueCtr: CampaignSource<UniqueCtrPerformance>;
-  leads: CampaignSource<CrmPerformance>;
-  appointments: CampaignSource<CrmPerformance>;
+  leads: CampaignSource<WebsiteConversionPerformance>;
+  appointments: CampaignSource<WebsiteConversionPerformance>;
   websiteCvr: number | null;
   websiteVisitors: number;
   websiteConversions: number;
@@ -39,6 +38,7 @@ const mappingSchema = z.object({
   siteId: id,
   google: z.object({ customerId: googleId, loginCustomerId: googleId.optional(), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
   facebook: z.object({ adAccountId: id.transform((value) => value.replace(/^act_/, "")).pipe(numericId), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
+  // Accepted for existing configurations; dashboard conversions now come from WordPress.
   ghl: z.object({ locationId: id, installId: id.optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
@@ -47,7 +47,6 @@ type Env = Record<string, string | undefined>;
 type Options = {
   env?: Env;
   fetchImpl?: typeof fetch;
-  getGhlToken?: (installId: string) => Promise<GhlTokenRecord>;
   now?: Date;
 };
 
@@ -103,17 +102,9 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     }));
     return token.access_token;
   })();
-  const ghlTokens = new Map<string, Promise<GhlTokenRecord>>();
-  const getGhlToken = (installId: string) => {
-    let token = ghlTokens.get(installId);
-    if (!token) {
-      token = (options.getGhlToken ?? getFreshGhlTokenRecord)(installId);
-      ghlTokens.set(installId, token);
-    }
-    return token;
-  };
   // Do not mix real account data with the WordPress demo sites.
   const sites = dashboard.source.mode === "live" ? dashboard.sites : [];
+  const conversionRows = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
   const rows: CampaignPerformanceRow[] = [];
   const uniqueCtrRequests = new Map<string, Promise<CampaignSource<UniqueCtrPerformance>>>();
   // Bound concurrency across sites; each site's providers load independently.
@@ -121,11 +112,12 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
       const mapping = mappings.find((item) => item.siteId === site.id);
       const facebookRequest = loadFacebook(mapping?.facebook);
-      const [google, facebook, facebookUniqueCtr, crm] = await Promise.all([
-        loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookUniqueCtr), loadCrm(mapping?.ghl)
+      const [google, facebook, facebookUniqueCtr] = await Promise.all([
+        loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookUniqueCtr)
       ]);
       return {
-        siteId: site.id, name: site.name, url: site.url, google, facebook, facebookUniqueCtr, ...crm,
+        siteId: site.id, name: site.name, url: site.url, google, facebook, facebookUniqueCtr,
+        leads: websiteConversions(site.id, "brochure"), appointments: websiteConversions(site.id, "appointment"),
         websiteCvr: site.cvrLinkCount > 0 && site.cvrSourceVisitors > 0 ? site.conversionRatePercent : null,
         websiteVisitors: site.cvrSourceVisitors, websiteConversions: site.cvrConversionVisitors
       };
@@ -150,7 +142,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   return {
     rows, facebookUniqueCtr,
     message: dashboard.source.mode === "demo"
-      ? "Verbind eerst een website via de WordPress-plugin en koppel daarna de advertentieaccounts en CRM-locatie."
+      ? "Verbind eerst een website via de WordPress-plugin en koppel daarna de advertentieaccounts."
       : ""
   };
 
@@ -298,62 +290,13 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     }, "Facebook Ads kon niet worden geladen. Controleer de accountkoppeling en toegangsrechten.");
   }
 
-  async function loadCrm(config: CampaignSiteMapping["ghl"]): Promise<{ leads: CampaignSource<CrmPerformance>; appointments: CampaignSource<CrmPerformance> }> {
-    if (!config) return { leads: missing("GoHighLevel is nog niet gekoppeld."), appointments: missing("GoHighLevel is nog niet gekoppeld.") };
-    const token = getGhlToken(config.installId ?? config.locationId);
-    const call = async (path: string, body?: unknown) => {
-      const record = await token;
-      if (record.locationId !== config.locationId) throw new Error("A matching location installation is required");
-      return request(`https://services.leadconnectorhq.com${path}`, {
-        method: body ? "POST" : "GET",
-        headers: { Authorization: `Bearer ${record.accessToken}`, Version: env.GHL_CAMPAIGN_API_VERSION ?? "2021-07-28", "Content-Type": "application/json" },
-        ...(body ? { body: JSON.stringify(body) } : {})
-      });
+  function websiteConversions(siteId: string, column: "brochure" | "appointment"): CampaignSource<WebsiteConversionPerformance> {
+    const projects = conversionRows.filter((row) => row.siteId === siteId);
+    if (projects.length === 0) return missing("Koppel de bedankpagina’s in Websiteprestaties om leads en afspraken te meten.");
+    return {
+      state: "connected", message: "",
+      data: { siteId, count: projects.reduce((sum, row) => sum + row[column].visitors, 0) }
     };
-    const { start, end } = campaignPeriodBounds(dashboard.period);
-    const [leads, appointments] = await Promise.all([
-      safely(async () => {
-        const ids = new Set<string>();
-        const seen = new Set<string>();
-        for (let page = 1; page <= MAX_PAGES; page++) {
-          const result = z.object({
-            contacts: z.array(z.object({ id, dateAdded: id })), total: numeric
-          }).parse(await call("/contacts/search", {
-            locationId: config.locationId, page, pageLimit: 100,
-            filters: [{ field: "dateAdded", operator: "range", value: { gte: new Date(start).toISOString(), lte: new Date(end).toISOString() } }],
-            sort: [{ field: "dateAdded", direction: "asc" }]
-          }));
-          const before = seen.size;
-          for (const contact of result.contacts) {
-            seen.add(contact.id);
-            const date = Date.parse(contact.dateAdded);
-            if (!Number.isFinite(date)) throw new Error("Invalid contact date");
-            if (date >= start && date <= end) ids.add(contact.id);
-          }
-          if (seen.size >= result.total) return { locationId: config.locationId, ids: [...ids] };
-          if (seen.size === before) throw new Error("Incomplete contact pagination");
-        }
-        throw new Error("Contact pagination limit");
-      }, "Leads konden niet worden geladen. Controleer de CRM-koppeling en contactrechten."),
-      safely(async () => {
-        const calendars = config.calendarIds ?? z.object({ calendars: z.array(z.object({ id })) })
-          .parse(await call(`/calendars/?${new URLSearchParams({ locationId: config.locationId })}`)).calendars.map((calendar) => calendar.id);
-        const ids = new Set<string>();
-        for (const calendarId of new Set(calendars)) {
-          const result = z.object({ events: z.array(z.object({ id, startTime: id, appointmentStatus: id.optional(), contactId: id.optional() })) })
-            .parse(await call(`/calendars/events?${new URLSearchParams({ locationId: config.locationId, calendarId, startTime: String(start), endTime: String(end) })}`));
-          for (const event of result.events) {
-            if (!event.contactId) continue; // Blocked calendar slots are not appointments.
-            if (!event.appointmentStatus) throw new Error("Missing appointment status");
-            const date = Date.parse(event.startTime);
-            if (!Number.isFinite(date)) throw new Error("Invalid appointment date");
-            if (date >= start && date <= end && !["cancelled", "canceled", "invalid"].includes(event.appointmentStatus.toLowerCase())) ids.add(event.id);
-          }
-        }
-        return { locationId: config.locationId, ids: [...ids] };
-      }, "Afspraken konden niet worden geladen. Controleer de CRM-koppeling en agendarechten.")
-    ]);
-    return { leads, appointments };
   }
 }
 
@@ -373,25 +316,6 @@ function currencyCode(value: unknown) {
   const code = z.string().regex(/^[A-Z]{3}$/).parse(value);
   new Intl.NumberFormat("nl-BE", { style: "currency", currency: code });
   return code;
-}
-
-// Brussels midnight, including the 23/25-hour days at the DST boundaries.
-export function campaignPeriodBounds(period: Pick<SiteAnalyticsPeriod, "start" | "end">) {
-  const midnight = (date: string) => {
-    const target = Date.parse(`${date}T00:00:00Z`);
-    let value = target;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Europe/Brussels", year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
-      }).formatToParts(value).map((part) => [part.type, part.value]));
-      const local = Date.parse(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`);
-      value += target - local;
-    }
-    return value;
-  };
-  const nextDay = new Date(Date.parse(`${period.end}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
-  return { start: midnight(period.start), end: midnight(nextDay) - 1 };
 }
 
 export function summarizeAds(sources: CampaignSource<AdPerformance>[]) {
@@ -420,15 +344,15 @@ export function summarizeAds(sources: CampaignSource<AdPerformance>[]) {
   };
 }
 
-export function summarizeCrm(sources: CampaignSource<CrmPerformance>[]) {
-  const ids = new Set<string>();
+export function summarizeWebsiteConversions(sources: CampaignSource<WebsiteConversionPerformance>[]) {
+  const sites = new Map<string, number>();
   let connected = 0;
   for (const source of sources) {
     if (!source.data) continue;
     connected++;
-    source.data.ids.forEach((item) => ids.add(`${source.data.locationId}:${item}`));
+    sites.set(source.data.siteId, source.data.count);
   }
-  return { connected, total: sources.length, count: connected > 0 ? ids.size : null };
+  return { connected, total: sources.length, count: connected > 0 ? [...sites.values()].reduce((sum, count) => sum + count, 0) : null };
 }
 
 // Each input covers one account's complete selection, deduplicated by Meta.

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import {
-  getCampaignPerformance, summarizeAds, summarizeCrm,
-  type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type CrmPerformance, type UniqueCtrSummary
+  getCampaignPerformance, summarizeAds, summarizeWebsiteConversions,
+  type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type WebsiteConversionPerformance, type UniqueCtrSummary
 } from "../../src/campaignPerformance.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 
@@ -15,8 +15,8 @@ export async function CampaignPerformance({ dashboard }: { dashboard: SiteAnalyt
 }
 
 export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { rows: CampaignPerformanceRow[]; message: string; facebookUniqueCtr: UniqueCtrSummary }) {
-  const leads = summarizeCrm(rows.map((row) => row.leads));
-  const appointments = summarizeCrm(rows.map((row) => row.appointments));
+  const leads = summarizeWebsiteConversions(rows.map((row) => row.leads));
+  const appointments = summarizeWebsiteConversions(rows.map((row) => row.appointments));
   const measuredSites = rows.filter((row) => row.websiteCvr !== null);
   const visitors = measuredSites.reduce((sum, row) => sum + row.websiteVisitors, 0);
   const conversions = measuredSites.reduce((sum, row) => sum + row.websiteConversions, 0);
@@ -32,9 +32,9 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
       {message ? <p className="data-notice">{message}</p> : null}
       <section className="metric-grid campaign-metric-grid" aria-label="Campagne KPI's">
         <CampaignMetric label="Leads" value={leads.count === null ? "—" : number.format(leads.count)}
-          detail="Nieuwe contacten in GoHighLevel" availability={coverage(leads)} />
+          detail="Brochure uit Websiteprestaties" availability={coverage(leads)} />
         <CampaignMetric label="Afspraken" value={appointments.count === null ? "—" : number.format(appointments.count)}
-          detail="Afspraken in de gekozen periode, excl. annuleringen" availability={coverage(appointments)} />
+          detail="Afspraak uit Websiteprestaties" availability={coverage(appointments)} />
         <CampaignMetric label="Website CVR" value={percentage(cvr)} detail="Conversieratio van gekoppelde websitepagina’s"
           availability={measuredSites.length > 0 ? `${measuredSites.length} van ${rows.length} sites met metingen` : "Nog geen conversiemetingen"} />
       </section>
@@ -60,7 +60,7 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
               <tbody>{rows.map((row) => <tr key={row.siteId}>
                 <th scope="row"><span className="row-title">{row.name}</span><span className="cell-muted">{displayHost(row.url)}</span></th>
                 <td><CampaignStatus sources={[row.google]} /></td><td><CampaignStatus sources={[row.facebook]} /></td>
-                <td><CrmValue source={row.leads} /></td><td><CrmValue source={row.appointments} /></td>
+                <td><ConversionValue source={row.leads} /></td><td><ConversionValue source={row.appointments} /></td>
                 <td><DataValue source={row.facebookUniqueCtr}>{percentage(row.facebookUniqueCtr.data?.ctr ?? null)}</DataValue>
                   {row.facebookUniqueCtr.data && row.facebookUniqueCtr.message ? <span className="cell-muted">{row.facebookUniqueCtr.message}</span> : null}</td>
                 <td><AdValue source={row.facebook} metric="spend" /></td>
@@ -81,8 +81,9 @@ export function CampaignPerformanceView({ rows, message, facebookUniqueCtr }: { 
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
         Facebook unieke CTR (alle) = unieke klikkers ÷ uniek bereik van de momenteel lopende campagnes, binnen de gekozen periode.
         Facebook-cijfers omvatten de plaatsingen van het Meta-advertentieaccount, inclusief Instagram.
-        Leads en afspraken komen uit de gekoppelde CRM-locatie en zijn niet uitsluitend aan advertenties toegeschreven.
-        CRM en website gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
+        Leads = Brochure en Afspraken = Afspraak uit Websiteprestaties, voor dezelfde website en periode.
+        Dit zijn bezoekers van gekoppelde bedankpagina’s; ze zijn niet uitsluitend aan advertenties toegeschreven.
+        Websitemetingen gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
         Bij onvolledige koppelingen tonen de kaarten alleen de beschikbare gegevens.
       </p>
     </div>
@@ -131,8 +132,8 @@ function CampaignStatus({ sources }: { sources: CampaignSource<AdPerformance>[] 
   return <span className={`campaign-status campaign-status--${tone}`}><i aria-hidden="true" />{label}</span>;
 }
 
-function CrmValue({ source }: { source: CampaignSource<CrmPerformance> }) {
-  return <DataValue source={source}>{source.data ? number.format(source.data.ids.length) : "—"}</DataValue>;
+function ConversionValue({ source }: { source: CampaignSource<WebsiteConversionPerformance> }) {
+  return <DataValue source={source}>{source.data ? number.format(source.data.count) : "—"}</DataValue>;
 }
 
 function AdValue({ source, metric }: { source: CampaignSource<AdPerformance>; metric: "ctr" | "spend" }) {

@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getCampaignPerformance } from "../src/campaignPerformance.js";
+import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
 import {
   deleteRegisteredSiteAnalyticsSite,
   deleteSiteAnalyticsCvrLink,
@@ -203,6 +205,13 @@ test("site analytics calculates CVR from linked project and thank-you pages", as
     assert.equal(site?.cvrConversionVisitors, 3);
     assert.equal(Math.round((site?.conversionRatePercent ?? 0) * 10) / 10, 100);
     assert.equal(sourceLinks.length, 2);
+    const overview = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
+    const campaigns = await getCampaignPerformance(dashboard, { env: {} });
+    assert.equal(overview[0].brochure.visitors, 2);
+    assert.equal(overview[0].appointment.visitors, 2);
+    assert.equal(campaigns.rows[0].leads.data?.count, 2);
+    assert.equal(campaigns.rows[0].appointments.data?.count, 2);
+
     assert.deepEqual(
       sourceLinks.map((row) => row.targetPath).sort(),
       ["/bedankt-afspraak/?p_slug=crollet", "/thankyou-brochure/?p_slug=crollet"]

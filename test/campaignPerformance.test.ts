@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  campaignPeriodBounds, getCampaignPerformance, parseCampaignSiteMappings, summarizeAds, summarizeCrm, summarizeUniqueCtr,
+  getCampaignPerformance, parseCampaignSiteMappings, summarizeAds, summarizeWebsiteConversions, summarizeUniqueCtr,
   type AdPerformance, type CampaignSiteMapping, type CampaignSource
 } from "../src/campaignPerformance.js";
-import type { SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
+import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
+import type { SiteAnalyticsCvrLinkRow, SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
 
 const period = { days: 7, start: "2026-09-08", end: "2026-09-14", label: "Laatste 7 dagen" };
 function dashboard(siteIds = ["site-a"]): SiteAnalyticsDashboardData {
@@ -22,10 +23,14 @@ function environment(mappings: CampaignSiteMapping[], extra: Record<string, stri
 const googleCredentials = { GOOGLE_ADS_CLIENT_ID: "client", GOOGLE_ADS_CLIENT_SECRET: "secret", GOOGLE_ADS_REFRESH_TOKEN: "refresh" };
 const response = (value: unknown) => Response.json(value);
 function connected<T>(data: T): CampaignSource<T> { return { state: "connected", data, message: "" }; }
-const token = async (installId: string) => ({
-  installId, locationId: installId, accessToken: "private-token", refreshToken: "refresh", tokenType: "Bearer",
-  expiresAt: Date.now() + 3600_000, createdAt: 0, updatedAt: 0
-});
+function conversionLink(siteId: string, targetPath: string, visitors: number, sourcePath = "/project", targetTitle = "Bedankt"): SiteAnalyticsCvrLinkRow {
+  return {
+    id: `${siteId}:${sourcePath}:${targetPath}`, siteId, siteName: siteId, sourcePath, sourceTitle: sourcePath,
+    targetPath, targetTitle, createdAt: "2026-09-01", updatedAt: "2026-09-01",
+    sourceVisitors: 50, sourcePageViews: 80, targetVisitors: visitors, targetPageViews: visitors * 3,
+    conversionRatePercent: visitors / 50 * 100, dailySeries: []
+  };
+}
 
 test("campaign mappings reject ambiguous sites, empty scopes and unsafe IDs", () => {
   assert.throws(() => parseCampaignSiteMappings('[{"siteId":"a"},{"siteId":"a"}]'));
@@ -41,7 +46,7 @@ test("unconfigured providers never fetch and do not invent zeros or live statuse
   assert.equal(rows[0].leads.data, null);
   assert.equal(rows[0].websiteCvr, 10);
   assert.equal(summarizeAds([rows[0].google]).ctr, null);
-  assert.equal(summarizeCrm([rows[0].leads]).count, null);
+  assert.equal(summarizeWebsiteConversions([rows[0].leads]).count, null);
 });
 
 test("campaign tab never attaches live accounts to demo website data", async () => {
@@ -306,83 +311,73 @@ test("unavailable campaign status blocks unique CTR instead of including unrelat
   assert.doesNotMatch(JSON.stringify(result), /private-provider-error/);
 });
 
-test("provider failures are isolated and upstream secrets never reach the dashboard", async () => {
-  const result = await getCampaignPerformance(dashboard(), {
-    env: environment([{ siteId: "site-a", google: { customerId: "123" }, ghl: { locationId: "location" } }], googleCredentials),
-    getGhlToken: token,
+test("ad provider failures do not block existing website conversions or expose secrets", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 4), conversionLink("site-a", "/bedankt-afspraak", 2)];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", google: { customerId: "123" }, ghl: { locationId: "legacy-location" } }], googleCredentials),
     fetchImpl: async (input) => {
-      if (String(input).includes("google")) return response({ error: "secret-token" });
-      if (String(input).includes("contacts/search")) return response({ contacts: [], total: 0 });
-      return response({ calendars: [] });
+      assert.match(String(input), /google/); // A legacy CRM mapping must not request contacts or calendars.
+      return response({ error: "secret-token" });
     }
   });
   assert.equal(result.rows[0].google.state, "unavailable");
-  assert.equal(result.rows[0].leads.state, "connected");
-  assert.equal(result.rows[0].appointments.state, "connected");
-  assert.doesNotMatch(JSON.stringify(result), /secret-token|private-token/);
+  assert.equal(result.rows[0].leads.data?.count, 4);
+  assert.equal(result.rows[0].appointments.data?.count, 2);
+  assert.doesNotMatch(JSON.stringify(result), /secret-token|legacy-location/);
 });
 
-test("CRM counts new contacts over all pages and excludes canceled appointments and blocked slots", async () => {
-  const dates = ["2026-09-07T22:00:00Z", "2026-09-14T21:59:59Z", "2026-09-14T22:00:00Z"];
-  const pages: number[] = [];
-  const result = await getCampaignPerformance(dashboard(), {
-    env: environment([{ siteId: "site-a", ghl: { locationId: "location", calendarIds: ["calendar-a", "calendar-b"] } }]),
-    getGhlToken: token,
-    fetchImpl: async (input, init) => {
-      if (String(input).includes("contacts/search")) {
-        const body = JSON.parse(String(init?.body));
-        pages.push(body.page);
-        assert.equal(body.filters[0].value.gte, "2026-09-07T22:00:00.000Z");
-        return response(body.page === 1
-          ? { contacts: [{ id: "a", dateAdded: dates[0] }], total: 3 }
-          : { contacts: [{ id: "b", dateAdded: dates[1] }, { id: "c", dateAdded: dates[2] }], total: 3 });
-      }
-      return response({ events: [
-        { id: "a", contactId: "a", startTime: dates[0], appointmentStatus: "confirmed" },
-        { id: "b", contactId: "b", startTime: dates[1], appointmentStatus: "cancelled" },
-        { id: "c", contactId: "c", startTime: dates[2], appointmentStatus: "confirmed" },
-        { id: "block", startTime: dates[0] }
-      ] });
-    }
-  });
-  assert.deepEqual(pages, [1, 2]);
-  assert.deepEqual(result.rows[0].leads.data?.ids, ["a", "b"]);
-  assert.deepEqual(result.rows[0].appointments.data?.ids, ["a"]);
+test("campaign conversions match Brochure and Afspraak across projects and sites without CRM", async () => {
+  const data = dashboard(["a", "b"]);
+  data.cvrLinks = [
+    conversionLink("a", "/thankyou-brochure", 3),
+    conversionLink("a", "/bedankt-afspraak", 2),
+    conversionLink("a", "/bedankt-download", 4, "/project-2", "BRÓCHURE gedownload"),
+    conversionLink("b", "/thankyou-brochure", 8),
+    conversionLink("b", "/bedankt", 5)
+  ];
+  const websiteRows = cvrOverviewRowsFromLinks(data.cvrLinks);
+  const result = await getCampaignPerformance(data, { env: {}, fetchImpl: async () => { assert.fail("No provider needed"); } });
+  for (const row of result.rows) {
+    const projects = websiteRows.filter((project) => project.siteId === row.siteId);
+    assert.equal(row.leads.data?.count, projects.reduce((sum, project) => sum + project.brochure.visitors, 0));
+    assert.equal(row.appointments.data?.count, projects.reduce((sum, project) => sum + project.appointment.visitors, 0));
+  }
+  assert.deepEqual(result.rows.map((row) => [row.leads.data?.count, row.appointments.data?.count]), [[7, 2], [8, 5]]);
+  assert.equal(summarizeWebsiteConversions(result.rows.map((row) => row.leads)).count, 15);
+  assert.equal(summarizeWebsiteConversions(result.rows.map((row) => row.appointments)).count, 7);
+  assert.equal(websiteRows[0].sourceVisitors, 50); // Two conversion types do not duplicate the source visitors.
 });
 
-test("CRM rejects a token belonging to another location", async () => {
-  const result = await getCampaignPerformance(dashboard(), {
-    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "another" } }]),
-    getGhlToken: token, fetchImpl: async () => { assert.fail("Wrong-location tokens must not be used"); }
-  });
-  assert.equal(result.rows[0].leads.state, "unavailable");
-  assert.equal(result.rows[0].appointments.state, "unavailable");
+test("conversion counts use only the selected site's provided period measurements", async () => {
+  const data = dashboard(["a"]);
+  data.selectedSiteId = "a";
+  data.cvrLinks = [conversionLink("a", "/bedankt-brochure", 2), conversionLink("b", "/bedankt-brochure", 99)];
+  const first = await getCampaignPerformance(data, { env: {} });
+  assert.equal(summarizeWebsiteConversions(first.rows.map((row) => row.leads)).count, 2);
+  data.period = { ...period, days: 30, start: "2026-08-16" };
+  data.cvrLinks = [conversionLink("a", "/bedankt-brochure", 12)];
+  const second = await getCampaignPerformance(data, { env: {} });
+  assert.equal(summarizeWebsiteConversions(second.rows.map((row) => row.leads)).count, 12);
 });
 
-test("incomplete pagination produces unavailable data instead of an understated lead total", async () => {
-  const result = await getCampaignPerformance(dashboard(), {
-    env: environment([{ siteId: "site-a", ghl: { locationId: "location" } }]), getGhlToken: token,
-    fetchImpl: async (input) => response(String(input).includes("contacts/search")
-      ? { contacts: [{ id: "same", dateAdded: "2026-09-10T00:00:00Z" }], total: 2 }
-      : { calendars: [] })
-  });
-  assert.equal(result.rows[0].leads.state, "unavailable");
-  assert.equal(result.rows[0].appointments.state, "connected");
+test("mapped pages with no conversions show zero, while sites without page mappings remain missing", async () => {
+  const data = dashboard(["mapped", "missing"]);
+  data.cvrLinks = [conversionLink("mapped", "/bedankt-brochure", 0)];
+  const { rows } = await getCampaignPerformance(data, { env: {} });
+  assert.equal(rows[0].leads.data?.count, 0);
+  assert.equal(rows[0].appointments.data?.count, 0); // Matches the empty Afspraak column in Websiteprestaties.
+  assert.equal(rows[1].leads.state, "not_configured");
+  assert.equal(rows[1].appointments.data, null);
+  assert.deepEqual(summarizeWebsiteConversions(rows.map((row) => row.leads)), { connected: 1, total: 2, count: 0 });
 });
 
-test("Brussels reporting days handle summer and winter clock changes", () => {
-  const spring = campaignPeriodBounds({ start: "2026-03-29", end: "2026-03-29" });
-  const autumn = campaignPeriodBounds({ start: "2026-10-25", end: "2026-10-25" });
-  assert.equal(spring.end - spring.start + 1, 23 * 3600_000);
-  assert.equal(autumn.end - autumn.start + 1, 25 * 3600_000);
-});
-
-test("summaries deduplicate shared accounts and CRM records and keep different currencies separate", () => {
+test("summaries deduplicate shared accounts and repeated sites and keep different currencies separate", () => {
   const ads: AdPerformance = { accountId: "123", currency: "EUR", campaigns: [{ id: "1", live: true, clicks: 1, impressions: 100, spend: 10 }] };
   const summary = summarizeAds([connected(ads), connected(ads), connected({ ...ads, accountId: "456", currency: "USD" })]);
   assert.equal(summary.liveCount, 2);
   assert.deepEqual(summary.spend, [{ currency: "EUR", amount: 10 }, { currency: "USD", amount: 10 }]);
-  assert.equal(summarizeCrm([connected({ locationId: "a", ids: ["1", "2"] }), connected({ locationId: "a", ids: ["2", "3"] })]).count, 3);
+  assert.equal(summarizeWebsiteConversions([connected({ siteId: "a", count: 4 }), connected({ siteId: "a", count: 4 }), connected({ siteId: "b", count: 3 })]).count, 7);
 });
 
 test("invalid configuration is explained without exposing raw configuration", async () => {
