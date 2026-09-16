@@ -19,6 +19,8 @@ import { CvrTrendChart } from "./cvr-trend-chart.js";
 import { CampaignPerformance } from "./campaign-performance.js";
 import { SortableTable } from "./sortable-table.js";
 import { CrmTrackingCopy } from "./crm-tracking-copy.js";
+import { DataManagementPage } from "./data-management.js";
+import { DashboardViewTabs } from "./view-tabs.js";
 import { dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +70,7 @@ async function deleteCvrLinkAction(formData: FormData) {
 
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
   const params = (await searchParams) ?? {};
+  if (firstParam(params.tab) === "data-management") return <DataManagementPage params={params} />;
   const now = new Date();
   const selection = dashboardPeriodSelection(params, now);
   const { days } = selection.period;
@@ -109,18 +112,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
           </div>
         </header>
 
-        <nav className="dashboard-tabs site-analytics-view-tabs" aria-label="Dashboardweergave">
-          {(["website", "campaigns"] as const).map((tab) => (
-            <a
-              key={tab}
-              className={`dashboard-tab ${view === tab ? "dashboard-tab--active" : ""}`}
-              href={dashboardHref({ params: { ...params, tab: tab === "campaigns" ? tab : undefined }, days, siteId: dashboard.selectedSiteId, customPeriod })}
-              aria-current={view === tab ? "page" : undefined}
-            >
-              {tab === "campaigns" ? "Campagneperformance" : "Websiteprestaties"}
-            </a>
-          ))}
-        </nav>
+        <DashboardViewTabs view={view} params={params} days={days} siteId={dashboard.selectedSiteId} customPeriod={customPeriod} />
 
         {view === "website" && dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 

@@ -19,6 +19,14 @@ export async function readJsonCache<T>(key: string): Promise<T | null> {
   }
 }
 
+export async function readJsonCaches<T>(keys: string[]): Promise<(T | null)[]> {
+  if (!keys.length) return [];
+  if (getJsonCacheMode() !== "upstash_rest") return Promise.all(keys.map((key) => readJsonCache<T>(key)));
+  const values = await kvCommand<(string | null)[]>(["MGET", ...keys]);
+  if (!Array.isArray(values) || values.length !== keys.length) throw new Error("Incomplete cache response");
+  return values.map((value) => value === null ? null : JSON.parse(value) as T);
+}
+
 export async function writeJsonCache(key: string, value: unknown): Promise<void> {
   await writeRawCache(key, JSON.stringify(value));
 }

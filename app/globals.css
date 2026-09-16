@@ -1684,6 +1684,149 @@ td .inline-bar {
   min-width: 1240px;
 }
 
+.data-management-intro {
+  max-width: 76ch;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.data-management-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.data-management-filters,
+.data-management-assignment-controls {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+
+.data-management-filters label {
+  flex: 1;
+}
+
+.data-management-filters label,
+.data-management-assignment label {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.data-management-panel input,
+.data-management-panel select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
+}
+
+.data-management-panel input:focus-visible,
+.data-management-panel select:focus-visible,
+.data-management-panel button:focus-visible,
+.data-management-projects summary:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: 3px;
+}
+
+.data-management-help {
+  margin: 16px 0 24px;
+  line-height: 1.6;
+}
+
+.data-management-client {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 1fr);
+  gap: 16px 32px;
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
+}
+
+.data-management-client h3 {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.data-management-assignment-controls {
+  margin-top: 8px;
+}
+
+.data-management-assignment button {
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--good);
+  color: var(--background);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.data-management-assignment button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.data-management-success,
+.data-management-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--green);
+}
+
+.data-management-error {
+  color: var(--danger);
+}
+
+.data-management-projects {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13px;
+}
+
+.data-management-projects summary {
+  cursor: pointer;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 0;
+  color: var(--muted);
+}
+
+.data-management-projects ul {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+}
+
+.data-management-projects li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  background: var(--surface-muted);
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.data-management-projects small {
+  margin-left: 10px;
+  color: var(--muted);
+}
+
+@media (max-width: 700px) {
+  .data-management-metrics,
+  .data-management-client { grid-template-columns: minmax(0, 1fr); }
+  .data-management-filters { flex-direction: column; align-items: stretch; }
+  .data-management-projects li { flex-direction: column; gap: 4px; }
+}
+
 .campaign-project-table {
   min-width: 1400px;
 }
