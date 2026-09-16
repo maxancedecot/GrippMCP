@@ -21,6 +21,7 @@ import { SortableTable } from "./sortable-table.js";
 import { CrmTrackingCopy } from "./crm-tracking-copy.js";
 import { DataManagementPage } from "./data-management.js";
 import { DashboardViewTabs } from "./view-tabs.js";
+import { isExcludedAnalyticsLink } from "../../src/analyticsPageFilter.js";
 import { dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
 export const dynamic = "force-dynamic";
@@ -86,7 +87,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
     getPublicSiteAnalyticsSites()
   ]);
   const overviewCvrLinks = dashboard.cvrLinks;
-  const siteTabs = configuredSites.length > 0 ? configuredSites : connectedDashboard.sites;
+  const siteTabs = (configuredSites.length > 0 ? configuredSites : connectedDashboard.sites).filter((site) => !isExcludedAnalyticsLink(site.url));
   const totalCvrSourceVisitors = dashboard.sites.reduce((sum, site) => sum + site.cvrSourceVisitors, 0);
   const totalCvrConversionVisitors = dashboard.sites.reduce((sum, site) => sum + site.cvrConversionVisitors, 0);
   const overallConversionRatePercent = totalCvrSourceVisitors > 0 ? (totalCvrConversionVisitors / totalCvrSourceVisitors) * 100 : 0;

@@ -5,16 +5,17 @@ import type { JsonValue } from "./types.js";
 
 const identifier = z.number().int().positive();
 const managerSchema = z.object({ id: identifier, name: z.string(), active: z.boolean() });
-const projectSchema = z.object({ id: identifier, name: z.string(), clientId: identifier.nullable(), archived: z.boolean() });
-const clientSchema = z.object({ id: identifier, name: z.string(), active: z.boolean(), accountManagerId: identifier.nullable() });
+const projectSchema = z.object({ id: identifier, name: z.string(), clientId: identifier.nullable(), archived: z.boolean(), accountManagerId: identifier.nullable().default(null) });
+const clientSchema = z.object({ id: identifier, name: z.string(), active: z.boolean(), accountManagerId: identifier.nullable(), website: z.string().default("") });
 const catalogSchema = z.object({ clients: z.array(clientSchema), managers: z.array(managerSchema), projects: z.array(projectSchema), fetchedAt: z.string().datetime() });
 const assignmentSchema = z.object({ clientId: identifier, managerId: identifier.nullable(), updatedAt: z.string().datetime() }).strict();
-const CATALOG_KEY = "data-management:catalog:v1";
+const CATALOG_KEY = "data-management:catalog:v2";
 const PAGE_SIZE = 250;
 const MAX_PAGES = 40;
 const CATALOG_TTL = 5 * 60_000;
 type RecordData = Record<string, unknown>;
 type Catalog = z.infer<typeof catalogSchema>;
+export type GrippDataCatalog = Catalog;
 export type AccountManager = z.infer<typeof managerSchema>;
 export type ClientAssignment = z.infer<typeof assignmentSchema>;
 export type ManagedClient = z.infer<typeof clientSchema> & {
@@ -29,9 +30,10 @@ export type DataManagementData = {
 type Store = {
   read: typeof readJsonCache; readMany: typeof readJsonCaches; write: typeof writeJsonCache;
 };
-type Options = {
+export type DataManagementOptions = {
   client?: Pick<GrippClient, "call">; store?: Store; now?: Date; force?: boolean; env?: Record<string, string | undefined>;
 };
+type Options = DataManagementOptions;
 const defaultStore: Store = { read: readJsonCache, readMany: readJsonCaches, write: writeJsonCache };
 export const clientAssignmentKey = (clientId: number) => `data-management:client-account-manager:v1:${identifier.parse(clientId)}`;
 
@@ -88,12 +90,13 @@ async function loadCatalog(options: Options): Promise<Catalog> {
   ]);
   const projects = projectRecords.map((record) => ({
     id: requiredId(field(record, "id")), name: displayName(record, "Project"),
-    clientId: recordId(field(record, "company") ?? field(record, "company.id")), archived: isTrue(field(record, "archived"))
+    clientId: recordId(field(record, "company") ?? field(record, "company.id")), archived: isTrue(field(record, "archived")),
+    accountManagerId: recordId(field(record, "accountmanager") ?? field(record, "accountmanager.id"))
   })).sort((a, b) => Number(a.archived) - Number(b.archived) || a.name.localeCompare(b.name, "nl-BE"));
   const projectClientIds = new Set(projects.map((project) => project.clientId));
   const clients = companies.filter((record) => projectClientIds.has(requiredId(field(record, "id"))) || hasCustomerRole(field(record, "companyroles")))
     .map((record) => ({ id: requiredId(field(record, "id")), name: displayName(record, "Klant"), active: !isFalse(field(record, "active")),
-      accountManagerId: recordId(field(record, "accountmanager") ?? field(record, "accountmanager.id")) }))
+      accountManagerId: recordId(field(record, "accountmanager") ?? field(record, "accountmanager.id")), website: text(field(record, "website")) }))
     .sort((a, b) => a.name.localeCompare(b.name, "nl-BE"));
   const managers = employees.map((record) => ({ id: requiredId(field(record, "id")), name: displayName(record, "Medewerker"), active: !isFalse(field(record, "active")) }))
     .sort((a, b) => a.name.localeCompare(b.name, "nl-BE"));
@@ -101,6 +104,10 @@ async function loadCatalog(options: Options): Promise<Catalog> {
   // Cache only identifiers, names and relations; never raw Gripp records or personal details.
   await store.write(CATALOG_KEY, catalog);
   return catalog;
+}
+
+export async function getGrippDataCatalog(options: DataManagementOptions = {}): Promise<GrippDataCatalog> {
+  return loadCatalog(options);
 }
 
 async function fetchRecords(client: Pick<GrippClient, "call">, entity: "company" | "employee" | "project") {

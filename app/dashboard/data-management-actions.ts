@@ -1,16 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { saveClientAccountManager, type ClientAssignment } from "../../src/dataManagement.js";
+import { saveProjectPageManager, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 
-export async function saveAccountManagerAction(clientId: number, managerId: number | null): Promise<
-  { ok: true; assignment: ClientAssignment } | { ok: false; error: string }
+export async function saveAccountManagerAction(siteId: string, path: string, managerId: number | null): Promise<
+  { ok: true; page: ManagedProjectPage } | { ok: false; error: string }
 > {
   try {
-    const assignment = await saveClientAccountManager({ clientId, managerId });
+    const page = await saveProjectPageManager({ siteId, path, managerId });
     revalidatePath("/dashboard");
-    return { ok: true, assignment };
+    return { ok: true, page };
   } catch {
-    return { ok: false, error: "De koppeling is niet opgeslagen. Vernieuw de gegevens en probeer opnieuw." };
+    return { ok: false, error: "De toewijzing is niet opgeslagen. Vernieuw de gegevens en probeer opnieuw." };
   }
 }

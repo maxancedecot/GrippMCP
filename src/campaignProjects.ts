@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { CampaignPerformanceRow, CampaignSource } from "./campaignPerformance.js";
 import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
 import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
+import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
 
 export const CAMPAIGN_PROJECT_MATCHES_KEY = "campaign-project-matches:v1";
 const identifier = z.string().trim().min(1);
@@ -79,6 +80,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
   const unmatchedCampaigns: UnmatchedProjectCampaign[] = [];
   const conversions = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
   for (const site of sites) {
+    if (isExcludedAnalyticsLink(site.url)) continue;
     const ensureProject = (sourcePath: string, title = ""): CampaignProjectRow => {
       const path = normalizeProjectPath(sourcePath);
       const key = `${site.siteId}:${path}`;
@@ -99,12 +101,12 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
       projects.set(key, row);
       return row;
     };
-    for (const project of conversions.filter((row) => row.siteId === site.siteId)) ensureProject(project.sourcePath, project.sourceTitle);
+    for (const project of conversions.filter((row) => row.siteId === site.siteId && !isExcludedAnalyticsLink(row.sourcePath))) ensureProject(project.sourcePath, project.sourceTitle);
     // Keep saved matches for stopped campaigns so their period spend and current
     // status remain visible. CTR still uses only the currently running selection.
     for (const campaign of site.facebook.data?.campaigns ?? []) {
       const pages = site.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
-      const uniquePages = [...new Map(pages.map((page) => [normalizeProjectPath(page.path), page])).values()];
+      const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [normalizeProjectPath(page.path), page])).values()];
       if (uniquePages.length === 0) {
         if (campaign.live === true) unmatchedCampaigns.push({ channel: "facebook", siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
         continue;
@@ -121,7 +123,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     }
     for (const campaign of site.google.data?.campaigns ?? []) {
       const pages = site.googleCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
-      const uniquePages = [...new Map(pages.map((page) => [normalizeProjectPath(page.path), page])).values()];
+      const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [normalizeProjectPath(page.path), page])).values()];
       if (uniquePages.length === 0) {
         if (campaign.live === true || campaign.spend > 0) unmatchedCampaigns.push({ channel: "google", siteId: site.siteId, siteName: site.name,
           campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });

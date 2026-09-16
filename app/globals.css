@@ -1748,6 +1748,11 @@ td .inline-bar {
   overflow-wrap: anywhere;
 }
 
+.data-management-page-url {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
 .data-management-assignment-controls {
   margin-top: 8px;
 }
@@ -1830,7 +1835,7 @@ td .inline-bar {
 }
 
 .campaign-project-table {
-  min-width: 1400px;
+  min-width: 1540px;
   border-collapse: separate;
   border-spacing: 0;
 }

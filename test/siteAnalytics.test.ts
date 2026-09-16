@@ -3,6 +3,8 @@ import { dashboardToday } from "../src/dashboardPeriod.js";
 import assert from "node:assert/strict";
 import { getCampaignPerformance } from "../src/campaignPerformance.js";
 import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
+import { readJsonCache, writeJsonCache } from "../src/jsonCache.js";
+import { isExcludedAnalyticsLink } from "../src/analyticsPageFilter.js";
 import {
   deleteRegisteredSiteAnalyticsSite,
   deleteSiteAnalyticsCvrLink,
@@ -25,6 +27,59 @@ test("site analytics reads configured sites and validates tokens", async () => {
     assert.equal(await verifySiteAnalyticsToken("token-check", "secret-token"), true);
     assert.equal(await verifySiteAnalyticsToken("token-check", "wrong-token"), false);
     assert.equal(await verifySiteAnalyticsToken("unknown", "secret-token"), false);
+  });
+});
+
+test("tooling links are excluded case-insensitively, including encoded URLs and query parameters", () => {
+  for (const url of ["https://example.com/?preview=1", "/ELEMENTOR/test", "https://sites.leadconnectorhq.com/home", "/wordpress", "/%70review/test"]) {
+    assert.equal(isExcludedAnalyticsLink(url), true);
+  }
+  assert.equal(isExcludedAnalyticsLink("https://ankerrui-antwerpen.be/home"), false);
+});
+
+test("excluded future events do not pollute published pages or totals", async () => {
+  const siteId = `filtered-events-${Date.now()}`;
+  await withSiteAnalyticsEnv(siteId, "event-token", async () => {
+    for (const [index, path] of ["/", "/?preview=true", "/?elementor=100", "/wordpress/test", "/leadconnector/test"].entries()) {
+      await recordSiteAnalyticsEvent({ site_id: siteId, event_type: "page_view", visitor_id: `visitor-${index}`, session_id: `session-${index}`,
+        page_view_id: `view-${index}`, page_url: `https://example.com${path}`, path, page_title: "WordPress-powered real project" });
+    }
+    const data = await getSiteAnalyticsDashboardData({ siteId, days: 1 });
+    assert.equal(data.totals.pageViews, 1);
+    assert.equal(data.totals.uniqueVisitors, 1);
+    assert.deepEqual(data.pageRows.map((page) => page.path), ["/"]);
+  });
+});
+
+test("historical excluded pages are hidden and removed from totals without deleting stored data", async () => {
+  const siteId = `filtered-history-${Date.now()}`;
+  await withSiteAnalyticsEnv(siteId, "event-token", async () => {
+    const date = dashboardToday();
+    const key = `site-analytics:v1:${siteId}:${date}`;
+    const makePage = (path: string, visitor: string) => ({ path, title: path, url: `https://example.com${path}`, views: 1,
+      visitors: [visitor], sessions: [visitor], engagementMs: 1000, scrollByView: { [visitor]: 50 } });
+    const stored = { version: 1, siteId, date, totals: { pageViews: 2, engagementMs: 2000 }, visitors: ["valid", "preview"], sessions: ["valid", "preview"],
+      pages: { "/": makePage("/", "valid"), "/?elementor=1": makePage("/?elementor=1", "preview") },
+      referrers: { source: { source: "google", views: 2, sessions: ["valid", "preview"] } } };
+    await writeJsonCache(key, stored);
+    const data = await getSiteAnalyticsDashboardData({ siteId, days: 1 });
+    assert.deepEqual(data.pageRows.map((page) => page.path), ["/"]);
+    assert.equal(data.cvrPageCandidates.length, 1);
+    assert.equal(data.totals.pageViews, 1);
+    assert.equal(data.totals.uniqueVisitors, 1);
+    assert.equal(data.totals.sessions, 1);
+    assert.equal(data.dailyRows[0].pageViews, 1);
+    assert.equal(data.referrerRows.reduce((sum, row) => sum + row.pageViews, 0), 1);
+    assert.deepEqual(await readJsonCache(key), stored);
+  });
+});
+
+test("whole sites on excluded hosts are absent from website metrics", async () => {
+  await withSiteAnalyticsEnv(`blocked-host-${Date.now()}`, "event-token", async () => {
+    process.env.SITE_ANALYTICS_SITES = JSON.stringify([{ id: "blocked-host", name: "Leadconnector", url: "https://sites.leadconnectorhq.com", token: "event-token" }]);
+    const data = await getSiteAnalyticsDashboardData({ days: 1 });
+    assert.equal(data.sites.some((site) => site.id === "blocked-host"), false);
+    assert.equal(data.source.mode, "live");
   });
 });
 

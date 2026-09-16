@@ -6,6 +6,7 @@ import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
 import { highestSortValue, liveSortValue } from "../../src/tableSorting.js";
 import { SortableTable } from "./sortable-table.js";
+import { getProjectPageManagementData, projectPageKey, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 
 const number = new Intl.NumberFormat("nl-BE");
 const percent = new Intl.NumberFormat("nl-BE", { maximumFractionDigits: 2 });
@@ -22,12 +23,15 @@ function rateColor(value: number | null, target: number) {
 
 export async function CampaignPerformance({ dashboard }: { dashboard: SiteAnalyticsDashboardData }) {
   const { rows, message, facebookLinkCtr, projects, unmatchedCampaigns } = await getCampaignPerformance(dashboard);
-  return <CampaignPerformanceView rows={rows} message={message} facebookLinkCtr={facebookLinkCtr} projects={projects} unmatchedCampaigns={unmatchedCampaigns} />;
+  const managers = await getProjectPageManagementData({ pages: projects.map((project) => ({ siteId: project.siteId, siteName: project.siteName, path: project.sourcePath, title: project.title, url: project.url })) });
+  return <CampaignPerformanceView rows={rows} message={[message, managers.error].filter(Boolean).join(" ")} facebookLinkCtr={facebookLinkCtr} projects={projects} unmatchedCampaigns={unmatchedCampaigns}
+    accountManagers={Object.fromEntries(managers.pages.map((page) => [page.key, page]))} />;
 }
 
-export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projects, unmatchedCampaigns }: {
+export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projects, unmatchedCampaigns, accountManagers }: {
   rows: CampaignPerformanceRow[]; message: string; facebookLinkCtr: LinkCtrSummary;
   projects: CampaignProjectRow[]; unmatchedCampaigns: UnmatchedProjectCampaign[];
+  accountManagers: Record<string, ManagedProjectPage>;
 }) {
   const leads = summarizeWebsiteConversions(rows.map((row) => row.leads));
   const appointments = summarizeWebsiteConversions(rows.map((row) => row.appointments));
@@ -69,6 +73,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
           <div className="table-wrap campaign-table-wrap campaign-project-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
             <SortableTable className="campaign-project-table" columns={[
               { key: "title", label: "Projectpagina", text: true },
+              { key: "accountManager", label: "Accountmanager", text: true },
               { key: "ctr", label: "Facebook CTR (link)", description: "Hoogste CTR binnen het project" },
               { key: "spend", label: "Facebook spend", description: "Totale spend van de campagnes binnen het project" },
               { key: "live", label: "Facebook live" },
@@ -78,9 +83,11 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               { key: "leads", label: "Brochure" }, { key: "appointments", label: "Afspraak" }, { key: "cvr", label: "Project CVR" }
             ]} rows={projects.map((project) => {
               const google = summarizeGoogleProjectCampaigns(project.googleCampaigns);
+              const manager = accountManagers[projectPageKey({ siteId: project.siteId, path: project.sourcePath })];
               return {
                 key: project.key,
                 sortValues: {
+                  accountManager: manager?.accountManagerName ?? null,
                   title: project.title, ctr: highestSortValue(project.campaigns.map((campaign) => campaign.ctr)),
                   spend: project.campaigns.length ? project.campaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
                   live: liveSortValue(project.campaigns.map((campaign) => campaign.live)),
@@ -92,6 +99,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
                 content: <tr key={project.key} data-project-key={project.key}>
                   <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
                     <span className="cell-muted">{project.siteName}</span><span className="cell-muted">{project.sourcePath}</span></th>
+                  <td>{manager?.accountManagerName ? <span title={[manager.reason, manager.clientName, manager.grippProjectName].filter(Boolean).join(" · ")}>{manager.accountManagerName}</span>
+                    : <a className="cell-muted" href="/dashboard?tab=data-management">Nog toe te wijzen</a>}</td>
                   <td data-metric="ctr"><ProjectCampaignMetric project={project} metric="ctr" /></td>
                   <td data-metric="spend"><ProjectCampaignMetric project={project} metric="spend" /></td>
                   <td data-metric="status"><ProjectCampaignMetric project={project} metric="status" /></td>

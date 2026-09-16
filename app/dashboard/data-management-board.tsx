@@ -1,79 +1,78 @@
 "use client";
 
 import { useId, useState, type FormEvent } from "react";
-import type { AccountManager, DataManagementData, ManagedClient } from "../../src/dataManagement.js";
+import type { AccountManager } from "../../src/dataManagement.js";
+import type { ManagedProjectPage, ProjectPageManagementData } from "../../src/projectPageManagement.js";
 import { saveAccountManagerAction } from "./data-management-actions.js";
 
-export function DataManagementBoard({ data }: { data: DataManagementData }) {
-  const [clients, setClients] = useState(data.clients);
+export function DataManagementBoard({ data }: { data: ProjectPageManagementData }) {
+  const [pages, setPages] = useState(data.pages);
   const [search, setSearch] = useState("");
-  const [managerFilter, setManagerFilter] = useState("");
+  const [status, setStatus] = useState("unmatched");
+  const [notice, setNotice] = useState("");
   const query = search.trim().toLocaleLowerCase("nl-BE");
-  const filtered = clients.filter((client) => (!query || `${client.name} ${client.projects.map((project) => project.name).join(" ")}`.toLocaleLowerCase("nl-BE").includes(query))
-    && (!managerFilter || (managerFilter === "unassigned" ? client.accountManagerId === null : String(client.accountManagerId) === managerFilter)));
-  const assigned = clients.filter((client) => client.accountManagerId !== null).length;
-  const usedManagerIds = new Set(clients.map((client) => client.accountManagerId));
+  const filtered = pages.filter((page) => (!query || `${page.title} ${page.url} ${page.clientName ?? ""} ${page.accountManagerName ?? ""}`.toLocaleLowerCase("nl-BE").includes(query))
+    && (status === "all" || (status === "unmatched" ? page.needsAssignment : !page.needsAssignment)));
+  const unresolved = pages.filter((page) => page.needsAssignment).length;
   return <>
-    <section className="metric-grid data-management-metrics" aria-label="Klantkoppelingen">
-      <article className="metric-card metric-card--neutral"><span>Klanten</span><strong>{clients.length}</strong><p>Uit Gripp, inclusief klanten met projecten</p></article>
-      <article className="metric-card metric-card--good"><span>Met accountmanager</span><strong>{assigned}</strong><p>{clients.length - assigned} nog te koppelen</p></article>
-      <article className="metric-card metric-card--neutral"><span>Projecten bij klanten</span><strong>{clients.reduce((sum, client) => sum + client.projects.length, 0)}</strong><p>Volgen de accountmanager van hun klant</p></article>
+    <section className="metric-grid data-management-metrics" aria-label="Projectpaginakoppelingen">
+      <article className="metric-card metric-card--neutral"><span>Projectpagina’s</span><strong>{pages.length}</strong><p>Uit de verbonden websites</p></article>
+      <article className="metric-card metric-card--good"><span>Gekoppeld</span><strong>{pages.length - unresolved}</strong><p>{pages.filter((page) => page.source === "gripp").length} via Gripp · {pages.filter((page) => page.source === "manual").length} handmatig</p></article>
+      <article className="metric-card metric-card--neutral"><span>Nog toe te wijzen</span><strong>{unresolved}</strong><p>Geen eenduidige, actieve accountmanager gevonden</p></article>
     </section>
-    <section className="panel data-management-panel" aria-labelledby="data-management-clients">
-      <div className="panel-heading"><div><p className="eyebrow">Accountmanager per klant</p><h2 id="data-management-clients">Klantkoppelingen</h2></div><span className="panel-total">{filtered.length} van {clients.length} klanten</span></div>
+    <section className="panel data-management-panel" aria-labelledby="data-management-pages">
+      <div className="panel-heading"><div><p className="eyebrow">Accountmanager per projectpagina</p><h2 id="data-management-pages">Projectpagina’s koppelen</h2></div><span className="panel-total">{filtered.length} van {pages.length} pagina’s</span></div>
       <div className="data-management-filters">
-        <label>Zoeken<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Klant of project zoeken…" /></label>
-        <label>Accountmanager<select value={managerFilter} onChange={(event) => setManagerFilter(event.target.value)}>
-          <option value="">Alle accountmanagers</option><option value="unassigned">Zonder accountmanager</option>
-          {data.managers.filter((manager) => manager.active || usedManagerIds.has(manager.id)).map((manager) => <option key={manager.id} value={manager.id}>{manager.name}{manager.active ? "" : " (inactief)"}</option>)}
+        <label>Zoeken<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Projectpagina, klant of accountmanager zoeken…" /></label>
+        <label>Weergave<select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="unmatched">Nog toe te wijzen</option><option value="linked">Gekoppeld</option><option value="all">Alle projectpagina’s</option>
         </select></label>
       </div>
-      <p className="cell-muted data-management-help">Bestaande Gripp-koppelingen zijn als startpunt ingevuld. Kies een accountmanager en klik op Opslaan. Kies ‘Geen accountmanager’ om een koppeling in dit dashboard te verwijderen.</p>
-      {filtered.length ? <div className="data-management-clients">{filtered.map((client) => <ClientAssignmentRow key={client.id} client={client} managers={data.managers} canSave={data.canSave}
-        onSaved={(updated) => setClients((current) => current.map((item) => item.id === updated.id ? updated : item))} />)}</div>
-        : <p className="empty-state">{clients.length ? "Geen klanten gevonden met deze filters." : "Er zijn nog geen klanten beschikbaar."}</p>}
+      <p className="cell-muted data-management-help">We matchen projectpagina’s met projecten en klanten in Gripp. Hun accountmanager wordt automatisch overgenomen. Kies hieronder een accountmanager wanneer die koppeling ontbreekt of niet eenduidig is.</p>
+      {notice ? <p className="data-management-success" role="status">{notice}</p> : null}
+      {filtered.length ? <div className="data-management-clients">{filtered.map((page) => <PageAssignmentRow key={`${page.key}:${page.accountManagerId}:${page.source}`} page={page} managers={data.managers} canSave={data.canSave}
+        onSaved={(updated) => {
+          setPages((current) => current.map((item) => item.key === updated.key ? updated : item));
+          setNotice(`${updated.title}: ${updated.accountManagerName ? `toegewezen aan ${updated.accountManagerName}` : "volgt opnieuw Gripp"}. Opgeslagen.`);
+        }} />)}</div> : <p className="empty-state">{query ? "Geen projectpagina’s gevonden met deze filters." : status === "unmatched" ? "Alle projectpagina’s hebben een accountmanager." : "Geen projectpagina’s in deze weergave."}</p>}
     </section>
-    {data.unlinkedProjects > 0 ? <p className="data-notice">{data.unlinkedProjects} projecten hebben geen beschikbare klantkoppeling in Gripp en zijn daarom niet in dit overzicht opgenomen.</p> : null}
   </>;
 }
 
-function ClientAssignmentRow({ client, managers, canSave, onSaved }: {
-  client: ManagedClient; managers: AccountManager[]; canSave: boolean; onSaved: (client: ManagedClient) => void;
+function PageAssignmentRow({ page, managers, canSave, onSaved }: {
+  page: ManagedProjectPage; managers: AccountManager[]; canSave: boolean; onSaved: (page: ManagedProjectPage) => void;
 }) {
   const inputId = useId();
-  const [value, setValue] = useState(client.accountManagerId === null ? "" : String(client.accountManagerId));
+  const savedValue = page.source === "manual" ? String(page.accountManagerId) : "";
+  const [value, setValue] = useState(savedValue);
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const savedValue = client.accountManagerId === null ? "" : String(client.accountManagerId);
-  const managerName = managers.find((manager) => manager.id === client.accountManagerId)?.name ?? (client.accountManagerId === null ? "Geen accountmanager" : `Medewerker ${client.accountManagerId}`);
   async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setPending(true); setError(""); setNotice("");
+    event.preventDefault(); setPending(true); setError("");
     try {
-      const result = await saveAccountManagerAction(client.id, value ? Number(value) : null);
+      const result = await saveAccountManagerAction(page.siteId, page.path, value ? Number(value) : null);
       if (!result.ok) { setError(result.error); return; }
-      onSaved({ ...client, accountManagerId: result.assignment.managerId, assignmentSource: "dashboard", updatedAt: result.assignment.updatedAt });
-      setNotice("Opgeslagen voor deze klant en alle bijbehorende projecten.");
+      onSaved(result.page);
     } catch { setError("Opslaan is niet gelukt. Probeer opnieuw."); }
     finally { setPending(false); }
   }
-  return <article className="data-management-client" data-client-id={client.id}>
-    <div className="data-management-client-heading"><h3>{client.name}</h3><span className="cell-muted">{client.active ? "" : "Inactieve klant · "}{client.assignmentSource === "dashboard" ? "Dashboardkoppeling" : "Overgenomen uit Gripp"}</span></div>
+  return <article className="data-management-client" data-project-page-key={page.key}>
+    <div className="data-management-client-heading">
+      <h3><a className="row-title" href={page.url} target="_blank" rel="noreferrer">{page.title}</a></h3>
+      <span className="cell-muted data-management-page-url">{page.url}</span>
+      <p className="cell-muted">{page.clientName ? `Klant: ${page.clientName}` : "Klant nog niet herkend"}{page.grippProjectName ? ` · Gripp-project: ${page.grippProjectName}` : ""}</p>
+      <p className={page.needsAssignment ? "data-management-error" : "cell-muted"}>{page.reason}{page.accountManagerName ? ` · ${page.accountManagerName}` : ""}</p>
+    </div>
     <form className="data-management-assignment" onSubmit={save}>
-      <label htmlFor={inputId}>Accountmanager voor {client.name}</label>
+      <label htmlFor={inputId}>Accountmanager voor {page.title}</label>
       <div className="data-management-assignment-controls">
-        <select id={inputId} value={value} disabled={!canSave || pending} onChange={(event) => { setValue(event.target.value); setNotice(""); setError(""); }}>
-          <option value="">Geen accountmanager</option>
-          {client.accountManagerId !== null && !managers.some((manager) => manager.id === client.accountManagerId) ? <option value={client.accountManagerId} disabled>{managerName} (niet beschikbaar)</option> : null}
-          {managers.filter((manager) => manager.active || manager.id === client.accountManagerId).map((manager) => <option key={manager.id} value={manager.id} disabled={!manager.active}>{manager.name}{manager.active ? "" : " (inactief)"}</option>)}
+        <select id={inputId} value={value} disabled={!canSave || pending} onChange={(event) => { setValue(event.target.value); setError(""); }}>
+          <option value="">{page.source === "gripp" ? `Gripp volgen (${page.accountManagerName})` : page.source === "manual" ? "Opnieuw automatisch via Gripp" : "Kies een accountmanager"}</option>
+          {managers.filter((manager) => manager.active).map((manager) => <option key={manager.id} value={manager.id}>{manager.name}</option>)}
         </select>
         <button type="submit" disabled={!canSave || pending || value === savedValue}>{pending ? "Opslaan…" : "Opslaan"}</button>
       </div>
-      {notice ? <p className="data-management-success" role="status">{notice}</p> : null}
       {error ? <p className="data-management-error" role="alert">{error}</p> : null}
     </form>
-    {client.projects.length ? <details className="data-management-projects"><summary>{client.projects.length} {client.projects.length === 1 ? "project" : "projecten"} · {managerName}</summary>
-      <ul>{client.projects.map((project) => <li key={project.id}><span>{project.name}{project.archived ? <small>Gearchiveerd</small> : null}</span><span className="cell-muted">{managerName}</span></li>)}</ul>
-    </details> : <p className="cell-muted data-management-projects">Nog geen projecten gekoppeld aan deze klant.</p>}
   </article>;
 }

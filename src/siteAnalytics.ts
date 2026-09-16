@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { readJsonCache, writeJsonCache } from "./jsonCache.js";
+import { readJsonCache, readJsonCaches, writeJsonCache } from "./jsonCache.js";
+import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
 import { siteAnalyticsPeriod, type SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 export type { SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 
@@ -447,6 +448,7 @@ export async function deleteSiteAnalyticsCvrLink(linkId: string): Promise<boolea
 
 export async function recordSiteAnalyticsEvent(payload: unknown): Promise<{ accepted: true }> {
   const event = normalizeSiteAnalyticsEvent(payload);
+  if (isExcludedAnalyticsLink(event.pageUrl) || isExcludedAnalyticsLink(event.pageKey)) return { accepted: true };
   const daily = await readDailySiteAnalyticsData(event.siteId, event.receivedAt);
   applySiteAnalyticsEvent(daily, event);
   await writeJsonCache(dailySiteAnalyticsCacheKey(event.siteId, daily.date), daily);
@@ -458,7 +460,7 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
   const now = options.now ?? new Date();
   const period = siteAnalyticsPeriod(options, now);
   const configuredSites = await getSiteAnalyticsSites();
-  const publicSites = configuredSites.map(({ token: _token, ...site }) => site);
+  const publicSites = configuredSites.filter((site) => !isExcludedAnalyticsLink(site.url)).map(({ token: _token, ...site }) => site);
   const selectedSiteId = normalizeOptionalIdentifier(options.siteId);
   const selectedSites = selectedSiteId ? publicSites.filter((site) => site.id === selectedSiteId) : publicSites;
 
@@ -490,13 +492,13 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
   }
 
   for (const site of siteList) {
-    for (const date of dateKeys) {
-      const daily = await readJsonCache<DailySiteAnalyticsData>(dailySiteAnalyticsCacheKey(site.id, date));
+    const storedDays = await readJsonCaches<DailySiteAnalyticsData>(dateKeys.map((date) => dailySiteAnalyticsCacheKey(site.id, date)));
+    for (const daily of storedDays) {
       if (!isDailySiteAnalyticsData(daily)) {
         continue;
       }
 
-      mergeDailySiteAnalyticsData(daily, site, totals, siteAccumulators, pageAccumulators, referrerAccumulators, dailyRows, pageDailyVisitors);
+      mergeDailySiteAnalyticsData(withoutExcludedPages(daily, site.url), site, totals, siteAccumulators, pageAccumulators, referrerAccumulators, dailyRows, pageDailyVisitors);
     }
   }
 
@@ -505,7 +507,8 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
     .sort((left, right) => right.pageViews - left.pageViews || right.uniqueVisitors - left.uniqueVisitors || left.path.localeCompare(right.path))
     .slice(0, 50);
   const sitesById = new Map(siteList.map((site) => [site.id, site]));
-  const storedCvrLinks = (await readSiteAnalyticsCvrLinkData()).links.filter((link) => sitesById.has(link.siteId));
+  const storedCvrLinks = (await readSiteAnalyticsCvrLinkData()).links.filter((link) => sitesById.has(link.siteId)
+    && !isExcludedAnalyticsLink(link.sourcePath) && !isExcludedAnalyticsLink(link.targetPath));
   applyCvrLinksToSiteAccumulators(storedCvrLinks, siteAccumulators, pageAccumulators);
   const cvrPageCandidates = Array.from(pageAccumulators.values())
     .map(cvrPageCandidateFromAccumulator)
@@ -909,6 +912,22 @@ function applySiteAnalyticsEvent(daily: DailySiteAnalyticsData, event: Normalize
   }
 
   daily.pages[event.pageKey] = page;
+}
+
+function withoutExcludedPages(daily: DailySiteAnalyticsData, siteUrl: string): DailySiteAnalyticsData {
+  const entries = Object.entries(daily.pages).filter(([, page]) => !isExcludedAnalyticsLink(page.path)
+    && !isExcludedAnalyticsLink(page.url || `${siteUrl}${page.path}`));
+  if (entries.length === Object.keys(daily.pages).length) return daily;
+  const pages = entries.map(([, page]) => page);
+  const sessions = [...new Set(pages.flatMap((page) => page.sessions))];
+  const pageViews = pages.reduce((sum, page) => sum + page.views, 0);
+  return { ...daily, pages: Object.fromEntries(entries),
+    visitors: [...new Set(pages.flatMap((page) => page.visitors))], sessions,
+    totals: { pageViews, engagementMs: pages.reduce((sum, page) => sum + page.engagementMs, 0) },
+    // Historical referrers were recorded per site/day, not per page. Keep the
+    // remaining traffic count without guessing its source after filtering.
+    referrers: pageViews ? { filtered: { source: "Onbekend (gefilterde pagina’s)", views: pageViews, sessions } } : {}
+  };
 }
 
 function mergeDailySiteAnalyticsData(
