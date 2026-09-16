@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
+import { projectPageGroup } from "./projectPageGroups.js";
 import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, normalizeProjectPath, parseCampaignProjectMatches } from "./campaignProjects.js";
 import { getGrippDataCatalog, type AccountManager, type DataManagementOptions, type GrippDataCatalog } from "./dataManagement.js";
 import { getJsonCacheMode, readJsonCache, readJsonCaches, writeJsonCache } from "./jsonCache.js";
@@ -10,7 +11,7 @@ const localPath = z.string().min(1).max(1000).refine((value) => value.startsWith
 const pageSchema = z.object({ siteId: z.string().min(1).max(200), siteName: z.string(), path: localPath, title: z.string(), url: z.string().url() });
 const assignmentSchema = z.object({ siteId: pageSchema.shape.siteId, path: localPath, managerId: z.number().int().positive().nullable(), updatedAt: z.string().datetime() }).strict();
 const inventorySchema = z.object({ pages: z.array(pageSchema), fetchedAt: z.string().datetime() });
-const INVENTORY_KEY = "data-management:project-pages:v1";
+const INVENTORY_KEY = "data-management:project-pages:v2";
 export type ProjectPage = z.infer<typeof pageSchema>;
 export type ManagedProjectPage = ProjectPage & {
   key: string; accountManagerId: number | null; accountManagerName: string | null;
@@ -79,8 +80,9 @@ export function projectPagesFromDashboard(dashboard: SiteAnalyticsDashboardData,
     const site = dashboard.sites.find((site) => site.id === siteId);
     if (!site || isExcludedAnalyticsLink(site.url) || isExcludedAnalyticsLink(path)) return;
     if (!explicit && isUtilityPage(path)) return;
-    const normalized = normalizeProjectPath(path);
-    const page = { siteId, siteName: site.name, path: normalized, title: title || (normalized === "/" ? site.name : normalized), url: new URL(normalized, site.url).toString() };
+    const group = projectPageGroup(site.url, path);
+    const normalized = group?.sourcePath ?? normalizeProjectPath(path);
+    const page = { siteId, siteName: site.name, path: normalized, title: group?.title || title || (normalized === "/" ? site.name : normalized), url: new URL(normalized, site.url).toString() };
     pages.set(projectPageKey(page), page);
   };
   for (const site of dashboard.sites) add(site.id, "/", site.name);

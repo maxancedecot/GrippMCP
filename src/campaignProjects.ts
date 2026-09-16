@@ -3,6 +3,8 @@ import type { CampaignPerformanceRow, CampaignSource } from "./campaignPerforman
 import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
 import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
 import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
+import { normalizeProjectPath, projectPageGroup } from "./projectPageGroups.js";
+export { normalizeProjectPath } from "./projectPageGroups.js";
 
 export const CAMPAIGN_PROJECT_MATCHES_KEY = "campaign-project-matches:v1";
 export const META_DISCOVERED_PROJECT_MATCHES_KEY = "meta-discovered-project-matches:v1";
@@ -23,13 +25,6 @@ export function parseCampaignProjectMatches(value: unknown): CampaignProjectMatc
   const keys = matches.map((match) => `${match.channel ?? "facebook"}:${match.siteId}:${match.accountId}:${match.campaignId}`);
   if (new Set(keys).size !== keys.length) throw new Error("Duplicate campaign/project mapping");
   return matches;
-}
-
-export function normalizeProjectPath(value: string): string {
-  const url = new URL(value, "https://project.local");
-  const path = url.pathname.replace(/\/+$/, "") || "/";
-  const slug = url.searchParams.get("p_slug");
-  return path + (slug !== null ? `?${new URLSearchParams({ p_slug: slug })}` : "");
 }
 
 export type ProjectCampaign = {
@@ -77,6 +72,7 @@ export type CampaignProjectRow = {
   siteId: string;
   siteName: string;
   sourcePath: string;
+  sourcePaths?: string[];
   url: string;
   title: string;
   visitors: number | null;
@@ -97,8 +93,10 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
   const conversions = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
   for (const site of sites) {
     if (isExcludedAnalyticsLink(site.url)) continue;
+    const projectPath = (path: string) => projectPageGroup(site.url, path)?.sourcePath ?? normalizeProjectPath(path);
     const ensureProject = (sourcePath: string, title = ""): CampaignProjectRow => {
-      const path = normalizeProjectPath(sourcePath);
+      const group = projectPageGroup(site.url, sourcePath);
+      const path = projectPath(sourcePath);
       const key = `${site.siteId}:${path}`;
       const existing = projects.get(key);
       if (existing) return existing;
@@ -114,16 +112,28 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         hasConversionMapping: !!metrics, facebookState: (site.facebookAccounts ?? [site]).some((account) => account.facebook.state === "connected") ? "connected" : site.facebook.state, campaigns: [],
         googleState: site.google.state === "connected" ? site.googleCampaignPages.state : site.google.state, googleCampaigns: []
       };
+      if (group) {
+        const grouped = dashboard.projectPageGroups?.find((item) => item.siteId === site.siteId && item.sourcePath === path);
+        // Grouped unique counts come from visitor sets, never sums of page totals.
+        Object.assign(row, {
+          sourcePath: path, sourcePaths: group.sourcePaths, title: group.title, url: new URL(path, site.url).toString(),
+          visitors: grouped?.visitors ?? null, leads: grouped?.leads ?? null, appointments: grouped?.appointments ?? null,
+          cvr: grouped?.leads !== null && grouped?.leads !== undefined && grouped.appointments !== null
+            ? grouped.visitors > 0 ? (grouped.leads + grouped.appointments) / grouped.visitors * 100 : 0 : null,
+          hasConversionMapping: grouped?.leads !== null && grouped?.leads !== undefined
+        });
+      }
       projects.set(key, row);
       return row;
     };
+    for (const group of dashboard.projectPageGroups?.filter((group) => group.siteId === site.siteId) ?? []) ensureProject(group.sourcePath);
     for (const project of conversions.filter((row) => row.siteId === site.siteId && !isExcludedAnalyticsLink(row.sourcePath))) ensureProject(project.sourcePath, project.sourceTitle);
     // Keep saved matches for stopped campaigns so their period spend and current
     // status remain visible. CTR follows the selected reporting period.
     for (const account of (site.facebookAccounts ?? [site])) {
       for (const campaign of account.facebook.data?.campaigns ?? []) {
         const pages = account.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
-        const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [normalizeProjectPath(page.path), page])).values()];
+        const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [projectPath(page.path), page])).values()];
         if (uniquePages.length === 0) {
           if (campaign.live === true || campaign.impressions > 0 || campaign.spend > 0) unmatchedCampaigns.push({ channel: "facebook", accountId: account.facebook.data?.accountId, siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
           continue;
@@ -142,7 +152,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     }
     for (const campaign of site.google.data?.campaigns ?? []) {
       const pages = site.googleCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
-      const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [normalizeProjectPath(page.path), page])).values()];
+      const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [projectPath(page.path), page])).values()];
       if (uniquePages.length === 0) {
         if (campaign.live === true || campaign.spend > 0) unmatchedCampaigns.push({ channel: "google", siteId: site.siteId, siteName: site.name,
           campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });

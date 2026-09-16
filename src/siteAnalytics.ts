@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readJsonCache, readJsonCaches, writeJsonCache } from "./jsonCache.js";
 import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
+import { normalizeProjectPath, projectPageGroupsForSite } from "./projectPageGroups.js";
 import { siteAnalyticsPeriod, type SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 export type { SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 
@@ -117,6 +118,7 @@ export type SiteAnalyticsDashboardData = {
   referrerRows: SiteAnalyticsReferrerRow[];
   cvrPageCandidates: SiteAnalyticsCvrPageCandidate[];
   cvrLinks: SiteAnalyticsCvrLinkRow[];
+  projectPageGroups?: { siteId: string; sourcePath: string; visitors: number; leads: number | null; appointments: number | null }[];
   lastUpdated: string;
 };
 
@@ -553,6 +555,16 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
     referrerRows,
     cvrPageCandidates,
     cvrLinks,
+    projectPageGroups: siteList.flatMap((site) => projectPageGroupsForSite(site.url).map((group) => {
+      const links = storedCvrLinks.filter((link) => link.siteId === site.id && group.sourcePaths.includes(normalizeProjectPath(link.sourcePath)));
+      const pages = [...pageAccumulators.values()].filter((page) => page.siteId === site.id);
+      const visitorsFor = (paths: string[]) => new Set(pages.filter((page) => paths.includes(normalizeProjectPath(page.path)))
+        .flatMap((page) => [...page.visitors])).size;
+      const isBrochure = (link: SiteAnalyticsCvrLink) => /brochure/i.test(`${link.targetPath} ${link.targetTitle}`);
+      return { siteId: site.id, sourcePath: group.sourcePath, visitors: visitorsFor(group.sourcePaths),
+        leads: links.length ? visitorsFor(links.filter(isBrochure).map((link) => normalizeProjectPath(link.targetPath))) : null,
+        appointments: links.length ? visitorsFor(links.filter((link) => !isBrochure(link)).map((link) => normalizeProjectPath(link.targetPath))) : null };
+    })),
     lastUpdated: latestEventAt ? dateTimeFormatter.format(new Date(latestEventAt)) : dateTimeFormatter.format(now)
   };
 }

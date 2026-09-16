@@ -5,7 +5,7 @@ import {
   type AdPerformance, type CampaignSiteMapping, type CampaignSource
 } from "../src/campaignPerformance.js";
 import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
-import { parseCampaignProjectMatches, summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type ProjectCampaign, type GoogleProjectCampaign } from "../src/campaignProjects.js";
+import { campaignProjectOverview, parseCampaignProjectMatches, summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type ProjectCampaign, type GoogleProjectCampaign } from "../src/campaignProjects.js";
 import type { SiteAnalyticsCvrLinkRow, SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
 
 const period = { days: 7, start: "2026-09-08", end: "2026-09-14", label: "Laatste 7 dagen" };
@@ -55,6 +55,39 @@ test("saved project matches require scoped campaign IDs and local project paths"
   assert.equal(parseCampaignProjectMatches([match, { ...match, siteId: "site-b" }]).length, 2);
   assert.equal(parseCampaignProjectMatches([match, { ...match, channel: "google" }]).length, 2);
   assert.throws(() => parseCampaignProjectMatches([match, { ...match, channel: "facebook" }]));
+});
+
+test("Brusselskaai merges Facebook and Google language destinations without duplicating campaigns or other projects", async () => {
+  const data = dashboard(["brussels", "other"]);
+  data.sites[0].url = "https://brusselskaai.be";
+  data.cvrLinks = [conversionLink("brussels", "/thanks", 2, "/home-fr/"), conversionLink("other", "/thanks", 2, "/home-fr/")];
+  data.projectPageGroups = [{ siteId: "brussels", sourcePath: "/", visitors: 8, leads: 2, appointments: 1 }];
+  const { rows } = await getCampaignPerformance(data, { env: {} });
+  const ads: AdPerformance = { accountId: "123", currency: "EUR", campaigns: [
+      { id: "1", name: "Ledoux NL", clicks: 10, impressions: 100, spend: 5, live: false },
+      { id: "2", name: "Ledoux FR", clicks: 20, impressions: 900, spend: 15, live: true }
+    ] };
+  rows[0].facebook = connected(ads);
+  delete rows[0].facebookAccounts;
+  rows[0].google = connected(ads);
+  rows[0].facebookLinkCtr = connected({ accountId: "123", ctr: 3, campaigns: [
+    { id: "1", name: "Ledoux NL", ctr: 10, impressions: 100 }, { id: "2", name: "Ledoux FR", ctr: 20 / 9, impressions: 900 }
+  ] });
+  rows[0].facebookCampaignPages = rows[0].googleCampaignPages = connected([
+    { campaignId: "1", pages: ["/", "/home-fr/", "/home-eng", "/teaser-fr"].map((path) => ({ path, url: `https://brusselskaai.be${path}`, title: path, hasConversionMapping: false })) },
+    { campaignId: "2", pages: ["/home-fr", "/?p_slug=separate"].map((path) => ({ path, url: `https://brusselskaai.be${path}`, title: path, hasConversionMapping: false })) }
+  ]);
+  const result = campaignProjectOverview(data, rows);
+  assert.equal(result.projects.length, 3);
+  const project = result.projects.find((project) => project.key === "brussels:/")!;
+  assert.deepEqual([project.title, project.visitors, project.leads, project.appointments, project.cvr], ["Brusselskaai", 8, 2, 1, 37.5]);
+  for (const campaigns of [project.campaigns, project.googleCampaigns]) assert.deepEqual(campaigns.map((c) => [c.id, c.projectCount]), [["1", 1], ["2", 2]]);
+  for (const summary of [summarizeFacebookProjectCampaigns(project.campaigns), summarizeGoogleProjectCampaigns(project.googleCampaigns)]) {
+    assert.equal(summary.ctr, 3);
+    assert.deepEqual(summary.spend, [{ currency: "EUR", amount: 20 }]);
+  }
+  assert.equal(result.projects.find((p) => p.key === "other:/home-fr")?.visitors, 50);
+  assert.equal(result.projects.find((p) => p.key === "brussels:/?p_slug=separate")?.visitors, null);
 });
 
 test("unconfigured providers never fetch and do not invent zeros or live statuses", async () => {

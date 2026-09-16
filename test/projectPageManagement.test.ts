@@ -32,6 +32,19 @@ function page(path = "/", title = "Home", siteId = "thuz", siteName = "Thuz", ho
   return { siteId, siteName, path, title, url: `https://${host}${path}` };
 }
 
+test("Brusselskaai language pages share one canonical account-manager assignment", async () => {
+  const dashboard = {
+    sites: [{ id: "brussels", name: "Brusselskaai", url: "https://brusselskaai.be" }],
+    cvrPageCandidates: ["/", "/home-fr/", "/home-eng", "/teaser-fr"].map((path) => ({ siteId: "brussels", path, title: path })),
+    cvrLinks: [{ siteId: "brussels", sourcePath: "/home-fr/", sourceTitle: "FR" }]
+  } as SiteAnalyticsDashboardData;
+  const pages = projectPagesFromDashboard(dashboard, [{ siteId: "brussels", path: "/home-eng/" }]);
+  assert.deepEqual(pages, [page("/", "Brusselskaai", "brussels", "Brusselskaai", "brusselskaai.be")]);
+  const options = { ...fixture(), pages };
+  await saveProjectPageManager({ siteId: "brussels", path: "/", managerId: 2 }, options);
+  assert.equal((await getProjectPageManagementData(options)).pages[0].accountManagerName, "Tristan");
+});
+
 test("project pages inherit the matched Gripp client's manager before the project manager", () => {
   const { catalog, pages } = fixture();
   const result = resolveProjectPage(pages[0], catalog);

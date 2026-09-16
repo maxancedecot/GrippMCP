@@ -109,7 +109,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
                 },
                 content: <tr key={project.key} data-project-key={project.key}>
                   <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
-                    <span className="cell-muted">{project.siteName}</span><span className="cell-muted">{project.sourcePath}</span></th>
+                    <span className="cell-muted">{project.siteName}</span><span className="cell-muted" title={project.sourcePaths?.join("\n")}>{project.sourcePaths ? "Samengevoegde projectpagina’s" : project.sourcePath}</span></th>
                   <td>{manager?.accountManagerName ? <span title={[manager.reason, manager.clientName, manager.grippProjectName].filter(Boolean).join(" · ")}>{manager.accountManagerName}</span>
                     : <a className="cell-muted" href="/dashboard?tab=data-management">Nog toe te wijzen</a>}</td>
                   <td data-metric="ctr"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="ctr" /></td>
