@@ -1624,10 +1624,24 @@ td .inline-bar {
   padding-right: 44px;
 }
 
-.campaign-channel-info > summary {
+.campaign-overview {
+  position: relative;
+}
+
+.campaign-overview .panel-heading {
+  padding-right: 44px;
+}
+
+.campaign-channel-info > summary,
+.campaign-project-info > summary {
   position: absolute;
   top: 24px;
   right: 16px;
+}
+
+.campaign-channel-info > summary,
+.campaign-project-info > summary,
+.campaign-method-info > summary {
   display: grid;
   place-items: center;
   width: 36px;
@@ -1638,22 +1652,30 @@ td .inline-bar {
   cursor: pointer;
 }
 
-.campaign-channel-info > summary::-webkit-details-marker {
+.campaign-channel-info > summary::-webkit-details-marker,
+.campaign-project-info > summary::-webkit-details-marker,
+.campaign-method-info > summary::-webkit-details-marker {
   display: none;
 }
 
 .campaign-channel-info > summary:hover,
-.campaign-channel-info[open] > summary {
+.campaign-channel-info[open] > summary,
+.campaign-project-info > summary:hover,
+.campaign-project-info[open] > summary,
+.campaign-method-info > summary:hover,
+.campaign-method-info[open] > summary {
   color: var(--good);
   background: var(--surface-muted);
 }
 
-.campaign-channel-info > summary:focus-visible {
+.campaign-channel-info > summary:focus-visible,
+.campaign-project-info > summary:focus-visible,
+.campaign-method-info > summary:focus-visible {
   outline: 2px solid var(--good);
   outline-offset: 2px;
 }
 
-.campaign-channel-info-content {
+.campaign-info-content {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
@@ -1662,12 +1684,29 @@ td .inline-bar {
   line-height: 1.6;
 }
 
-.campaign-channel-info-content p {
+.campaign-info-content p {
   margin: 0;
 }
 
-.campaign-channel-info-content p + p {
+.campaign-info-content p + p {
   margin-top: 10px;
+}
+
+.campaign-project-info[open] {
+  margin-bottom: 20px;
+}
+
+.campaign-project-info .campaign-info-content {
+  margin-top: 0;
+}
+
+.campaign-method-info > summary {
+  display: inline-flex;
+  gap: 8px;
+  width: auto;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 13px;
 }
 
 .campaign-status {

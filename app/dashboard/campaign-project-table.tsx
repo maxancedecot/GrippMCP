@@ -1,12 +1,12 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { SortableTable, type Column, type Row } from "./sortable-table.js";
 
 type ProjectRow = Row & { accountManagerId: number | null; accountManagerName: string | null };
 const number = new Intl.NumberFormat("nl-BE");
 
-export function CampaignProjectTable({ columns, rows }: { columns: Column[]; rows: ProjectRow[] }) {
+export function CampaignProjectTable({ columns, rows, info }: { columns: Column[]; rows: ProjectRow[]; info?: ReactNode }) {
   const filterId = useId();
   const [selectedManager, setSelectedManager] = useState("");
   const managers = [...new Map(rows.flatMap((row) => row.accountManagerId !== null && row.accountManagerName
@@ -21,6 +21,7 @@ export function CampaignProjectTable({ columns, rows }: { columns: Column[]; row
       <div><p className="eyebrow">Campagnes gekoppeld aan projecten</p><h2 id="campaign-projects-title">Performance per projectpagina</h2></div>
       <span className="panel-total" role="status">{activeManager ? `${number.format(filtered.length)} van ${number.format(rows.length)}` : number.format(rows.length)} projectpagina’s</span>
     </div>
+    {info}
     <div className="campaign-project-filters">
       <label htmlFor={filterId}>Accountmanager
         <select id={filterId} value={activeManager} onChange={(event) => setSelectedManager(event.target.value)} aria-controls={`${filterId}-projects`}>

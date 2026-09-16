@@ -76,7 +76,10 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       </section>
 
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
-        <CampaignProjectTable columns={[
+        <CampaignProjectTable info={<details className="campaign-project-info">
+          <summary aria-label="Meer informatie over de projectcijfers" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
+          <div className="campaign-info-content"><p>Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p></div>
+        </details>} columns={[
           { key: "title", label: "Projectpagina", text: true },
           { key: "live", label: "Facebook live" },
           { key: "googleLive", label: "Google live" },
@@ -122,7 +125,6 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
             </tr>
           };
         })} />
-        <p className="campaign-method-note">Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
         {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
           <h3>Nog aan een projectpagina te koppelen</h3>
           <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.channel}:${campaign.siteId}:${campaign.accountId ?? ""}:${campaign.campaignId}`}>
@@ -147,7 +149,9 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         </li>)}</ul>
       </details> : null}
 
-      <p className="campaign-method-note">
+      <details className="campaign-method-info">
+        <summary aria-label="Meer informatie over de cijfers en databronnen" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /><span>Over deze cijfers</span></summary>
+        <div className="campaign-info-content"><p>
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
         Facebook link-CTR is het gemiddelde van de campagnepercentages, gewogen op vertoningen in de gekozen periode, ook bij gestopte campagnes.
         Facebook-cijfers tellen alleen campagnes met “Ledoux” in de naam, inclusief hun Instagram-plaatsingen.
@@ -156,7 +160,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         Dit zijn bezoekers van gekoppelde bedankpagina’s; ze zijn niet uitsluitend aan advertenties toegeschreven.
         Websitemetingen gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
         Bij onvolledige koppelingen tonen de kaarten alleen de beschikbare gegevens.
-      </p>
+        </p></div>
+      </details>
     </div>
   );
 }
@@ -207,7 +212,7 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
     </dl>
     <details className="campaign-channel-info">
       <summary aria-label={`Meer informatie over ${name} Ads`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
-      <div className="campaign-channel-info-content">
+      <div className="campaign-info-content">
         <p>{summary.connected > 0
           ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary, "website-accountkoppelingen")}`
           : coverage(summary, "website-accountkoppelingen")}</p>
