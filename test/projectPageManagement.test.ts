@@ -35,7 +35,7 @@ function page(path = "/", title = "Home", siteId = "thuz", siteName = "Thuz", ho
 test("Brusselskaai language pages share one canonical account-manager assignment", async () => {
   const dashboard = {
     sites: [{ id: "brussels", name: "Brusselskaai", url: "https://brusselskaai.be" }],
-    cvrPageCandidates: ["/", "/home-fr/", "/home-eng", "/teaser-fr"].map((path) => ({ siteId: "brussels", path, title: path })),
+    cvrPageCandidates: ["/", "/home-fr/", "/home-eng", "/teaser-fr", "/teaser-eng/"].map((path) => ({ siteId: "brussels", path, title: path })),
     cvrLinks: [{ siteId: "brussels", sourcePath: "/home-fr/", sourceTitle: "FR" }]
   } as SiteAnalyticsDashboardData;
   const pages = projectPagesFromDashboard(dashboard, [{ siteId: "brussels", path: "/home-eng/" }]);

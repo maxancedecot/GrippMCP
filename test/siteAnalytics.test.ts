@@ -402,7 +402,7 @@ test("Brusselskaai groups language pages using unique visitors and conversion vi
     const yesterday = new Date(Date.parse(today) - 86_400_000).toISOString().slice(0, 10);
     const pages = [
       ["/", "shared"], ["/", "nl"], ["/home-fr/", "shared"], ["/home-fr", "fr"],
-      ["/home-eng/", "shared"], ["/home-eng", "eng"], ["/teaser-fr/", "fr"],
+      ["/home-eng/", "shared"], ["/home-eng", "eng"], ["/teaser-fr/", "fr"], ["/teaser-eng/", "eng"],
       ["/bedankt-brochure", "shared"], ["/bedankt-brochure-fr", "shared"], ["/bedankt-brochure-fr", "fr"],
       ["/bedankt-afspraak", "nl"], ["/contact", "contact-only"], ["/home-fr/?p_slug=other", "other-project"]
     ];

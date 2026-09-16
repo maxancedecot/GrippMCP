@@ -2,7 +2,7 @@ export type ProjectPageGroup = { title: string; sourcePath: string; sourcePaths:
 
 // Explicitly grouped versions of the same project; other sites keep exact paths.
 const brusselskaai: ProjectPageGroup = {
-  title: "Brusselskaai", sourcePath: "/", sourcePaths: ["/", "/home-fr", "/home-eng", "/teaser-fr"]
+  title: "Brusselskaai", sourcePath: "/", sourcePaths: ["/", "/home-fr", "/home-eng", "/teaser-fr", "/teaser-eng"]
 };
 
 export function normalizeProjectPath(value: string): string {

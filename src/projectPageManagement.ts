@@ -11,7 +11,7 @@ const localPath = z.string().min(1).max(1000).refine((value) => value.startsWith
 const pageSchema = z.object({ siteId: z.string().min(1).max(200), siteName: z.string(), path: localPath, title: z.string(), url: z.string().url() });
 const assignmentSchema = z.object({ siteId: pageSchema.shape.siteId, path: localPath, managerId: z.number().int().positive().nullable(), updatedAt: z.string().datetime() }).strict();
 const inventorySchema = z.object({ pages: z.array(pageSchema), fetchedAt: z.string().datetime() });
-const INVENTORY_KEY = "data-management:project-pages:v2";
+const INVENTORY_KEY = "data-management:project-pages:v3";
 export type ProjectPage = z.infer<typeof pageSchema>;
 export type ManagedProjectPage = ProjectPage & {
   key: string; accountManagerId: number | null; accountManagerName: string | null;
