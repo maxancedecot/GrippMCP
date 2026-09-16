@@ -83,13 +83,14 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
           <div className="table-wrap campaign-table-wrap campaign-project-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
             <SortableTable className="campaign-project-table" columns={[
               { key: "title", label: "Projectpagina", text: true },
+              { key: "live", label: "Facebook live" },
+              { key: "googleLive", label: "Google live" },
               { key: "accountManager", label: "Accountmanager", text: true },
               { key: "ctr", label: "Facebook CTR (link)", description: "Gemiddelde CTR, gewogen op vertoningen" },
               { key: "spend", label: "Facebook spend", description: "Totale spend van de campagnes binnen het project" },
-              { key: "live", label: "Facebook live" },
               { key: "googleCtr", label: "Google CTR", description: "Gemiddelde CTR, gewogen op vertoningen" },
               { key: "googleSpend", label: "Google spend", description: "Totale spend van de campagnes binnen het project" },
-              { key: "googleLive", label: "Google live" }, { key: "visitors", label: "Bezoekers" },
+              { key: "visitors", label: "Bezoekers" },
               { key: "leads", label: "Brochure" }, { key: "appointments", label: "Afspraak" }, { key: "cvr", label: "Project CVR" }
             ]} rows={projects.map((project) => {
               const google = summarizeGoogleProjectCampaigns(project.googleCampaigns);
@@ -110,14 +111,14 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
                 content: <tr key={project.key} data-project-key={project.key}>
                   <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
                     <span className="cell-muted">{project.siteName}</span><span className="cell-muted" title={project.sourcePaths?.join("\n")}>{project.sourcePaths ? "Samengevoegde projectpagina’s" : project.sourcePath}</span></th>
+                  <td data-metric="status"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="status" /></td>
+                  <td data-metric="google-status"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="status" /></td>
                   <td>{manager?.accountManagerName ? <span title={[manager.reason, manager.clientName, manager.grippProjectName].filter(Boolean).join(" · ")}>{manager.accountManagerName}</span>
                     : <a className="cell-muted" href="/dashboard?tab=data-management">Nog toe te wijzen</a>}</td>
                   <td data-metric="ctr"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="ctr" /></td>
                   <td data-metric="spend"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="spend" /></td>
-                  <td data-metric="status"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="status" /></td>
                   <td data-metric="google-ctr"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="ctr" /></td>
                   <td data-metric="google-spend"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="spend" /></td>
-                  <td data-metric="google-status"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="status" /></td>
                   <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
                   <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
                   <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
