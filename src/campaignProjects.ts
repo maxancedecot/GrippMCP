@@ -8,6 +8,7 @@ const identifier = z.string().trim().min(1);
 const projectPath = identifier.refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"), "Use a local project path")
   .transform(normalizeProjectPath);
 const matchSchema = z.object({
+  channel: z.enum(["facebook", "google"]).optional(),
   siteId: identifier,
   accountId: identifier.regex(/^\d+$/),
   campaignId: identifier.regex(/^\d+$/),
@@ -17,7 +18,7 @@ export type CampaignProjectMatch = z.infer<typeof matchSchema>;
 
 export function parseCampaignProjectMatches(value: unknown): CampaignProjectMatch[] {
   const matches = z.array(matchSchema).parse(value ?? []);
-  const keys = matches.map((match) => `${match.siteId}:${match.accountId}:${match.campaignId}`);
+  const keys = matches.map((match) => `${match.channel ?? "facebook"}:${match.siteId}:${match.accountId}:${match.campaignId}`);
   if (new Set(keys).size !== keys.length) throw new Error("Duplicate campaign/project mapping");
   return matches;
 }
@@ -54,8 +55,10 @@ export type CampaignProjectRow = {
   hasConversionMapping: boolean;
   facebookState: CampaignSource<unknown>["state"];
   campaigns: ProjectCampaign[];
+  googleState: CampaignSource<unknown>["state"];
+  googleCampaigns: ProjectCampaign[];
 };
-export type UnmatchedProjectCampaign = { siteId: string; siteName: string; campaignId: string; campaignName: string };
+export type UnmatchedProjectCampaign = { channel: "facebook" | "google"; siteId: string; siteName: string; campaignId: string; campaignName: string };
 
 export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, sites: CampaignPerformanceRow[]) {
   const projects = new Map<string, CampaignProjectRow>();
@@ -76,7 +79,8 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         title: metrics?.sourceTitle || candidate?.title || title || (path === "/" ? site.name : path),
         visitors, leads: metrics?.brochure.visitors ?? null, appointments: metrics?.appointment.visitors ?? null,
         cvr: metrics ? (metrics.sourceVisitors > 0 ? (metrics.brochure.visitors + metrics.appointment.visitors) / metrics.sourceVisitors * 100 : 0) : null,
-        hasConversionMapping: !!metrics, facebookState: site.facebook.state, campaigns: []
+        hasConversionMapping: !!metrics, facebookState: site.facebook.state, campaigns: [],
+        googleState: site.google.state === "connected" ? site.googleCampaignPages.state : site.google.state, googleCampaigns: []
       };
       projects.set(key, row);
       return row;
@@ -88,7 +92,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
       const pages = site.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
       const uniquePages = [...new Map(pages.map((page) => [normalizeProjectPath(page.path), page])).values()];
       if (uniquePages.length === 0) {
-        if (campaign.live === true) unmatchedCampaigns.push({ siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
+        if (campaign.live === true) unmatchedCampaigns.push({ channel: "facebook", siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
         continue;
       }
       for (const page of uniquePages) {
@@ -99,6 +103,24 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr,
           spend: campaign.spend, currency: site.facebook.data!.currency, live: campaign.live,
           unavailable: campaign.live === true && site.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
+      }
+    }
+    for (const campaign of site.google.data?.campaigns ?? []) {
+      const pages = site.googleCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
+      const uniquePages = [...new Map(pages.map((page) => [normalizeProjectPath(page.path), page])).values()];
+      if (uniquePages.length === 0) {
+        if (campaign.live === true || campaign.spend > 0) unmatchedCampaigns.push({ channel: "google", siteId: site.siteId, siteName: site.name,
+          campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
+        continue;
+      }
+      for (const page of uniquePages) {
+        const project = ensureProject(page.path, page.title);
+        const accountId = site.google.data!.accountId;
+        if (project.googleCampaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
+        project.googleCampaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id,
+          ctr: campaign.impressions > 0 ? campaign.clicks / campaign.impressions * 100 : null,
+          spend: campaign.spend, currency: site.google.data!.currency, live: campaign.live,
+          unavailable: false, projectCount: uniquePages.length });
       }
     }
   }

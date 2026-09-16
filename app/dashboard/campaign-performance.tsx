@@ -40,7 +40,9 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
     .filter((key) => row[key].state !== "connected")
     .map((key) => ({ key: `${row.siteId}:${key}`, site: row.name, message: row[key].message }))
     .concat(row.facebookLinkCtr.state === "unavailable"
-      ? [{ key: `${row.siteId}:facebookLinkCtr`, site: row.name, message: row.facebookLinkCtr.message }] : []));
+      ? [{ key: `${row.siteId}:facebookLinkCtr`, site: row.name, message: row.facebookLinkCtr.message }] : [])
+    .concat(row.google.state === "connected" && row.googleCampaignPages.message
+      ? [{ key: `${row.siteId}:googleCampaignPages`, site: row.name, message: row.googleCampaignPages.message }] : []));
 
   return (
     <div className="campaign-performance">
@@ -70,7 +72,10 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               { key: "title", label: "Projectpagina", text: true },
               { key: "ctr", label: "Facebook CTR (link)", description: "Hoogste CTR binnen het project" },
               { key: "spend", label: "Facebook spend", description: "Totale spend van de campagnes binnen het project" },
-              { key: "live", label: "Facebook live" }, { key: "visitors", label: "Bezoekers" },
+              { key: "live", label: "Facebook live" },
+              { key: "googleCtr", label: "Google CTR", description: "Hoogste CTR binnen het project" },
+              { key: "googleSpend", label: "Google spend", description: "Totale spend van de campagnes binnen het project" },
+              { key: "googleLive", label: "Google live" }, { key: "visitors", label: "Bezoekers" },
               { key: "leads", label: "Brochure" }, { key: "appointments", label: "Afspraak" }, { key: "cvr", label: "Project CVR" }
             ]} rows={projects.map((project) => ({
               key: project.key,
@@ -78,6 +83,9 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
                 title: project.title, ctr: highestSortValue(project.campaigns.map((campaign) => campaign.ctr)),
                 spend: project.campaigns.length ? project.campaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
                 live: liveSortValue(project.campaigns.map((campaign) => campaign.live)),
+                googleCtr: highestSortValue(project.googleCampaigns.map((campaign) => campaign.ctr)),
+                googleSpend: project.googleCampaigns.length ? project.googleCampaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
+                googleLive: liveSortValue(project.googleCampaigns.map((campaign) => campaign.live)),
                 visitors: project.visitors, leads: project.leads, appointments: project.appointments, cvr: project.cvr
               },
               content: <tr key={project.key} data-project-key={project.key}>
@@ -86,6 +94,9 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
                 <td data-metric="ctr"><ProjectCampaignMetric project={project} metric="ctr" /></td>
                 <td data-metric="spend"><ProjectCampaignMetric project={project} metric="spend" /></td>
                 <td data-metric="status"><ProjectCampaignMetric project={project} metric="status" /></td>
+                <td data-metric="google-ctr"><ProjectCampaignMetric project={project} channel="google" metric="ctr" /></td>
+                <td data-metric="google-spend"><ProjectCampaignMetric project={project} channel="google" metric="spend" /></td>
+                <td data-metric="google-status"><ProjectCampaignMetric project={project} channel="google" metric="status" /></td>
                 <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
                 <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
                 <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
@@ -98,8 +109,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         <p className="campaign-method-note">CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. Beweeg over de CTR voor de campagnenaam. Spend geldt voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
         {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
           <h3>Nog aan een projectpagina te koppelen</h3>
-          <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.siteId}:${campaign.campaignId}`}>
-            {campaign.siteName} — {campaign.campaignName}
+          <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.channel}:${campaign.siteId}:${campaign.campaignId}`}>
+            {campaign.siteName} — {campaign.channel === "google" ? "Google" : "Facebook"}: {campaign.campaignName}
           </li>)}</ul>
         </div> : null}
       </section>
@@ -163,16 +174,18 @@ function websiteSortValues(row: CampaignPerformanceRow) {
   };
 }
 
-function ProjectCampaignMetric({ project, metric }: { project: CampaignProjectRow; metric: "ctr" | "spend" | "status" }) {
-  if (project.campaigns.length === 0) return metric === "status"
-    ? <span className="cell-muted">{project.facebookState === "not_configured" ? "Niet gekoppeld"
-      : project.facebookState === "unavailable" ? "Niet beschikbaar" : "Geen campagne"}</span>
+function ProjectCampaignMetric({ project, metric, channel = "facebook" }: { project: CampaignProjectRow; metric: "ctr" | "spend" | "status"; channel?: "facebook" | "google" }) {
+  const campaigns = channel === "google" ? project.googleCampaigns : project.campaigns;
+  const state = channel === "google" ? project.googleState : project.facebookState;
+  if (campaigns.length === 0) return metric === "status"
+    ? <span className="cell-muted">{state === "not_configured" ? "Niet gekoppeld"
+      : state === "unavailable" ? "Niet beschikbaar" : "Geen campagne"}</span>
     : <strong>—</strong>;
   return <ul className="campaign-project-values">
-    {project.campaigns.map((campaign) => {
+    {campaigns.map((campaign) => {
       const shared = campaign.projectCount > 1 ? `CTR en spend voor ${campaign.projectCount} projectpagina’s samen.` : "";
       const status = campaign.live === true ? "Live" : campaign.live === false ? "Niet live" : "Onbekend";
-      const ctrDetail = campaign.live !== true ? "CTR wordt alleen voor lopende campagnes getoond."
+      const ctrDetail = channel === "facebook" && campaign.live !== true ? "CTR wordt alleen voor lopende campagnes getoond."
         : campaign.unavailable ? "CTR niet beschikbaar." : campaign.ctr === null ? "Geen vertoningen in deze periode." : "";
       return <li key={`${campaign.accountId}:${campaign.id}`} data-campaign-id={campaign.id}>
         {metric === "ctr" ? <CampaignCtr name={campaign.name} ctr={campaign.ctr} detail={`${status}. ${ctrDetail} ${shared}`.trim()} />

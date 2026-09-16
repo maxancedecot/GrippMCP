@@ -30,6 +30,7 @@ export type CampaignPerformanceRow = {
   name: string;
   url: string;
   google: CampaignSource<AdPerformance>;
+  googleCampaignPages: CampaignSource<CampaignPageMatch[]>;
   facebook: CampaignSource<AdPerformance>;
   facebookLinkCtr: CampaignSource<LinkCtrPerformance>;
   facebookCampaignPages: CampaignSource<CampaignPageMatch[]>;
@@ -66,8 +67,13 @@ type Options = {
 const numeric = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/)]).transform(Number).pipe(z.number().finite().nonnegative());
 const googleRow = z.object({
   customer: z.object({ currencyCode: id }).optional(),
-  campaign: z.object({ id, status: id.optional(), primaryStatus: id.optional() }).optional(),
+  campaign: z.object({ id, name: id.optional(), status: id.optional(), primaryStatus: id.optional() }).optional(),
   metrics: z.object({ clicks: numeric.optional(), impressions: numeric.optional(), costMicros: numeric.optional() }).optional()
+});
+const googleDestinationRow = z.object({
+  campaign: z.object({ id: numericId }),
+  adGroupAd: z.object({ ad: z.object({ finalUrls: z.array(id).optional(), finalMobileUrls: z.array(id).optional() }) }).optional(),
+  assetGroup: z.object({ finalUrls: z.array(id).optional(), finalMobileUrls: z.array(id).optional() }).optional()
 });
 const metaCampaign = z.object({ id, name: id, effective_status: id, start_time: id.optional(), stop_time: id.optional() });
 const metaInsight = z.object({ campaign_id: id, campaign_name: id, clicks: numeric.optional(), impressions: numeric, spend: numeric });
@@ -131,13 +137,16 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   for (let offset = 0; offset < sites.length; offset += 3) {
     rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
       const mapping = mappings.find((item) => item.siteId === site.id);
-      const explicitMatches = projectMatches.filter((match) => match.siteId === site.id && match.accountId === mapping?.facebook?.adAccountId);
+      const explicitMatches = projectMatches.filter((match) => (match.channel ?? "facebook") === "facebook" && match.siteId === site.id && match.accountId === mapping?.facebook?.adAccountId);
+      const googleMatches = projectMatches.filter((match) => match.channel === "google" && match.siteId === site.id && match.accountId === mapping?.google?.customerId);
       const facebookRequest = loadFacebook(mapping?.facebook);
-      const [google, facebook, facebookLinkCtr, destinations] = await Promise.all([
-        loadGoogle(mapping?.google), facebookRequest, facebookRequest.then(loadCurrentFacebookLinkCtr),
+      const googleRequest = loadGoogle(mapping?.google);
+      const [google, facebook, facebookLinkCtr, destinations, googleDestinations] = await Promise.all([
+        googleRequest, facebookRequest, facebookRequest.then(loadCurrentFacebookLinkCtr),
         facebookRequest.then((source) => loadFacebookDestinations(source.data ? {
           ...source, data: { ...source.data, campaigns: source.data.campaigns.filter((campaign) => !explicitMatches.some((match) => match.campaignId === campaign.id)) }
-        } : source))
+        } : source)),
+        googleRequest.then((source) => loadGoogleDestinations(mapping?.google, source, googleMatches.map((match) => match.campaignId)))
       ]);
       const siteProjects = conversionRows.filter((project) => project.siteId === site.id);
       const explicitPages = explicitMatches.filter((match) => facebook.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
@@ -148,6 +157,14 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         data: [...explicitPages, ...(destinations.data ?? []).map((campaign) => ({ campaignId: campaign.campaignId,
           pages: matchCampaignPages(site.url, campaign.urls, siteProjects) }))]
       } : destinations;
+      const googleExplicitPages = googleMatches.filter((match) => google.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
+        .map((match) => ({ campaignId: match.campaignId,
+          pages: matchCampaignPages(site.url, match.sourcePaths.map((path) => new URL(path, site.url).toString()), siteProjects) }));
+      const googleCampaignPages: CampaignSource<CampaignPageMatch[]> = googleDestinations.data || googleExplicitPages.length ? {
+        state: "connected", message: googleDestinations.state === "unavailable" ? "Niet alle Google-campagnes konden aan een projectpagina worden gekoppeld." : "",
+        data: [...googleExplicitPages, ...(googleDestinations.data ?? []).map((campaign) => ({ campaignId: campaign.campaignId,
+          pages: matchCampaignPages(site.url, campaign.urls, siteProjects) }))]
+      } : googleDestinations;
       // A verified destination on another website must not inherit this site's
       // CTR merely because both campaigns share an advertising account.
       const otherSiteCampaigns = new Set(destinations.data?.filter((campaign) => campaign.urls.length > 0
@@ -159,7 +176,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         message: facebookLinkCtr.data.campaigns.length > 0 && scopedCampaigns.length === 0 ? "Geen lopende Ledoux-campagne voor deze website" : facebookLinkCtr.message
       } : facebookLinkCtr;
       return {
-        siteId: site.id, name: site.name, url: site.url, google, facebook, facebookLinkCtr: scopedLinkCtr, facebookCampaignPages,
+        siteId: site.id, name: site.name, url: site.url, google, googleCampaignPages, facebook, facebookLinkCtr: scopedLinkCtr, facebookCampaignPages,
         leads: websiteConversions(site.id, "brochure"), appointments: websiteConversions(site.id, "appointment"),
         websiteCvr: site.cvrLinkCount > 0 && site.cvrSourceVisitors > 0 ? site.conversionRatePercent : null,
         websiteVisitors: site.cvrSourceVisitors, websiteConversions: site.cvrConversionVisitors
@@ -284,28 +301,53 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     return pending;
   }
 
+  async function googleQuery<T extends z.ZodTypeAny>(config: NonNullable<CampaignSiteMapping["google"]>, text: string, schema: T): Promise<z.output<T>[]> {
+    const version = z.string().regex(/^v\d+$/).parse(env.GOOGLE_ADS_API_VERSION ?? "v25");
+    const headers: Record<string, string> = { Authorization: `Bearer ${await getGoogleToken()}`, "Content-Type": "application/json" };
+    if (env.GOOGLE_ADS_DEVELOPER_TOKEN) headers["developer-token"] = env.GOOGLE_ADS_DEVELOPER_TOKEN;
+    const loginId = config.loginCustomerId ?? env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
+    if (loginId) headers["login-customer-id"] = googleId.parse(loginId);
+    const chunks = z.array(z.object({ results: z.array(schema).optional() })).parse(await request(
+      `https://googleads.googleapis.com/${version}/customers/${config.customerId}/googleAds:searchStream`,
+      { method: "POST", headers, body: JSON.stringify({ query: text }) }
+    ));
+    return chunks.flatMap((chunk) => chunk.results ?? []);
+  }
+
+  async function loadGoogleDestinations(config: CampaignSiteMapping["google"], source: CampaignSource<AdPerformance>, matchedIds: string[]): Promise<CampaignSource<CampaignDestinations>> {
+    if (!source.data) return { state: source.state, data: null, message: source.message };
+    const campaignIds = source.data.campaigns.map((campaign) => campaign.id).filter((id) => !matchedIds.includes(id));
+    if (!campaignIds.length) return { state: "connected", data: [], message: "" };
+    return safely(async () => {
+      if (!config) throw new Error("Missing Google account");
+      const filter = `campaign.id IN (${campaignIds.map((value) => numericId.parse(value)).join(",")})`;
+      const [ads, groups] = await Promise.all([
+        googleQuery(config, `SELECT campaign.id, ad_group_ad.ad.final_urls, ad_group_ad.ad.final_mobile_urls FROM ad_group_ad WHERE ${filter} AND ad_group_ad.status != 'REMOVED'`, googleDestinationRow),
+        googleQuery(config, `SELECT campaign.id, asset_group.final_urls, asset_group.final_mobile_urls FROM asset_group WHERE ${filter} AND asset_group.status != 'REMOVED'`, googleDestinationRow)
+      ]);
+      const destinations = new Map(campaignIds.map((id) => [id, new Set<string>()]));
+      for (const row of [...ads, ...groups]) {
+        const urls = destinations.get(row.campaign.id);
+        if (!urls) throw new Error("Unexpected Google campaign destination");
+        const destination = row.adGroupAd?.ad ?? row.assetGroup;
+        if (!destination) throw new Error("Missing Google destination fields");
+        for (const url of [...destination.finalUrls ?? [], ...destination.finalMobileUrls ?? []]) urls.add(url);
+      }
+      return [...destinations].map(([campaignId, urls]) => ({ campaignId, urls: [...urls] }));
+    }, "De projectpagina’s van Google Ads konden niet worden gecontroleerd.");
+  }
+
   async function loadGoogle(config: CampaignSiteMapping["google"]): Promise<CampaignSource<AdPerformance>> {
     if (!config || !env.GOOGLE_ADS_CLIENT_ID || !env.GOOGLE_ADS_CLIENT_SECRET || !env.GOOGLE_ADS_REFRESH_TOKEN) {
       return missing("Google Ads is nog niet gekoppeld.");
     }
     return safely(async () => {
-      const version = z.string().regex(/^v\d+$/).parse(env.GOOGLE_ADS_API_VERSION ?? "v25");
-      const headers: Record<string, string> = { Authorization: `Bearer ${await getGoogleToken()}`, "Content-Type": "application/json" };
-      if (env.GOOGLE_ADS_DEVELOPER_TOKEN) headers["developer-token"] = env.GOOGLE_ADS_DEVELOPER_TOKEN;
-      const loginId = config.loginCustomerId ?? env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
-      if (loginId) headers["login-customer-id"] = googleId.parse(loginId);
-      const query = async (text: string) => {
-        const chunks = z.array(z.object({ results: z.array(googleRow).optional() })).parse(await request(
-          `https://googleads.googleapis.com/${version}/customers/${config.customerId}/googleAds:searchStream`,
-          { method: "POST", headers, body: JSON.stringify({ query: text }) }
-        ));
-        return chunks.flatMap((chunk) => chunk.results ?? []);
-      };
+      const query = (text: string) => googleQuery(config, text, googleRow);
       const filter = config.campaignIds ? `campaign.id IN (${config.campaignIds.join(",")})` : "campaign.status != 'REMOVED'";
       const [account, statuses, metrics] = await Promise.all([
         query("SELECT customer.currency_code FROM customer LIMIT 1"),
-        query(`SELECT campaign.id, campaign.status, campaign.primary_status FROM campaign WHERE ${filter}`),
-        query(`SELECT campaign.id, metrics.clicks, metrics.impressions, metrics.cost_micros FROM campaign WHERE segments.date BETWEEN '${dashboard.period.start}' AND '${dashboard.period.end}'${config.campaignIds ? ` AND ${filter}` : ""}`)
+        query(`SELECT campaign.id, campaign.name, campaign.status, campaign.primary_status FROM campaign WHERE ${filter}`),
+        query(`SELECT campaign.id, campaign.name, metrics.clicks, metrics.impressions, metrics.cost_micros FROM campaign WHERE segments.date BETWEEN '${dashboard.period.start}' AND '${dashboard.period.end}'${config.campaignIds ? ` AND ${filter}` : ""}`)
       ]);
       const currency = currencyCode(account[0]?.customer?.currencyCode);
       const campaigns = new Map<string, AdCampaign>();
@@ -313,7 +355,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         if (!row.campaign) throw new Error("Missing campaign");
         const { id: campaignId, status, primaryStatus } = row.campaign;
         campaigns.set(campaignId, {
-          id: campaignId, clicks: 0, impressions: 0, spend: 0,
+          id: campaignId, name: row.campaign.name, clicks: 0, impressions: 0, spend: 0,
           live: status !== "ENABLED" ? false
             : !primaryStatus || ["UNKNOWN", "UNSPECIFIED"].includes(primaryStatus) ? null
             : ["ELIGIBLE", "LIMITED", "LEARNING"].includes(primaryStatus)
@@ -321,7 +363,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       }
       for (const row of metrics) {
         if (!row.campaign || !row.metrics) throw new Error("Missing metrics");
-        const campaign = campaigns.get(row.campaign.id) ?? { id: row.campaign.id, live: false, clicks: 0, impressions: 0, spend: 0 };
+        const campaign = campaigns.get(row.campaign.id) ?? { id: row.campaign.id, name: row.campaign.name, live: false, clicks: 0, impressions: 0, spend: 0 };
         campaign.clicks += row.metrics.clicks ?? 0;
         campaign.impressions += row.metrics.impressions ?? 0;
         campaign.spend += (row.metrics.costMicros ?? 0) / 1_000_000;

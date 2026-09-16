@@ -53,6 +53,8 @@ test("saved project matches require scoped campaign IDs and local project paths"
     assert.throws(() => parseCampaignProjectMatches([{ ...match, sourcePaths }]));
   }
   assert.equal(parseCampaignProjectMatches([match, { ...match, siteId: "site-b" }]).length, 2);
+  assert.equal(parseCampaignProjectMatches([match, { ...match, channel: "google" }]).length, 2);
+  assert.throws(() => parseCampaignProjectMatches([match, { ...match, channel: "facebook" }]));
 });
 
 test("unconfigured providers never fetch and do not invent zeros or live statuses", async () => {
@@ -85,6 +87,7 @@ test("Google separates present delivery status from period metrics and includes 
       assert.equal(new Headers(init?.headers).get("login-customer-id"), "456");
       const query = JSON.parse(String(init?.body)).query as string;
       queries.push(query);
+      if (query.includes("final_urls")) return response([{ results: [] }]);
       if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
       if (query.includes("primary_status")) return response([{ results: [
         { campaign: { id: "1", status: "ENABLED", primaryStatus: "ELIGIBLE" } },
@@ -743,6 +746,7 @@ test("Ads Manager link CTR and both ad providers use the exact custom date range
         if (url.hostname === "oauth2.googleapis.com") return response({ access_token: "access" });
         if (url.hostname === "googleads.googleapis.com") {
           const query = JSON.parse(String(init?.body)).query as string;
+          if (query.includes("final_urls")) return response([{ results: [] }]);
           if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
           if (query.includes("primary_status")) return response([{ results: [{ campaign: { id: "2", status: "ENABLED", primaryStatus: "ELIGIBLE" } }] }]);
           assert.ok(query.includes(`BETWEEN '${range.start}' AND '${range.end}'`));
@@ -820,4 +824,110 @@ test("project campaign spend and live status stay scoped by ID and survive a CTR
     assert.equal((first.leads ?? 0) + (first.appointments ?? 0), 5);
     assert.deepEqual(result.unmatchedCampaigns, []);
   }
+});
+
+test("Google project metrics use exact landing pages and campaign IDs, including PMax and paused period spend", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 5, "/project-one/")];
+  let tokenRequests = 0;
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", google: { customerId: "123", campaignIds: ["1", "2", "3", "4"] } }], googleCredentials),
+    fetchImpl: async (input, init) => {
+      if (String(input).includes("oauth2")) { tokenRequests++; return response({ access_token: "access" }); }
+      const query = JSON.parse(String(init?.body)).query as string;
+      if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
+      if (query.includes("primary_status")) return response([{ results: ["1", "2", "3", "4"].map((id) => ({ campaign: {
+        id, name: `Google ${id}`, status: id === "2" ? "PAUSED" : "ENABLED", primaryStatus: id === "2" ? "PAUSED" : "ELIGIBLE"
+      } })) }]);
+      if (query.includes("metrics.clicks")) return response([{ results: ["1", "2", "3", "4"].reverse().map((id) => ({
+        campaign: { id }, metrics: { clicks: Number(id) * 10, impressions: 100, costMicros: Number(id) * 1000000 }
+      })) }]);
+      assert.match(query, /campaign.id IN \(1,2,3,4\)/);
+      assert.doesNotMatch(query, /segments.date/);
+      if (query.includes("FROM ad_group_ad")) return response([{ results: [
+        { campaign: { id: "1" }, adGroupAd: { ad: { finalUrls: ["https://www.site-a.example/project-one/?utm_source=google#form"], finalMobileUrls: ["https://site-a.example/project-one"] } } },
+        { campaign: { id: "2" }, adGroupAd: { ad: { finalUrls: ["https://site-a.example/project-one"] } } },
+        { campaign: { id: "4" }, adGroupAd: { ad: { finalUrls: ["https://site-a.example.evil.example/project-one"] } } }
+      ] }]);
+      assert.match(query, /FROM asset_group/);
+      return response([{ results: [{ campaign: { id: "3" }, assetGroup: { finalUrls: [
+        "https://site-a.example/project-one/", "https://site-a.example/?p_slug=two&utm_campaign=test"
+      ] } }] }]);
+    }
+  });
+  assert.equal(tokenRequests, 1);
+  const project = result.projects.find((p) => p.key === "site-a:/project-one")!;
+  assert.deepEqual(project.googleCampaigns.map((c) => [c.id, c.name, c.ctr, c.spend, c.live, c.projectCount]), [
+    ["1", "Google 1", 10, 1, true, 1], ["2", "Google 2", 20, 2, false, 1], ["3", "Google 3", 30, 3, true, 2]
+  ]);
+  assert.deepEqual([project.visitors, project.leads, project.appointments, project.cvr], [50, 5, 0, 10]);
+  const other = result.projects.find((p) => p.key === "site-a:/?p_slug=two")!;
+  assert.equal(other.googleCampaigns[0].id, "3");
+  assert.equal(other.leads, null);
+  assert.equal(other.cvr, null);
+  assert.deepEqual(project.campaigns, []);
+  assert.deepEqual(result.unmatchedCampaigns.map((c) => [c.channel, c.campaignId]), [["google", "4"]]);
+  assert.equal(summarizeAds([result.rows[0].google]).spend[0].amount, 10, "Shared project campaigns are not duplicated in totals");
+});
+
+test("saved Google project aliases stay separate from Facebook and do not duplicate website conversions", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 5, "/home")];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", google: { customerId: "123" }, facebook: { adAccountId: "123" } }], { ...googleCredentials, META_ADS_ACCESS_TOKEN: "meta" }),
+    projectMatches: [
+      { channel: "google", siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/home"] },
+      { siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/home"] },
+      { channel: "google", siteId: "site-a", accountId: "999", campaignId: "1", sourcePaths: ["/wrong"] }
+    ],
+    fetchImpl: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.hostname === "oauth2.googleapis.com") return response({ access_token: "access" });
+      if (url.hostname === "googleads.googleapis.com") {
+        const query = JSON.parse(String(init?.body)).query as string;
+        assert.doesNotMatch(query, /final_urls/);
+        if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
+        if (query.includes("primary_status")) return response([{ results: [{ campaign: { id: "1", name: "Google home", status: "PAUSED", primaryStatus: "PAUSED" } }] }]);
+        return response([{ results: [{ campaign: { id: "1" }, metrics: { clicks: 0, impressions: 0, costMicros: 0 } }] }]);
+      }
+      assert.ok(!url.pathname.endsWith("/ads"));
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", name: "Ledoux home", effective_status: "ACTIVE" }] });
+      if (isLinkCtrRequest(url)) return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux home", inline_link_click_ctr: "2", impressions: "100" }] });
+      if (url.pathname.endsWith("/insights")) return response({ data: [] });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.projects.length, 1);
+  const project = result.projects[0];
+  assert.equal(project.key, "site-a:/home");
+  assert.equal(project.googleState, "connected");
+  assert.equal(project.googleCampaigns[0].ctr, null);
+  assert.equal(project.googleCampaigns[0].spend, 0);
+  assert.equal(project.googleCampaigns[0].live, false);
+  assert.equal(project.campaigns[0].ctr, 2);
+  assert.equal(project.leads, 5);
+  assert.deepEqual(result.unmatchedCampaigns, []);
+});
+
+test("Google destination failure keeps verified project metrics and does not invent matches for unknown campaigns", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt", 2, "/home")];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", google: { customerId: "123" } }], googleCredentials),
+    projectMatches: [{ channel: "google", siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/home"] }],
+    fetchImpl: async (input, init) => {
+      if (String(input).includes("oauth2")) return response({ access_token: "access" });
+      const query = JSON.parse(String(init?.body)).query as string;
+      if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
+      if (query.includes("primary_status")) return response([{ results: ["1", "2"].map((id) => ({ campaign: { id, status: "ENABLED", primaryStatus: "ELIGIBLE" } })) }]);
+      if (query.includes("metrics.clicks")) return response([{ results: [{ campaign: { id: "1" }, metrics: { clicks: 3, impressions: 100, costMicros: 5000000 } }] }]);
+      return new Response("provider detail must not leak", { status: 503 });
+    }
+  });
+  assert.equal(result.rows[0].google.state, "connected");
+  assert.equal(result.projects[0].googleCampaigns[0].ctr, 3);
+  assert.equal(result.projects[0].googleCampaigns[0].spend, 5);
+  assert.match(result.rows[0].googleCampaignPages.message, /Niet alle Google/);
+  assert.deepEqual(result.unmatchedCampaigns.map((c) => c.campaignId), ["2"]);
+  assert.doesNotMatch(JSON.stringify(result), /provider detail/);
 });
