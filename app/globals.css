@@ -1721,6 +1721,13 @@ td .inline-bar {
   text-underline-offset: 4px;
 }
 
+.campaign-google-summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  white-space: nowrap;
+}
+
 .campaign-ctr-trigger:focus-visible {
   outline: 2px solid var(--good);
   outline-offset: 4px;

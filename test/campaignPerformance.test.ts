@@ -5,7 +5,7 @@ import {
   type AdPerformance, type CampaignSiteMapping, type CampaignSource
 } from "../src/campaignPerformance.js";
 import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
-import { parseCampaignProjectMatches } from "../src/campaignProjects.js";
+import { parseCampaignProjectMatches, summarizeGoogleProjectCampaigns, type GoogleProjectCampaign } from "../src/campaignProjects.js";
 import type { SiteAnalyticsCvrLinkRow, SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
 
 const period = { days: 7, start: "2026-09-08", end: "2026-09-14", label: "Laatste 7 dagen" };
@@ -860,6 +860,8 @@ test("Google project metrics use exact landing pages and campaign IDs, including
   assert.deepEqual(project.googleCampaigns.map((c) => [c.id, c.name, c.ctr, c.spend, c.live, c.projectCount]), [
     ["1", "Google 1", 10, 1, true, 1], ["2", "Google 2", 20, 2, false, 1], ["3", "Google 3", 30, 3, true, 2]
   ]);
+  assert.equal(summarizeGoogleProjectCampaigns(project.googleCampaigns).ctr, 20);
+  assert.deepEqual(project.googleCampaigns.map((c) => [c.clicks, c.impressions]), [[10, 100], [20, 100], [30, 100]]);
   assert.deepEqual([project.visitors, project.leads, project.appointments, project.cvr], [50, 5, 0, 10]);
   const other = result.projects.find((p) => p.key === "site-a:/?p_slug=two")!;
   assert.equal(other.googleCampaigns[0].id, "3");
@@ -868,6 +870,25 @@ test("Google project metrics use exact landing pages and campaign IDs, including
   assert.deepEqual(project.campaigns, []);
   assert.deepEqual(result.unmatchedCampaigns.map((c) => [c.channel, c.campaignId]), [["google", "4"]]);
   assert.equal(summarizeAds([result.rows[0].google]).spend[0].amount, 10, "Shared project campaigns are not duplicated in totals");
+});
+
+test("Google project summaries weight CTR by impressions, total spend and combine live status", () => {
+  const campaign = (id: string, clicks: number, impressions: number, spend: number, live: boolean | null, currency = "EUR"): GoogleProjectCampaign => ({
+    id, accountId: "123", name: id, clicks, impressions, spend, live, currency,
+    ctr: impressions ? clicks / impressions * 100 : null, unavailable: false, projectCount: 1
+  });
+  const campaigns = [campaign("1", 10, 100, 12, true), campaign("2", 20, 1000, 18, false), campaign("3", 0, 0, 0, null)];
+  assert.deepEqual(summarizeGoogleProjectCampaigns(campaigns), {
+    ctr: 30 / 1100 * 100, spend: [{ currency: "EUR", amount: 30 }], live: true
+  });
+  assert.deepEqual(summarizeGoogleProjectCampaigns([]), { ctr: null, spend: [], live: null });
+  assert.deepEqual(summarizeGoogleProjectCampaigns([campaign("1", 0, 0, 0, false)]), {
+    ctr: null, spend: [{ currency: "EUR", amount: 0 }], live: false
+  });
+  assert.equal(summarizeGoogleProjectCampaigns([campaign("1", 0, 100, 1, false)]).ctr, 0);
+  assert.equal(summarizeGoogleProjectCampaigns(campaigns.slice(1)).live, null);
+  assert.deepEqual(summarizeGoogleProjectCampaigns([campaign("1", 1, 100, 12, false), campaign("2", 1, 100, 20, false, "USD")]).spend,
+    [{ currency: "EUR", amount: 12 }, { currency: "USD", amount: 20 }]);
 });
 
 test("saved Google project aliases stay separate from Facebook and do not duplicate website conversions", async () => {

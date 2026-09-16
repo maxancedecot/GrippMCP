@@ -41,6 +41,20 @@ export type ProjectCampaign = {
   unavailable: boolean;
   projectCount: number;
 };
+export type GoogleProjectCampaign = ProjectCampaign & { clicks: number; impressions: number };
+
+export function summarizeGoogleProjectCampaigns(campaigns: GoogleProjectCampaign[]) {
+  const clicks = campaigns.reduce((sum, campaign) => sum + campaign.clicks, 0);
+  const impressions = campaigns.reduce((sum, campaign) => sum + campaign.impressions, 0);
+  const amounts = new Map<string, number>();
+  for (const campaign of campaigns) amounts.set(campaign.currency, (amounts.get(campaign.currency) ?? 0) + campaign.spend);
+  return {
+    ctr: impressions > 0 ? clicks / impressions * 100 : null,
+    spend: [...amounts].map(([currency, amount]) => ({ currency, amount })),
+    live: campaigns.some((campaign) => campaign.live === true) ? true
+      : campaigns.length > 0 && campaigns.every((campaign) => campaign.live === false) ? false : null
+  };
+}
 export type CampaignProjectRow = {
   key: string;
   siteId: string;
@@ -56,7 +70,7 @@ export type CampaignProjectRow = {
   facebookState: CampaignSource<unknown>["state"];
   campaigns: ProjectCampaign[];
   googleState: CampaignSource<unknown>["state"];
-  googleCampaigns: ProjectCampaign[];
+  googleCampaigns: GoogleProjectCampaign[];
 };
 export type UnmatchedProjectCampaign = { channel: "facebook" | "google"; siteId: string; siteName: string; campaignId: string; campaignName: string };
 
@@ -118,6 +132,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         const accountId = site.google.data!.accountId;
         if (project.googleCampaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
         project.googleCampaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id,
+          clicks: campaign.clicks, impressions: campaign.impressions,
           ctr: campaign.impressions > 0 ? campaign.clicks / campaign.impressions * 100 : null,
           spend: campaign.spend, currency: site.google.data!.currency, live: campaign.live,
           unavailable: false, projectCount: uniquePages.length });
