@@ -104,23 +104,23 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     };
     for (const project of conversions.filter((row) => row.siteId === site.siteId && !isExcludedAnalyticsLink(row.sourcePath))) ensureProject(project.sourcePath, project.sourceTitle);
     // Keep saved matches for stopped campaigns so their period spend and current
-    // status remain visible. CTR still uses only the currently running selection.
+    // status remain visible. CTR follows the selected reporting period.
     for (const account of (site.facebookAccounts ?? [site])) {
       for (const campaign of account.facebook.data?.campaigns ?? []) {
         const pages = account.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
         const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [normalizeProjectPath(page.path), page])).values()];
         if (uniquePages.length === 0) {
-          if (campaign.live === true) unmatchedCampaigns.push({ channel: "facebook", accountId: account.facebook.data?.accountId, siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
+          if (campaign.live === true || campaign.impressions > 0 || campaign.spend > 0) unmatchedCampaigns.push({ channel: "facebook", accountId: account.facebook.data?.accountId, siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
           continue;
         }
         for (const page of uniquePages) {
           const project = ensureProject(page.path, page.title);
           const accountId = account.facebook.data!.accountId;
           if (project.campaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
-          const ctr = campaign.live === true ? account.facebookLinkCtr.data?.campaigns.find((metric) => metric.id === campaign.id)?.ctr ?? null : null;
+          const ctr = account.facebookLinkCtr.data?.campaigns.find((metric) => metric.id === campaign.id)?.ctr ?? null;
           project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr,
             spend: campaign.spend, currency: account.facebook.data!.currency, live: campaign.live,
-            unavailable: campaign.live === true && account.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
+            unavailable: (campaign.live === true || campaign.impressions > 0 || campaign.spend > 0) && account.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
         }
       }
     }

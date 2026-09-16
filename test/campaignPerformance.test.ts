@@ -127,13 +127,14 @@ test("Facebook follows cursors on a fixed host, filters campaigns and honors sch
         { id: "4", name: "Ledoux campagne", effective_status: "PAUSED" },
         { id: "5", name: "Ledoux campagne", effective_status: "ACTIVE", stop_time: "2026-09-13T00:00:00Z" }
       ] });
+      if (url.searchParams.get("level") === "ad") return response({ data: [] });
       if (url.pathname.endsWith("/insights")) {
         assert.deepEqual(JSON.parse(url.searchParams.get("time_range")!), { since: period.start, until: period.end });
         if (isLinkCtrRequest(url)) {
           assert.equal(url.searchParams.get("time_increment"), "all_days");
           assert.equal(url.searchParams.get("fields"), "campaign_id,campaign_name,inline_link_click_ctr,impressions");
-          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!), [{ field: "campaign.id", operator: "IN", value: ["1"] }]);
-          return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux campagne", inline_link_click_ctr: "10", impressions: "200", unique_ctr: "25", unique_clicks: "50" }] });
+          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!), [{ field: "campaign.id", operator: "IN", value: ["1", "2"] }]);
+          return response({ data: ["1", "2"].map((id) => ({ campaign_id: id, campaign_name: "Ledoux campagne", inline_link_click_ctr: "10", impressions: "200", unique_ctr: "25", unique_clicks: "50" })) });
         }
         if (!url.searchParams.has("after")) return response({ data: [
           { campaign_id: "1", campaign_name: "Ledoux campagne", clicks: "10", impressions: "100", spend: "5" }
@@ -278,11 +279,11 @@ test("Meta can return no insights for a connected account without inventing a ze
   assert.equal(result.rows[0].facebookLinkCtr.data?.ctr, null);
   assert.equal(result.facebookLinkCtr.unavailable, false);
   assert.equal(result.facebookLinkCtr.ctr, null);
-  assert.equal(result.rows[0].facebookLinkCtr.message, "Geen lopende Ledoux-campagne");
+  assert.equal(result.rows[0].facebookLinkCtr.message, "Geen Ledoux-campagne met vertoningen in deze periode");
   assert.equal(linkCtrRequests, 0);
 });
 
-test("no running campaigns never triggers an unfiltered link CTR query, even with historical clicks", async () => {
+test("paused, expired, future-scheduled and disabled accounts retain scoped historical link CTR", async () => {
   for (const scenario of [
     { account_status: 1, campaign: { id: "1", name: "Ledoux campagne", effective_status: "PAUSED" } },
     { account_status: 1, campaign: { id: "1", name: "Ledoux campagne", effective_status: "ACTIVE", start_time: "2026-09-15T00:00:00Z" } },
@@ -294,16 +295,19 @@ test("no running campaigns never triggers an unfiltered link CTR query, even wit
       env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
       fetchImpl: async (input) => {
         const url = new URL(String(input));
-        assert.equal(isLinkCtrRequest(url), false, "An empty running selection must not fetch CTR insights");
+        if (isLinkCtrRequest(url)) {
+          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!)[0].value, ["1"]);
+          return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux campagne", inline_link_click_ctr: "5", impressions: "1000" }] });
+        }
         if (url.pathname.endsWith("/campaigns")) return response({ data: [scenario.campaign] });
         if (url.pathname.endsWith("/insights")) return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux campagne", clicks: "500", impressions: "1000", spend: "50" }] });
         return response({ currency: "EUR", account_status: scenario.account_status });
       }
     });
     assert.equal(result.rows[0].facebookLinkCtr.state, "connected");
-    assert.equal(result.rows[0].facebookLinkCtr.data?.ctr, null);
-    assert.equal(result.rows[0].facebookLinkCtr.message, "Geen lopende Ledoux-campagne");
-    assert.equal(result.facebookLinkCtr.ctr, null);
+    assert.equal(result.rows[0].facebookLinkCtr.data?.ctr, 5);
+    assert.equal(result.rows[0].facebook.data?.campaigns[0].live, false);
+    assert.equal(result.facebookLinkCtr.ctr, 5);
     assert.equal(result.facebookLinkCtr.unavailable, false);
   }
 });
@@ -446,8 +450,8 @@ test("Facebook includes only Ledoux names for status, spend and link CTR within 
         return response({ data: metrics });
       }
       if (isLinkCtrRequest(url)) {
-        assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!)[0].value, ["1"]);
-        return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux campagne", inline_link_click_ctr: "4", impressions: "100" }] });
+        assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!)[0].value, ["1", "3", "4"]);
+        return response({ data: ["1", "3", "4"].map((id) => ({ campaign_id: id, campaign_name: "Ledoux campagne", inline_link_click_ctr: "4", impressions: "100" })) });
       }
       return response({ currency: "EUR", account_status: 1 });
     }
@@ -477,7 +481,7 @@ test("a valid Facebook mapping without Ledoux campaigns stays connected and neve
     assert.equal(rows[0].facebook.state, "connected");
     assert.deepEqual(rows[0].facebook.data?.campaigns, []);
     assert.deepEqual(summarizeAds([rows[0].facebook]).spend, [{ currency: "EUR", amount: 0 }]);
-    assert.equal(rows[0].facebookLinkCtr.message, "Geen lopende Ledoux-campagne");
+    assert.equal(rows[0].facebookLinkCtr.message, "Geen Ledoux-campagne met vertoningen in deze periode");
     assert.equal(facebookLinkCtr.unavailable, false);
     assert.equal(facebookLinkCtr.ctr, null);
   }
@@ -684,7 +688,7 @@ test("saved campaign matches join the exact project counters and keep shared cam
   assert.equal(result.projects.reduce((sum, project) => sum + (project.leads ?? 0), 0), 21);
 });
 
-test("homepage aliases keep paused matches and never include paused campaigns in current CTR", async () => {
+test("homepage aliases retain paused matches and show no CTR without period activity", async () => {
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt", 3, "/home"), conversionLink("site-a", "/bedankt", 0, "/other-project")];
   const result = await getCampaignPerformance(data, {
@@ -796,9 +800,9 @@ test("project campaign spend and live status stay scoped by ID and survive a CTR
           id, name: "Ledoux same campaign name", effective_status: id === "2" || id === "4" ? "PAUSED" : "ACTIVE"
         })) });
         if (isLinkCtrRequest(url)) {
-          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!)[0].value, ["1", "3"]);
+          assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!)[0].value, ["1", "2", "3", "4"]);
           if (ctrFailure) return new Response("Unavailable", { status: 503 });
-          return response({ data: ["3", "1"].map((id) => ({ campaign_id: id, campaign_name: "Ledoux same campaign name", inline_link_click_ctr: id, impressions: "100" })) });
+          return response({ data: ["3", "2", "4", "1"].map((id) => ({ campaign_id: id, campaign_name: "Ledoux same campaign name", inline_link_click_ctr: id, impressions: "100" })) });
         }
         if (url.pathname.endsWith("/insights")) return response({ data: [
           { campaign_id: "1", campaign_name: "Ledoux same campaign name", impressions: "100", spend: "12.34" },
@@ -818,11 +822,11 @@ test("project campaign spend and live status stay scoped by ID and survive a CTR
     assert.equal(first.campaigns[0].projectCount, 2);
     assert.equal(first.campaigns[0].ctr, ctrFailure ? null : 1);
     assert.equal(first.campaigns[0].unavailable, ctrFailure);
-    assert.equal(first.campaigns[1].ctr, null);
-    assert.equal(first.campaigns[1].unavailable, false);
+    assert.equal(first.campaigns[1].ctr, ctrFailure ? null : 2);
+    assert.equal(first.campaigns[1].unavailable, ctrFailure);
     assert.equal(first.facebookState, "connected");
     assert.equal((first.leads ?? 0) + (first.appointments ?? 0), 5);
-    assert.deepEqual(result.unmatchedCampaigns, []);
+    assert.deepEqual(result.unmatchedCampaigns.map((campaign) => campaign.campaignId), ["4"]);
   }
 });
 
@@ -984,8 +988,8 @@ test("automatic Meta discovery adds accounts and campaigns without duplicating w
   assert.equal(result.projects[1].campaigns.length, 1);
   assert.equal(result.projects[0].leads, 3);
   assert.equal(summarizeWebsiteConversions(result.rows.map((row) => row.leads)).count, 5);
-  assert.equal(result.facebookLinkCtr.campaigns, 2);
-  assert.equal(result.facebookLinkCtr.ctr, 4, "shared campaign counted once");
+  assert.equal(result.facebookLinkCtr.campaigns, 3);
+  assert.equal(result.facebookLinkCtr.ctr, 14 / 3, "shared campaign counted once, including paused period activity");
   assert.deepEqual(summarizeAds(result.rows.flatMap((row) => row.facebookAccounts!.map((account) => account.facebook))).spend, [{ currency: "EUR", amount: 35 }]);
 });
 
@@ -1001,4 +1005,67 @@ test("Meta account-list failure leaves configured campaigns available with a vis
   });
   assert.equal(result.rows[0].facebook.state, "connected");
   assert.equal(result.metaSync?.state, "unavailable");
+});
+
+test("stopped campaigns match only ads delivered in the selected period, with period-scoped destination caches", async () => {
+  const previousStore = process.env.JSON_CACHE_STORE;
+  process.env.JSON_CACHE_STORE = "memory";
+  try {
+    let destinationRequests = 0;
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "7001", name: "Ledoux launch", effective_status: "ACTIVE", stop_time: "2026-09-10T10:00:00Z" }] });
+      if (isLinkCtrRequest(url)) return response({ data: [{ campaign_id: "7001", campaign_name: "Ledoux launch", impressions: "100", inline_link_click_ctr: "3.25" }] });
+      if (url.searchParams.get("level") === "ad") {
+        assert.equal(url.pathname, "/v26.0/7001/insights");
+        const range = JSON.parse(url.searchParams.get("time_range")!);
+        if (!url.searchParams.has("after")) return response({ data: [{ ad_id: range.since === "2026-09-08" ? "10" : "20", campaign_id: "7001", impressions: "100", spend: "50" }],
+          paging: { next: "https://untrusted.example/next", cursors: { after: "second" } } });
+        assert.equal(url.hostname, "graph.facebook.com");
+        return response({ data: [{ ad_id: "30", campaign_id: "7001", impressions: "0", spend: "0" }] });
+      }
+      if (url.pathname.endsWith("/insights")) return response({ data: [{ campaign_id: "7001", campaign_name: "Ledoux launch", impressions: "100", spend: "50" }] });
+      if (url.pathname.endsWith("/ads")) {
+        destinationRequests++;
+        assert.equal(url.searchParams.has("filtering"), false, "historical ads must not be filtered by current ACTIVE status");
+        return response({ data: ["10", "20", "30"].map((id) => ({ id, campaign_id: "7001", creative: { link_url: `https://site-a.example/project-${id}` } })) });
+      }
+      return response({ currency: "EUR", account_status: 1 });
+    };
+    const options = { env: environment([{ siteId: "site-a", facebook: { adAccountId: "7000" } }], { META_ADS_ACCESS_TOKEN: "historical" }), fetchImpl, cacheCampaignPages: true, now: new Date("2026-09-16T12:00:00Z") };
+    const first = await getCampaignPerformance(dashboard(), options);
+    assert.equal(first.projects.length, 1);
+    assert.equal(first.projects[0].sourcePath, "/project-10");
+    assert.deepEqual(first.projects[0].campaigns.map(({ ctr, spend, live }) => ({ ctr, spend, live })), [{ ctr: 3.25, spend: 50, live: false }]);
+    assert.equal(first.facebookLinkCtr.ctr, 3.25);
+    const otherPeriod = dashboard(); otherPeriod.period = { ...otherPeriod.period, start: "2026-08-24", end: "2026-08-30" };
+    const second = await getCampaignPerformance(otherPeriod, options);
+    assert.equal(second.projects[0].sourcePath, "/project-20");
+    const cached = await getCampaignPerformance(dashboard(), options);
+    assert.equal(cached.projects[0].sourcePath, "/project-10");
+    assert.equal(destinationRequests, 2);
+  } finally {
+    if (previousStore === undefined) delete process.env.JSON_CACHE_STORE;
+    else process.env.JSON_CACHE_STORE = previousStore;
+  }
+});
+
+test("missing historical ad creatives leave period metrics intact and flag the missing project match", async () => {
+  const result = await getCampaignPerformance(dashboard(), {
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", name: "Ledoux historical", effective_status: "PAUSED" }] });
+      if (isLinkCtrRequest(url)) return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux historical", inline_link_click_ctr: "2.5", impressions: "100" }] });
+      if (url.searchParams.get("level") === "ad") return response({ data: [{ ad_id: "10", campaign_id: "1", impressions: "100", spend: "50" }] });
+      if (url.pathname.endsWith("/insights")) return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux historical", impressions: "100", spend: "50" }] });
+      if (url.pathname.endsWith("/ads")) return response({ data: [{ id: "20", campaign_id: "1", creative: { link_url: "https://site-a.example/wrong-period" } }] });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.rows[0].facebookCampaignPages.state, "unavailable");
+  assert.equal(result.rows[0].facebookLinkCtr.data?.ctr, 2.5);
+  assert.equal(result.rows[0].facebook.data?.campaigns[0].spend, 50);
+  assert.equal(result.projects.length, 0);
+  assert.deepEqual(result.unmatchedCampaigns.map((campaign) => campaign.campaignId), ["1"]);
 });

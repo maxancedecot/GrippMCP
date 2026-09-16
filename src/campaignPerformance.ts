@@ -209,7 +209,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     const facebook = await facebookRequests.get(key)!;
     const explicitMatches = projectMatches.filter((match) => (match.channel ?? "facebook") === "facebook" && match.siteId === site.id && match.accountId === config?.adAccountId);
     const [facebookLinkCtr, destinations] = await Promise.all([
-      loadCurrentFacebookLinkCtr(facebook),
+      loadPeriodFacebookLinkCtr(facebook),
       loadFacebookDestinations(facebook.data ? { ...facebook, data: { ...facebook.data,
         campaigns: facebook.data.campaigns.filter((campaign) => !explicitMatches.some((match) => match.campaignId === campaign.id)) } } : facebook)
     ]);
@@ -227,24 +227,26 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     const scopedCampaigns = facebookLinkCtr.data?.campaigns.filter((campaign) => !otherSiteCampaigns.has(campaign.id));
     const scopedLinkCtr = facebookLinkCtr.data && scopedCampaigns ? {
       ...facebookLinkCtr, data: { ...facebookLinkCtr.data, campaigns: scopedCampaigns, ctr: weightedCampaignCtr(scopedCampaigns) },
-      message: facebookLinkCtr.data.campaigns.length > 0 && scopedCampaigns.length === 0 ? "Geen lopende Ledoux-campagne voor deze website" : facebookLinkCtr.message
+      message: facebookLinkCtr.data.campaigns.length > 0 && scopedCampaigns.length === 0 ? "Geen Ledoux-campagne voor deze website in de gekozen periode" : facebookLinkCtr.message
     } : facebookLinkCtr;
     return { facebook, facebookLinkCtr: scopedLinkCtr, facebookCampaignPages };
   }
 
-  function loadCurrentFacebookLinkCtr(source: CampaignSource<AdPerformance>): Promise<CampaignSource<LinkCtrPerformance>> {
+  function loadPeriodFacebookLinkCtr(source: CampaignSource<AdPerformance>): Promise<CampaignSource<LinkCtrPerformance>> {
     if (!source.data) return Promise.resolve({ state: source.state, data: null, message: source.message });
-    return loadFacebookLinkCtr({ adAccountId: source.data.accountId, campaigns: source.data.campaigns.filter((campaign) => campaign.live === true) });
+    return loadFacebookLinkCtr({ adAccountId: source.data.accountId, campaigns: source.data.campaigns.filter((campaign) => campaign.live === true || campaign.impressions > 0 || campaign.spend > 0) });
   }
 
   function loadFacebookDestinations(source: CampaignSource<AdPerformance>): Promise<CampaignSource<CampaignDestinations>> {
     if (!source.data) return Promise.resolve({ state: source.state, data: null, message: source.message });
-    const campaignIds = source.data.campaigns.filter((campaign) => campaign.live === true).map((campaign) => campaign.id).sort();
+    const campaigns = source.data.campaigns.filter((campaign) => campaign.live === true || campaign.impressions > 0 || campaign.spend > 0);
+    const campaignIds = campaigns.map((campaign) => campaign.id).sort();
+    const historicalIds = campaigns.filter((campaign) => campaign.live !== true).map((campaign) => campaign.id).sort();
     if (campaignIds.length === 0) return Promise.resolve({ state: "connected", data: [], message: "" });
-    const key = JSON.stringify([source.data.accountId, campaignIds]);
+    const key = JSON.stringify([source.data.accountId, campaignIds, historicalIds, dashboard.period.start, dashboard.period.end]);
     let pending = destinationRequests.get(key);
     if (!pending) {
-      const cacheKey = `campaign-destinations:v1:${source.data.accountId}:${campaignIds.join(",")}`;
+      const cacheKey = `campaign-destinations:v2:${source.data.accountId}:${campaignIds.join(",")}:${historicalIds.join(",")}:${dashboard.period.start}:${dashboard.period.end}`;
       const useCache = options.cacheCampaignPages ?? !options.fetchImpl;
       pending = (async () => {
         const cached = useCache ? await readJsonCache<CachedCampaignDestinations>(cacheKey).catch(() => null) : null;
@@ -257,18 +259,25 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
           // on large accounts. Bound concurrency and read every campaign page.
           for (let offset = 0; offset < campaignIds.length; offset += 3) {
             await Promise.all(campaignIds.slice(offset, offset + 3).map(async (campaignId) => {
+              const periodAds = historicalIds.includes(campaignId) ? await historicalAdIds(campaignId, version) : null;
+              const foundAds = new Set<string>();
               const params = new URLSearchParams({
-                fields: "campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}", limit: "25",
-                filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }])
+                fields: "id,campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}", limit: "25",
+                ...(periodAds ? {} : { filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }]) })
               });
               for (let page = 0; ; page++) {
                 if (page === MAX_PAGES) throw new Error("Pagination limit");
-                const result = z.object({ data: z.array(z.object({ campaign_id: id, creative: z.unknown().optional() })), paging: graphPaging }).parse(await request(
+                const result = z.object({ data: z.array(z.object({ id: numericId.optional(), campaign_id: id, creative: z.unknown().optional() })), paging: graphPaging }).parse(await request(
                   `https://graph.facebook.com/${version}/${campaignId}/ads?${params}`,
                   { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }
                 ));
                 for (const ad of result.data) {
                   if (ad.campaign_id !== campaignId) throw new Error("Unexpected campaign destination");
+                  if (periodAds) {
+                    if (!ad.id) throw new Error("Missing historical ad ID");
+                    if (!periodAds.has(ad.id)) continue;
+                    foundAds.add(ad.id);
+                  }
                   for (const url of facebookDestinationUrls(ad.creative)) destinations.get(campaignId)!.add(url);
                 }
                 if (!result.paging?.next) break;
@@ -276,6 +285,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
                 if (!after || after === params.get("after")) throw new Error("Incomplete pagination");
                 params.set("after", after);
               }
+              if (periodAds && [...periodAds].some((adId) => !foundAds.has(adId))) throw new Error("Incomplete historical ad destinations");
             }));
           }
           return [...destinations].map(([campaignId, urls]) => ({ campaignId, urls: [...urls] }));
@@ -292,13 +302,35 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     return pending;
   }
 
+  async function historicalAdIds(campaignId: string, version: string): Promise<Set<string>> {
+    const params = new URLSearchParams({ fields: "ad_id,campaign_id,impressions,spend", level: "ad", limit: "100",
+      time_range: JSON.stringify({ since: dashboard.period.start, until: dashboard.period.end }) });
+    const ids = new Set<string>();
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const result = z.object({ data: z.array(z.object({ ad_id: numericId, campaign_id: numericId, impressions: numeric, spend: numeric })), paging: graphPaging })
+        .parse(await request(`https://graph.facebook.com/${version}/${campaignId}/insights?${params}`, { headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` } }));
+      for (const ad of result.data) {
+        if (ad.campaign_id !== campaignId) throw new Error("Unexpected historical campaign");
+        if (ad.impressions > 0 || ad.spend > 0) ids.add(ad.ad_id);
+      }
+      if (!result.paging?.next) {
+        if (!ids.size) throw new Error("Missing historical ad measurements");
+        return ids;
+      }
+      const after = result.paging.cursors?.after;
+      if (!after || after === params.get("after")) throw new Error("Incomplete historical ad pagination");
+      params.set("after", after);
+    }
+    throw new Error("Historical ad pagination limit");
+  }
+
   function loadFacebookLinkCtr(config: FacebookLinkScope): Promise<CampaignSource<LinkCtrPerformance>> {
     if (!env.META_ADS_ACCESS_TOKEN) return Promise.resolve(missing("Facebook Ads is nog niet gekoppeld."));
     const campaignIds = [...new Set(config.campaigns.map((campaign) => campaign.id))].sort();
-    // An empty live selection must never become an unfiltered account query.
+    // An empty period/live selection must never become an unfiltered account query.
     if (campaignIds.length === 0) return Promise.resolve({
       state: "connected", data: { accountId: config.adAccountId, campaigns: [], ctr: null },
-      message: "Geen lopende Ledoux-campagne"
+      message: "Geen Ledoux-campagne met vertoningen in deze periode"
     });
     const key = JSON.stringify([config.adAccountId, campaignIds]);
     let pending = linkCtrRequests.get(key);

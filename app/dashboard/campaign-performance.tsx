@@ -127,7 +127,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
             })} />
           </div>
         )}
-        <p className="campaign-method-note">Google toont per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een Google-cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. Beweeg over de Facebook-CTR voor de campagnenaam. Spend geldt voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
+        <p className="campaign-method-note">Google toont per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een Google-cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. Beweeg over de Facebook-CTR voor de campagnenaam. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
         {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
           <h3>Nog aan een projectpagina te koppelen</h3>
           <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.channel}:${campaign.siteId}:${campaign.accountId ?? ""}:${campaign.campaignId}`}>
@@ -154,7 +154,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
 
       <p className="campaign-method-note">
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
-        Facebook link-CTR wordt per campagne getoond: linkklikken ÷ vertoningen van die campagne, binnen de gekozen periode.
+        Facebook link-CTR wordt per campagne getoond: linkklikken ÷ vertoningen van die campagne, binnen de gekozen periode, ook bij een gestopte campagne.
         Facebook-cijfers tellen alleen campagnes met “Ledoux” in de naam, inclusief hun Instagram-plaatsingen.
         Projectpagina’s worden gekoppeld via vastgelegde campagnekoppelingen of de bestemmingslink van de advertenties.
         Leads = Brochure en Afspraken = Afspraak uit Websiteprestaties, voor dezelfde website en periode.
@@ -177,8 +177,7 @@ function ProjectCampaignMetric({ project, metric, channel = "facebook" }: { proj
     {campaigns.map((campaign) => {
       const shared = campaign.projectCount > 1 ? `CTR en spend voor ${campaign.projectCount} projectpagina’s samen.` : "";
       const status = campaign.live === true ? "Live" : campaign.live === false ? "Niet live" : "Onbekend";
-      const ctrDetail = channel === "facebook" && campaign.live !== true ? "CTR wordt alleen voor lopende campagnes getoond."
-        : campaign.unavailable ? "CTR niet beschikbaar." : campaign.ctr === null ? "Geen vertoningen in deze periode." : "";
+      const ctrDetail = campaign.unavailable ? "CTR niet beschikbaar." : campaign.ctr === null ? "Geen vertoningen in deze periode." : "";
       return <li key={`${campaign.accountId}:${campaign.id}`} data-campaign-id={campaign.id}>
         {metric === "ctr" ? <CampaignCtr name={campaign.name} ctr={campaign.ctr} detail={`${status}. ${ctrDetail} ${shared}`.trim()} />
           : metric === "spend" ? <strong title={`${campaign.name}${shared ? `\n${shared}` : ""}`}>{formatSpend([{ amount: campaign.spend, currency: campaign.currency }])}</strong>
@@ -230,7 +229,7 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
     <p className="campaign-channel-description">{summary.connected > 0
       ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary, "website-accountkoppelingen")}`
       : coverage(summary, "website-accountkoppelingen")}</p>
-    {linkCtr ? <p className="campaign-channel-description">CTR (taux de clics sur le lien) uit Ads Manager, per lopende Ledoux-campagne in de gekozen periode.</p> : null}
+    {linkCtr ? <p className="campaign-channel-description">CTR (taux de clics sur le lien) uit Ads Manager, per Ledoux-campagne in de gekozen periode, ook als die nu niet meer live is.</p> : null}
     <dl className="campaign-channel-metrics">
       <div><dt>{linkCtr ? `Facebook link-CTR${linkCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
         <dd style={{ color: rateColor(linkCtr ? linkCtr.ctr : summary.ctr, 1) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
