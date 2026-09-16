@@ -67,7 +67,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
           <span className="panel-total">{number.format(projects.length)} projectpagina’s</span>
         </div>
         {projects.length === 0 ? <p className="empty-state">Er zijn nog geen projectpagina’s gekoppeld.</p> : (
-          <div className="table-wrap campaign-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
+          <div className="table-wrap campaign-table-wrap campaign-project-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
             <SortableTable className="campaign-project-table" columns={[
               { key: "title", label: "Projectpagina", text: true },
               { key: "ctr", label: "Facebook CTR (link)", description: "Hoogste CTR binnen het project" },

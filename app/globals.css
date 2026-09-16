@@ -1827,8 +1827,24 @@ td .inline-bar {
   .data-management-projects li { flex-direction: column; gap: 4px; }
 }
 
+.campaign-project-table-wrap {
+  max-height: 75vh;
+  max-height: 75dvh;
+  overflow: auto;
+}
+
 .campaign-project-table {
   min-width: 1400px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.campaign-project-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-muted);
+  box-shadow: 0 1px 0 var(--border-strong);
 }
 
 .campaign-project-table tbody th {
