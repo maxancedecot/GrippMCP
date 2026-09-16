@@ -5,7 +5,7 @@ import {
   type AdPerformance, type CampaignSiteMapping, type CampaignSource
 } from "../src/campaignPerformance.js";
 import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
-import { parseCampaignProjectMatches, summarizeGoogleProjectCampaigns, type GoogleProjectCampaign } from "../src/campaignProjects.js";
+import { parseCampaignProjectMatches, summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type ProjectCampaign, type GoogleProjectCampaign } from "../src/campaignProjects.js";
 import type { SiteAnalyticsCvrLinkRow, SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
 
 const period = { days: 7, start: "2026-09-08", end: "2026-09-14", label: "Laatste 7 dagen" };
@@ -1068,4 +1068,43 @@ test("missing historical ad creatives leave period metrics intact and flag the m
   assert.equal(result.rows[0].facebook.data?.campaigns[0].spend, 50);
   assert.equal(result.projects.length, 0);
   assert.deepEqual(result.unmatchedCampaigns.map((campaign) => campaign.campaignId), ["1"]);
+});
+
+
+test("Facebook project summaries weight link CTR, include paused activity and keep spend and status available", () => {
+  const campaign = (impressions: number, ctr: number | null, spend: number, live: boolean | null, unavailable = false, currency = "EUR"): ProjectCampaign => ({
+    id: String(impressions), accountId: "123", name: "Ledoux project", impressions, ctr, spend, live, unavailable, currency, projectCount: 1
+  });
+  const campaigns = [campaign(100, 10, 12.5, false), campaign(900, 1, 7.5, true), campaign(0, null, 0, false)];
+  assert.deepEqual(summarizeFacebookProjectCampaigns(campaigns), { ctr: 1.9, spend: [{ currency: "EUR", amount: 20 }], live: true });
+  assert.deepEqual(summarizeFacebookProjectCampaigns([]), { ctr: null, spend: [], live: null });
+  assert.deepEqual(summarizeFacebookProjectCampaigns([campaign(0, null, 0, false)]), { ctr: null, spend: [{ currency: "EUR", amount: 0 }], live: false });
+  assert.equal(summarizeFacebookProjectCampaigns([campaign(100, 0, 10, false)]).ctr, 0);
+  assert.equal(summarizeFacebookProjectCampaigns([campaign(100, 3.263146, 10, false)]).ctr, 3.263146);
+  assert.deepEqual(summarizeFacebookProjectCampaigns([campaign(100, 2, 12, false), campaign(900, null, 8, null, true)]), {
+    ctr: null, spend: [{ currency: "EUR", amount: 20 }], live: null
+  });
+  assert.equal(summarizeFacebookProjectCampaigns([campaign(100, 2, 12, false), campaign(900, null, 8, false)]).ctr, null);
+  assert.deepEqual(summarizeFacebookProjectCampaigns([campaign(100, 1, 12, false), campaign(900, 1, 8, false, false, "USD")]).spend,
+    [{ currency: "EUR", amount: 12 }, { currency: "USD", amount: 8 }]);
+});
+
+test("Facebook project weighting uses impressions from the same link-CTR measurement", async () => {
+  const result = await getCampaignPerformance(dashboard(), {
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret" }),
+    projectMatches: ["1", "2"].map((id) => ({ siteId: "site-a", accountId: "123", campaignId: id, sourcePaths: ["/project"] })),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/campaigns")) return response({ data: ["1", "2"].map((id) => ({ id, name: `Ledoux ${id}`, effective_status: id === "1" ? "ACTIVE" : "PAUSED" })) });
+      if (isLinkCtrRequest(url)) return response({ data: [
+        { campaign_id: "1", campaign_name: "Ledoux 1", impressions: "100", inline_link_click_ctr: "10" },
+        { campaign_id: "2", campaign_name: "Ledoux 2", impressions: "900", inline_link_click_ctr: "1" }
+      ] });
+      if (url.pathname.endsWith("/insights")) return response({ data: ["1", "2"].map((id) => ({ campaign_id: id, campaign_name: `Ledoux ${id}`, impressions: "100", clicks: "70", spend: "10" })) });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.projects.length, 1);
+  assert.deepEqual(result.projects[0].campaigns.map((campaign) => campaign.impressions), [100, 900]);
+  assert.equal(summarizeFacebookProjectCampaigns(result.projects[0].campaigns).ctr, 1.9);
 });

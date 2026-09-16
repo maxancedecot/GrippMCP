@@ -37,25 +37,40 @@ export type ProjectCampaign = {
   accountId: string;
   name: string;
   ctr: number | null;
+  impressions: number;
   spend: number;
   currency: string;
   live: boolean | null;
   unavailable: boolean;
   projectCount: number;
 };
-export type GoogleProjectCampaign = ProjectCampaign & { clicks: number; impressions: number };
+export type GoogleProjectCampaign = ProjectCampaign & { clicks: number };
 
-export function summarizeGoogleProjectCampaigns(campaigns: GoogleProjectCampaign[]) {
-  const clicks = campaigns.reduce((sum, campaign) => sum + campaign.clicks, 0);
-  const impressions = campaigns.reduce((sum, campaign) => sum + campaign.impressions, 0);
+function summarizeProjectCampaignTotals(campaigns: ProjectCampaign[]) {
   const amounts = new Map<string, number>();
   for (const campaign of campaigns) amounts.set(campaign.currency, (amounts.get(campaign.currency) ?? 0) + campaign.spend);
   return {
-    ctr: impressions > 0 ? clicks / impressions * 100 : null,
     spend: [...amounts].map(([currency, amount]) => ({ currency, amount })),
     live: campaigns.some((campaign) => campaign.live === true) ? true
       : campaigns.length > 0 && campaigns.every((campaign) => campaign.live === false) ? false : null
   };
+}
+
+export function summarizeGoogleProjectCampaigns(campaigns: GoogleProjectCampaign[]) {
+  const clicks = campaigns.reduce((sum, campaign) => sum + campaign.clicks, 0);
+  const impressions = campaigns.reduce((sum, campaign) => sum + campaign.impressions, 0);
+  return { ctr: impressions > 0 ? clicks / impressions * 100 : null, ...summarizeProjectCampaignTotals(campaigns) };
+}
+
+export function summarizeFacebookProjectCampaigns(campaigns: ProjectCampaign[]) {
+  const measured = campaigns.filter((campaign) => campaign.impressions > 0);
+  const impressions = measured.reduce((sum, campaign) => sum + campaign.impressions, 0);
+  const complete = measured.length > 0 && measured.every((campaign) => !campaign.unavailable && campaign.ctr !== null);
+  // Weight Meta's link-CTR with the impressions from that same measurement.
+  // All-click counts are a different metric and must not be substituted here.
+  const ctr = !complete ? null : measured.length === 1 ? measured[0].ctr
+    : measured.reduce((sum, campaign) => sum + campaign.ctr! * campaign.impressions, 0) / impressions;
+  return { ctr, ...summarizeProjectCampaignTotals(campaigns) };
 }
 export type CampaignProjectRow = {
   key: string;
@@ -117,8 +132,9 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
           const project = ensureProject(page.path, page.title);
           const accountId = account.facebook.data!.accountId;
           if (project.campaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
-          const ctr = account.facebookLinkCtr.data?.campaigns.find((metric) => metric.id === campaign.id)?.ctr ?? null;
-          project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr,
+          const metric = account.facebookLinkCtr.data?.campaigns.find((metric) => metric.id === campaign.id);
+          const ctr = metric?.ctr ?? null;
+          project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr, impressions: metric?.impressions ?? campaign.impressions,
             spend: campaign.spend, currency: account.facebook.data!.currency, live: campaign.live,
             unavailable: (campaign.live === true || campaign.impressions > 0 || campaign.spend > 0) && account.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
         }

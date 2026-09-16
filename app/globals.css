@@ -1860,28 +1860,13 @@ td .inline-bar {
   font-variant-numeric: tabular-nums;
 }
 
-.campaign-project-values {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.campaign-project-values li {
-  display: flex;
-  align-items: center;
-  min-height: 30px;
-  white-space: nowrap;
-}
-
 .campaign-ctr-trigger {
   cursor: help;
   text-decoration: underline dotted var(--muted);
   text-underline-offset: 4px;
 }
 
-.campaign-google-summary {
+.campaign-project-summary {
   display: inline-flex;
   align-items: center;
   min-height: 30px;

@@ -4,8 +4,8 @@ import {
 } from "../../src/campaignPerformance.js";
 import type { MetaAccountSync } from "../../src/metaAccountDiscovery.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
-import { summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
-import { highestSortValue, liveSortValue } from "../../src/tableSorting.js";
+import { summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
+import { liveSortValue } from "../../src/tableSorting.js";
 import { SortableTable } from "./sortable-table.js";
 import { getProjectPageManagementData, projectPageKey, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 
@@ -84,7 +84,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
             <SortableTable className="campaign-project-table" columns={[
               { key: "title", label: "Projectpagina", text: true },
               { key: "accountManager", label: "Accountmanager", text: true },
-              { key: "ctr", label: "Facebook CTR (link)", description: "Hoogste CTR binnen het project" },
+              { key: "ctr", label: "Facebook CTR (link)", description: "Gemiddelde CTR, gewogen op vertoningen" },
               { key: "spend", label: "Facebook spend", description: "Totale spend van de campagnes binnen het project" },
               { key: "live", label: "Facebook live" },
               { key: "googleCtr", label: "Google CTR", description: "Gemiddelde CTR, gewogen op vertoningen" },
@@ -93,12 +93,13 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               { key: "leads", label: "Brochure" }, { key: "appointments", label: "Afspraak" }, { key: "cvr", label: "Project CVR" }
             ]} rows={projects.map((project) => {
               const google = summarizeGoogleProjectCampaigns(project.googleCampaigns);
+              const facebook = summarizeFacebookProjectCampaigns(project.campaigns);
               const manager = accountManagers[projectPageKey({ siteId: project.siteId, path: project.sourcePath })];
               return {
                 key: project.key,
                 sortValues: {
                   accountManager: manager?.accountManagerName ?? null,
-                  title: project.title, ctr: highestSortValue(project.campaigns.map((campaign) => campaign.ctr)),
+                  title: project.title, ctr: facebook.ctr,
                   spend: project.campaigns.length ? project.campaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
                   live: liveSortValue(project.campaigns.map((campaign) => campaign.live)),
                   googleCtr: google.ctr,
@@ -111,12 +112,12 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
                     <span className="cell-muted">{project.siteName}</span><span className="cell-muted">{project.sourcePath}</span></th>
                   <td>{manager?.accountManagerName ? <span title={[manager.reason, manager.clientName, manager.grippProjectName].filter(Boolean).join(" · ")}>{manager.accountManagerName}</span>
                     : <a className="cell-muted" href="/dashboard?tab=data-management">Nog toe te wijzen</a>}</td>
-                  <td data-metric="ctr"><ProjectCampaignMetric project={project} metric="ctr" /></td>
-                  <td data-metric="spend"><ProjectCampaignMetric project={project} metric="spend" /></td>
-                  <td data-metric="status"><ProjectCampaignMetric project={project} metric="status" /></td>
-                  <td data-metric="google-ctr"><GoogleProjectMetric project={project} summary={google} metric="ctr" /></td>
-                  <td data-metric="google-spend"><GoogleProjectMetric project={project} summary={google} metric="spend" /></td>
-                  <td data-metric="google-status"><GoogleProjectMetric project={project} summary={google} metric="status" /></td>
+                  <td data-metric="ctr"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="ctr" /></td>
+                  <td data-metric="spend"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="spend" /></td>
+                  <td data-metric="status"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="status" /></td>
+                  <td data-metric="google-ctr"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="ctr" /></td>
+                  <td data-metric="google-spend"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="spend" /></td>
+                  <td data-metric="google-status"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="status" /></td>
                   <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
                   <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
                   <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
@@ -127,7 +128,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
             })} />
           </div>
         )}
-        <p className="campaign-method-note">Google toont per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een Google-cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. Beweeg over de Facebook-CTR voor de campagnenaam. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
+        <p className="campaign-method-note">Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
         {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
           <h3>Nog aan een projectpagina te koppelen</h3>
           <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.channel}:${campaign.siteId}:${campaign.accountId ?? ""}:${campaign.campaignId}`}>
@@ -154,7 +155,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
 
       <p className="campaign-method-note">
         Live = momenteel actief volgens het advertentieplatform. Google CTR = alle klikken ÷ vertoningen.
-        Facebook link-CTR wordt per campagne getoond: linkklikken ÷ vertoningen van die campagne, binnen de gekozen periode, ook bij een gestopte campagne.
+        Facebook link-CTR is het gemiddelde van de campagnepercentages, gewogen op vertoningen in de gekozen periode, ook bij gestopte campagnes.
         Facebook-cijfers tellen alleen campagnes met “Ledoux” in de naam, inclusief hun Instagram-plaatsingen.
         Projectpagina’s worden gekoppeld via vastgelegde campagnekoppelingen of de bestemmingslink van de advertenties.
         Leads = Brochure en Afspraken = Afspraak uit Websiteprestaties, voor dezelfde website en periode.
@@ -166,51 +167,30 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   );
 }
 
-function ProjectCampaignMetric({ project, metric, channel = "facebook" }: { project: CampaignProjectRow; metric: "ctr" | "spend" | "status"; channel?: "facebook" | "google" }) {
+function ProjectCampaignMetric({ project, summary, metric, channel }: {
+  project: CampaignProjectRow; summary: ReturnType<typeof summarizeGoogleProjectCampaigns>; metric: "ctr" | "spend" | "status"; channel: "facebook" | "google";
+}) {
   const campaigns = channel === "google" ? project.googleCampaigns : project.campaigns;
   const state = channel === "google" ? project.googleState : project.facebookState;
-  if (campaigns.length === 0) return metric === "status"
+  if (!campaigns.length) return metric === "status"
     ? <span className="cell-muted">{state === "not_configured" ? "Niet gekoppeld"
       : state === "unavailable" ? "Niet beschikbaar" : "Geen campagne"}</span>
     : <strong>—</strong>;
-  return <ul className="campaign-project-values">
-    {campaigns.map((campaign) => {
-      const shared = campaign.projectCount > 1 ? `CTR en spend voor ${campaign.projectCount} projectpagina’s samen.` : "";
-      const status = campaign.live === true ? "Live" : campaign.live === false ? "Niet live" : "Onbekend";
-      const ctrDetail = campaign.unavailable ? "CTR niet beschikbaar." : campaign.ctr === null ? "Geen vertoningen in deze periode." : "";
-      return <li key={`${campaign.accountId}:${campaign.id}`} data-campaign-id={campaign.id}>
-        {metric === "ctr" ? <CampaignCtr name={campaign.name} ctr={campaign.ctr} detail={`${status}. ${ctrDetail} ${shared}`.trim()} />
-          : metric === "spend" ? <strong title={`${campaign.name}${shared ? `\n${shared}` : ""}`}>{formatSpend([{ amount: campaign.spend, currency: campaign.currency }])}</strong>
-          : <span className={`campaign-status campaign-status--${campaign.live === true ? "live" : campaign.live === false ? "offline" : "unknown"}`} title={campaign.name}>
-            <i aria-hidden="true" />{status}
-          </span>}
-      </li>;
-    })}
-  </ul>;
-}
-
-function GoogleProjectMetric({ project, summary, metric }: {
-  project: CampaignProjectRow; summary: ReturnType<typeof summarizeGoogleProjectCampaigns>; metric: "ctr" | "spend" | "status";
-}) {
-  if (!project.googleCampaigns.length) return <ProjectCampaignMetric project={project} channel="google" metric={metric} />;
   const status = (live: boolean | null) => live === true ? "Live" : live === false ? "Niet live" : "Onbekend";
-  const detail = project.googleCampaigns.map((campaign) => [
+  const detail = campaigns.map((campaign) => [
     campaign.name,
     `CTR: ${percentage(campaign.ctr)} · Spend: ${formatSpend([{ amount: campaign.spend, currency: campaign.currency }])} · ${status(campaign.live)}`,
+    ...(campaign.unavailable || (campaign.ctr === null && campaign.impressions > 0) ? ["CTR niet beschikbaar."]
+      : campaign.impressions === 0 ? ["Geen vertoningen in deze periode."] : []),
     ...(campaign.projectCount > 1 ? [`CTR en spend voor ${campaign.projectCount} projectpagina’s samen.`] : [])
   ].join("\n")).join("\n\n");
-  const title = `Google-campagnes · ${project.title}\nCTR gewogen op vertoningen; spend opgeteld.\n\n${detail}`;
+  const title = `${channel === "facebook" ? "Facebook" : "Google"}-campagnes · ${project.title}\nCTR gewogen op vertoningen; spend opgeteld.\n\n${detail}`;
   const value = metric === "ctr" ? percentage(summary.ctr) : metric === "spend" ? formatSpend(summary.spend) : status(summary.live);
-  return <span className="campaign-google-summary campaign-ctr-trigger" tabIndex={0} title={title} aria-label={`${value}. ${title}`}>
+  return <span className="campaign-project-summary campaign-ctr-trigger" tabIndex={0} title={title} aria-label={`${value}. ${title}`}>
     {metric === "status" ? <span className={`campaign-status campaign-status--${summary.live === true ? "live" : summary.live === false ? "offline" : "unknown"}`}>
       <i aria-hidden="true" />{value}
     </span> : <strong style={metric === "ctr" ? { color: rateColor(summary.ctr, 1) } : undefined}>{value}</strong>}
   </span>;
-}
-
-function CampaignCtr({ name, ctr, detail = "" }: { name: string; ctr: number | null; detail?: string }) {
-  return <strong className="campaign-ctr-trigger" style={{ color: rateColor(ctr, 1) }} tabIndex={0} title={`${name}${detail ? `\n${detail}` : ""}`}
-    aria-label={`${name}: ${percentage(ctr)}${detail ? `. ${detail}` : ""}`}>{percentage(ctr)}</strong>;
 }
 
 function CampaignMetric({ label, value, detail, availability }: { label: string; value: string; detail: string; availability: string }) {
@@ -236,7 +216,7 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
     {linkCtr && linkCtr.campaigns > 1 ? <p className="campaign-method-note">
-      Gewogen op vertoningen per campagne. Hieronder zie je de CTR per campagne.
+      Gewogen op vertoningen per campagne. Hieronder zie je het gemiddelde per project; hover toont de afzonderlijke campagnes.
     </p> : null}
     {linkCtr?.unavailable ? <p className="cell-muted">Link-CTR niet beschikbaar voor alle gekoppelde campagnes.</p> : null}
   </article>;
