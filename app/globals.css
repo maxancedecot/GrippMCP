@@ -1595,6 +1595,11 @@ td .inline-bar {
 
 .campaign-metric-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+
+.campaign-metric-card > span {
+  padding-right: 36px;
 }
 
 .campaign-coverage {
@@ -1633,14 +1638,21 @@ td .inline-bar {
 }
 
 .campaign-channel-info > summary,
-.campaign-project-info > summary {
+.campaign-project-info > summary,
+.campaign-metric-info > summary {
   position: absolute;
   top: 24px;
   right: 16px;
 }
 
+.campaign-metric-info > summary {
+  top: 12px;
+  right: 12px;
+}
+
 .campaign-channel-info > summary,
 .campaign-project-info > summary,
+.campaign-metric-info > summary,
 .campaign-method-info > summary {
   display: grid;
   place-items: center;
@@ -1654,6 +1666,7 @@ td .inline-bar {
 
 .campaign-channel-info > summary::-webkit-details-marker,
 .campaign-project-info > summary::-webkit-details-marker,
+.campaign-metric-info > summary::-webkit-details-marker,
 .campaign-method-info > summary::-webkit-details-marker {
   display: none;
 }
@@ -1662,6 +1675,8 @@ td .inline-bar {
 .campaign-channel-info[open] > summary,
 .campaign-project-info > summary:hover,
 .campaign-project-info[open] > summary,
+.campaign-metric-info > summary:hover,
+.campaign-metric-info[open] > summary,
 .campaign-method-info > summary:hover,
 .campaign-method-info[open] > summary {
   color: var(--good);
@@ -1670,6 +1685,7 @@ td .inline-bar {
 
 .campaign-channel-info > summary:focus-visible,
 .campaign-project-info > summary:focus-visible,
+.campaign-metric-info > summary:focus-visible,
 .campaign-method-info > summary:focus-visible {
   outline: 2px solid var(--good);
   outline-offset: 2px;
@@ -1686,6 +1702,7 @@ td .inline-bar {
 
 .campaign-info-content p {
   margin: 0;
+  line-height: inherit;
 }
 
 .campaign-info-content p + p {

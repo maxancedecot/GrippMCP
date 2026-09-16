@@ -193,8 +193,12 @@ function ProjectCampaignMetric({ project, summary, metric, channel }: {
 }
 
 function CampaignMetric({ label, value, detail, availability }: { label: string; value: string; detail: string; availability: string }) {
-  return <article className={`metric-card metric-card--${value === "—" ? "neutral" : "good"}`}>
-    <span>{label}</span><strong>{value}</strong><p>{detail}</p><small className="campaign-coverage">{availability}</small>
+  return <article className={`metric-card campaign-metric-card metric-card--${value === "—" ? "neutral" : "good"}`}>
+    <span>{label}</span><strong>{value}</strong>
+    <details className="campaign-metric-info">
+      <summary aria-label={`Meer informatie over ${label}`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
+      <div className="campaign-info-content"><p>{detail}</p><small className="campaign-coverage">{availability}</small></div>
+    </details>
   </article>;
 }
 
