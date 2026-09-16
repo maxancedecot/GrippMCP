@@ -3,8 +3,8 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { nextTableSort, sortTableRows, type TableSort, type TableSortRow } from "../../src/tableSorting.js";
 
-type Column = { key: string; label: string; text?: boolean; description?: string };
-type Row = TableSortRow & { key: string; content: ReactNode };
+export type Column = { key: string; label: string; text?: boolean; description?: string };
+export type Row = TableSortRow & { key: string; content: ReactNode };
 
 export function SortableTable({ columns, rows, className }: { columns: Column[]; rows: Row[]; className: string }) {
   const [sort, setSort] = useState<TableSort | null>(null);

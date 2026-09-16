@@ -1828,6 +1828,34 @@ td .inline-bar {
   .data-management-projects li { flex-direction: column; gap: 4px; }
 }
 
+.campaign-project-filters {
+  margin: 0 0 20px;
+}
+
+.campaign-project-filters label {
+  display: grid;
+  gap: 8px;
+  max-width: 280px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.campaign-project-filters select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
+}
+
+.campaign-project-filters select:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: 3px;
+}
+
 .campaign-project-table-wrap {
   max-height: 75vh;
   max-height: 75dvh;
@@ -1835,7 +1863,7 @@ td .inline-bar {
 }
 
 .campaign-project-table {
-  min-width: 1540px;
+  min-width: 1400px;
   border-collapse: separate;
   border-spacing: 0;
 }

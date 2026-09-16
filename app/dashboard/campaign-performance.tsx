@@ -6,7 +6,7 @@ import type { MetaAccountSync } from "../../src/metaAccountDiscovery.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
 import { liveSortValue } from "../../src/tableSorting.js";
-import { SortableTable } from "./sortable-table.js";
+import { CampaignProjectTable } from "./campaign-project-table.js";
 import { getProjectPageManagementData, projectPageKey, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 
 const number = new Intl.NumberFormat("nl-BE");
@@ -75,60 +75,52 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       </section>
 
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
-        <div className="panel-heading">
-          <div><p className="eyebrow">Campagnes gekoppeld aan projecten</p><h2 id="campaign-projects-title">Performance per projectpagina</h2></div>
-          <span className="panel-total">{number.format(projects.length)} projectpagina’s</span>
-        </div>
-        {projects.length === 0 ? <p className="empty-state">Er zijn nog geen projectpagina’s gekoppeld.</p> : (
-          <div className="table-wrap campaign-table-wrap campaign-project-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
-            <SortableTable className="campaign-project-table" columns={[
-              { key: "title", label: "Projectpagina", text: true },
-              { key: "live", label: "Facebook live" },
-              { key: "googleLive", label: "Google live" },
-              { key: "accountManager", label: "Accountmanager", text: true },
-              { key: "ctr", label: "Facebook CTR (link)", description: "Gemiddelde CTR, gewogen op vertoningen" },
-              { key: "spend", label: "Facebook spend", description: "Totale spend van de campagnes binnen het project" },
-              { key: "googleCtr", label: "Google CTR", description: "Gemiddelde CTR, gewogen op vertoningen" },
-              { key: "googleSpend", label: "Google spend", description: "Totale spend van de campagnes binnen het project" },
-              { key: "visitors", label: "Bezoekers" },
-              { key: "leads", label: "Brochure" }, { key: "appointments", label: "Afspraak" }, { key: "cvr", label: "Project CVR" }
-            ]} rows={projects.map((project) => {
-              const google = summarizeGoogleProjectCampaigns(project.googleCampaigns);
-              const facebook = summarizeFacebookProjectCampaigns(project.campaigns);
-              const manager = accountManagers[projectPageKey({ siteId: project.siteId, path: project.sourcePath })];
-              return {
-                key: project.key,
-                sortValues: {
-                  accountManager: manager?.accountManagerName ?? null,
-                  title: project.title, ctr: facebook.ctr,
-                  spend: project.campaigns.length ? project.campaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
-                  live: liveSortValue(project.campaigns.map((campaign) => campaign.live)),
-                  googleCtr: google.ctr,
-                  googleSpend: project.googleCampaigns.length ? project.googleCampaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
-                  googleLive: liveSortValue(project.googleCampaigns.map((campaign) => campaign.live)),
-                  visitors: project.visitors, leads: project.leads, appointments: project.appointments, cvr: project.cvr
-                },
-                content: <tr key={project.key} data-project-key={project.key}>
-                  <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
-                    <span className="cell-muted">{project.siteName}</span><span className="cell-muted" title={project.sourcePaths?.join("\n")}>{project.sourcePaths ? "Samengevoegde projectpagina’s" : project.sourcePath}</span></th>
-                  <td data-metric="status"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="status" /></td>
-                  <td data-metric="google-status"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="status" /></td>
-                  <td>{manager?.accountManagerName ? <span title={[manager.reason, manager.clientName, manager.grippProjectName].filter(Boolean).join(" · ")}>{manager.accountManagerName}</span>
-                    : <a className="cell-muted" href="/dashboard?tab=data-management">Nog toe te wijzen</a>}</td>
-                  <td data-metric="ctr"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="ctr" /></td>
-                  <td data-metric="spend"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="spend" /></td>
-                  <td data-metric="google-ctr"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="ctr" /></td>
-                  <td data-metric="google-spend"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="spend" /></td>
-                  <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
-                  <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
-                  <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
-                  <td><strong className="campaign-project-cvr-value" style={{ color: rateColor(project.cvr, 2) }}>{percentage(project.cvr)}</strong>
-                    {!project.hasConversionMapping ? <span className="cell-muted">Bedankpagina nog niet gekoppeld</span> : null}</td>
-                </tr>
-              };
-            })} />
-          </div>
-        )}
+        <CampaignProjectTable columns={[
+          { key: "title", label: "Projectpagina", text: true },
+          { key: "live", label: "Facebook live" },
+          { key: "googleLive", label: "Google live" },
+          { key: "ctr", label: "Facebook CTR (link)", description: "Gemiddelde CTR, gewogen op vertoningen" },
+          { key: "spend", label: "Facebook spend", description: "Totale spend van de campagnes binnen het project" },
+          { key: "googleCtr", label: "Google CTR", description: "Gemiddelde CTR, gewogen op vertoningen" },
+          { key: "googleSpend", label: "Google spend", description: "Totale spend van de campagnes binnen het project" },
+          { key: "visitors", label: "Bezoekers" },
+          { key: "leads", label: "Brochure" }, { key: "appointments", label: "Afspraak" }, { key: "cvr", label: "Project CVR" }
+        ]} rows={projects.map((project) => {
+          const google = summarizeGoogleProjectCampaigns(project.googleCampaigns);
+          const facebook = summarizeFacebookProjectCampaigns(project.campaigns);
+          const manager = accountManagers[projectPageKey({ siteId: project.siteId, path: project.sourcePath })];
+          return {
+            key: project.key,
+            accountManagerId: manager?.accountManagerId ?? null,
+            accountManagerName: manager?.accountManagerName ?? null,
+            sortValues: {
+              title: project.title, ctr: facebook.ctr,
+              spend: project.campaigns.length ? project.campaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
+              live: liveSortValue(project.campaigns.map((campaign) => campaign.live)),
+              googleCtr: google.ctr,
+              googleSpend: project.googleCampaigns.length ? project.googleCampaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null,
+              googleLive: liveSortValue(project.googleCampaigns.map((campaign) => campaign.live)),
+              visitors: project.visitors, leads: project.leads, appointments: project.appointments, cvr: project.cvr
+            },
+            content: <tr key={project.key} data-project-key={project.key} data-account-manager-id={manager?.accountManagerId ?? "unassigned"}>
+              <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
+                {manager?.accountManagerName ? <span className="cell-muted campaign-project-manager" title={[manager.reason, manager.clientName, manager.grippProjectName].filter(Boolean).join(" · ")}>Accountmanager: {manager.accountManagerName}</span>
+                  : <a className="cell-muted campaign-project-manager" href="/dashboard?tab=data-management">Accountmanager: nog toe te wijzen</a>}
+                <span className="cell-muted">{project.siteName}</span><span className="cell-muted" title={project.sourcePaths?.join("\n")}>{project.sourcePaths ? "Samengevoegde projectpagina’s" : project.sourcePath}</span></th>
+              <td data-metric="status"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="status" /></td>
+              <td data-metric="google-status"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="status" /></td>
+              <td data-metric="ctr"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="ctr" /></td>
+              <td data-metric="spend"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="spend" /></td>
+              <td data-metric="google-ctr"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="ctr" /></td>
+              <td data-metric="google-spend"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="spend" /></td>
+              <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
+              <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
+              <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
+              <td><strong className="campaign-project-cvr-value" style={{ color: rateColor(project.cvr, 2) }}>{percentage(project.cvr)}</strong>
+                {!project.hasConversionMapping ? <span className="cell-muted">Bedankpagina nog niet gekoppeld</span> : null}</td>
+            </tr>
+          };
+        })} />
         <p className="campaign-method-note">Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
         {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
           <h3>Nog aan een projectpagina te koppelen</h3>
