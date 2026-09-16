@@ -32,7 +32,7 @@ export function CampaignProjectTable({ columns, rows }: { columns: Column[]; row
     </div>
     <div id={`${filterId}-projects`}>
       {rows.length === 0 ? <p className="empty-state">Er zijn nog geen projectpagina’s gekoppeld.</p>
-        : filtered.length === 0 ? <p className="empty-state">Geen projectpagina’s voor deze accountmanager in de gekozen website en periode.</p>
+        : filtered.length === 0 ? <p className="empty-state">Geen projectpagina’s voor deze accountmanager in de gekozen periode.</p>
         : <div className="table-wrap campaign-table-wrap campaign-project-table-wrap" role="region" aria-label="Campagneperformance per projectpagina" tabIndex={0}>
           <SortableTable className="campaign-project-table" columns={columns} rows={filtered} />
         </div>}

@@ -77,8 +77,9 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   const { days } = selection.period;
   const customPeriod = selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined;
   const analyticsOptions = { days, ...customPeriod, now };
-  const siteId = firstParam(params.site);
   const view = firstParam(params.tab) === "campaigns" ? "campaigns" : "website";
+  // Campaign performance always covers all sites, including old links with a site filter.
+  const siteId = view === "campaigns" ? undefined : firstParam(params.site);
   const dashboardPromise = getSiteAnalyticsDashboardData({ ...analyticsOptions, siteId });
   const connectedDashboardPromise = siteId ? getSiteAnalyticsDashboardData(analyticsOptions) : dashboardPromise;
   const [dashboard, connectedDashboard, configuredSites] = await Promise.all([
@@ -142,7 +143,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
             <span>Max. {MAX_DASHBOARD_DAYS} dagen per periode</span>
           </form>
 
-          <nav className="dashboard-tabs site-analytics-site-tabs" aria-label="Sites">
+          {view === "website" ? <nav className="dashboard-tabs site-analytics-site-tabs" aria-label="Sites">
             <a
               className={`dashboard-tab ${!dashboard.selectedSiteId ? "dashboard-tab--active" : ""}`}
               href={dashboardHref({ params, days: dashboard.period.days, customPeriod })}
@@ -160,7 +161,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
                 {site.name}
               </a>
             ))}
-          </nav>
+          </nav> : null}
         </div>
 
         {view === "campaigns" ? (
