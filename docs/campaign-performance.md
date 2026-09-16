@@ -6,6 +6,8 @@ Brusselskaai bundelt `/`, `/home-fr`, `/home-eng` en de oudere `/teaser-fr` en `
 
 De accountmanager staat onder de projecttitel. Het filter boven de projecttabel toont direct de projecten van één accountmanager, alle accountmanagers of alleen nog toe te wijzen projecten. De keuze gebruikt de Gripp-koppeling of de dashboardtoewijzing uit Data management. Filteren vraagt geen nieuwe advertentiedata op; de kaarten boven de tabel blijven over alle websites in de gekozen periode gaan.
 
+De Google- en Facebook-kaarten tonen standaard alleen de kanaalnaam, huidige status, CTR en spend. Via het info-icoon klap je de aantallen live campagnes, gekoppelde accounts, gedeeltelijke dekking en CTR-toelichting open of dicht. De uitleg is ook met het toetsenbord bereikbaar.
+
 ## Tabellen sorteren
 
 Klik op een kolomkop om eerst van hoog naar laag te sorteren; nogmaals klikken draait dit om. Een andere kolom begint opnieuw van hoog naar laag. Het pijltje en `aria-sort` geven de huidige richting aan. Dit werkt direct in de browser, zonder nieuwe API-aanvragen, in de projecttabel en het conversieoverzicht in Websiteprestaties. De gekozen datums en site blijven behouden.

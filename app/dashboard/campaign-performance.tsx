@@ -4,6 +4,7 @@ import {
 } from "../../src/campaignPerformance.js";
 import type { MetaAccountSync } from "../../src/metaAccountDiscovery.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
+import { Info } from "lucide-react";
 import { summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
 import { liveSortValue } from "../../src/tableSorting.js";
 import { CampaignProjectTable } from "./campaign-project-table.js";
@@ -199,19 +200,24 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
       <div><p className="eyebrow">Advertenties</p><h2>{name} Ads</h2></div>
       <CampaignStatus sources={sources} />
     </div>
-    <p className="campaign-channel-description">{summary.connected > 0
-      ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary, "website-accountkoppelingen")}`
-      : coverage(summary, "website-accountkoppelingen")}</p>
-    {linkCtr ? <p className="campaign-channel-description">CTR (taux de clics sur le lien) uit Ads Manager, per Ledoux-campagne in de gekozen periode, ook als die nu niet meer live is.</p> : null}
     <dl className="campaign-channel-metrics">
       <div><dt>{linkCtr ? `Facebook link-CTR${linkCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
         <dd style={{ color: rateColor(linkCtr ? linkCtr.ctr : summary.ctr, 1) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
-    {linkCtr && linkCtr.campaigns > 1 ? <p className="campaign-method-note">
-      Gewogen op vertoningen per campagne. Hieronder zie je het gemiddelde per project; hover toont de afzonderlijke campagnes.
-    </p> : null}
-    {linkCtr?.unavailable ? <p className="cell-muted">Link-CTR niet beschikbaar voor alle gekoppelde campagnes.</p> : null}
+    <details className="campaign-channel-info">
+      <summary aria-label={`Meer informatie over ${name} Ads`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
+      <div className="campaign-channel-info-content">
+        <p>{summary.connected > 0
+          ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary, "website-accountkoppelingen")}`
+          : coverage(summary, "website-accountkoppelingen")}</p>
+        {linkCtr ? <p>CTR (taux de clics sur le lien) uit Ads Manager, per Ledoux-campagne in de gekozen periode, ook als die nu niet meer live is.</p> : null}
+        {linkCtr && linkCtr.campaigns > 1 ? <p>
+          Gewogen op vertoningen per campagne. Hieronder zie je het gemiddelde per project; hover toont de afzonderlijke campagnes.
+        </p> : null}
+        {linkCtr?.unavailable ? <p>Link-CTR niet beschikbaar voor alle gekoppelde campagnes.</p> : null}
+      </div>
+    </details>
   </article>;
 }
 
