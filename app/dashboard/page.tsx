@@ -26,10 +26,15 @@ import { dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERI
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Website- en campagneprestaties | Dashboard",
-  description: "Websiteprestaties en campagneperformance uit Google Ads, Facebook Ads en websiteconversies."
-};
+type DashboardPageProps = { searchParams?: Promise<DashboardSearchParams> };
+
+export async function generateMetadata({ searchParams }: DashboardPageProps): Promise<Metadata> {
+  const params = (await searchParams) ?? {};
+  return {
+    title: firstParam(params.tab) === "campaigns" ? "Accountmanager dashboard" : "Website- en campagneprestaties | Dashboard",
+    description: "Websiteprestaties en het Accountmanager dashboard met Google Ads, Facebook Ads en websiteconversies."
+  };
+}
 
 type DashboardFormValue = FormDataEntryValue | null;
 
@@ -69,7 +74,7 @@ async function deleteCvrLinkAction(formData: FormData) {
   redirect(returnTo);
 }
 
-export default async function DashboardPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const params = (await searchParams) ?? {};
   if (firstParam(params.tab) === "data-management") return <DataManagementPage params={params} />;
   const now = new Date();
@@ -99,7 +104,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
         <header className="dashboard-header">
           <div>
             <p className="eyebrow">{view === "campaigns" ? "Marketingoverzicht" : "Website-analyse"}</p>
-            <h1>{view === "campaigns" ? "Campagneperformance" : "Websiteprestaties"}</h1>
+            <h1>{view === "campaigns" ? "Accountmanager dashboard" : "Websiteprestaties"}</h1>
           </div>
           <div className="header-meta">
             <a className="header-meta-link" href="/api/site-analytics/plugin" download>
