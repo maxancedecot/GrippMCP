@@ -5,6 +5,7 @@ import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
 import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
 
 export const CAMPAIGN_PROJECT_MATCHES_KEY = "campaign-project-matches:v1";
+export const META_DISCOVERED_PROJECT_MATCHES_KEY = "meta-discovered-project-matches:v1";
 const identifier = z.string().trim().min(1);
 const projectPath = identifier.refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"), "Use a local project path")
   .transform(normalizeProjectPath);
@@ -73,7 +74,7 @@ export type CampaignProjectRow = {
   googleState: CampaignSource<unknown>["state"];
   googleCampaigns: GoogleProjectCampaign[];
 };
-export type UnmatchedProjectCampaign = { channel: "facebook" | "google"; siteId: string; siteName: string; campaignId: string; campaignName: string };
+export type UnmatchedProjectCampaign = { channel: "facebook" | "google"; siteId: string; siteName: string; accountId?: string; campaignId: string; campaignName: string };
 
 export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, sites: CampaignPerformanceRow[]) {
   const projects = new Map<string, CampaignProjectRow>();
@@ -95,7 +96,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         title: metrics?.sourceTitle || candidate?.title || title || (path === "/" ? site.name : path),
         visitors, leads: metrics?.brochure.visitors ?? null, appointments: metrics?.appointment.visitors ?? null,
         cvr: metrics ? (metrics.sourceVisitors > 0 ? (metrics.brochure.visitors + metrics.appointment.visitors) / metrics.sourceVisitors * 100 : 0) : null,
-        hasConversionMapping: !!metrics, facebookState: site.facebook.state, campaigns: [],
+        hasConversionMapping: !!metrics, facebookState: (site.facebookAccounts ?? [site]).some((account) => account.facebook.state === "connected") ? "connected" : site.facebook.state, campaigns: [],
         googleState: site.google.state === "connected" ? site.googleCampaignPages.state : site.google.state, googleCampaigns: []
       };
       projects.set(key, row);
@@ -104,21 +105,23 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     for (const project of conversions.filter((row) => row.siteId === site.siteId && !isExcludedAnalyticsLink(row.sourcePath))) ensureProject(project.sourcePath, project.sourceTitle);
     // Keep saved matches for stopped campaigns so their period spend and current
     // status remain visible. CTR still uses only the currently running selection.
-    for (const campaign of site.facebook.data?.campaigns ?? []) {
-      const pages = site.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
-      const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [normalizeProjectPath(page.path), page])).values()];
-      if (uniquePages.length === 0) {
-        if (campaign.live === true) unmatchedCampaigns.push({ channel: "facebook", siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
-        continue;
-      }
-      for (const page of uniquePages) {
-        const project = ensureProject(page.path, page.title);
-        const accountId = site.facebook.data!.accountId;
-        if (project.campaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
-        const ctr = campaign.live === true ? site.facebookLinkCtr.data?.campaigns.find((metric) => metric.id === campaign.id)?.ctr ?? null : null;
-        project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr,
-          spend: campaign.spend, currency: site.facebook.data!.currency, live: campaign.live,
-          unavailable: campaign.live === true && site.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
+    for (const account of (site.facebookAccounts ?? [site])) {
+      for (const campaign of account.facebook.data?.campaigns ?? []) {
+        const pages = account.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
+        const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [normalizeProjectPath(page.path), page])).values()];
+        if (uniquePages.length === 0) {
+          if (campaign.live === true) unmatchedCampaigns.push({ channel: "facebook", accountId: account.facebook.data?.accountId, siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
+          continue;
+        }
+        for (const page of uniquePages) {
+          const project = ensureProject(page.path, page.title);
+          const accountId = account.facebook.data!.accountId;
+          if (project.campaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
+          const ctr = campaign.live === true ? account.facebookLinkCtr.data?.campaigns.find((metric) => metric.id === campaign.id)?.ctr ?? null : null;
+          project.campaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id, ctr,
+            spend: campaign.spend, currency: account.facebook.data!.currency, live: campaign.live,
+            unavailable: campaign.live === true && account.facebookLinkCtr.state === "unavailable", projectCount: uniquePages.length });
+        }
       }
     }
     for (const campaign of site.google.data?.campaigns ?? []) {

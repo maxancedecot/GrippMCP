@@ -49,3 +49,10 @@ test("switching sites or tabs retains custom dates while a preset clears them", 
   assert.equal(dashboardHref({ params, days: 14, siteId: "first" }), "/dashboard?tab=campaigns&days=14&site=first");
   assert.equal(dashboardHref({ params, days: 30 }), "/dashboard?tab=campaigns");
 });
+
+
+test("manual Meta sync keeps filters and does not repeat when navigating", () => {
+  const options = { params: { tab: "campaigns", syncMeta: "1" }, days: 7, siteId: "first" };
+  assert.equal(dashboardHref(options), "/dashboard?tab=campaigns&days=7&site=first");
+  assert.equal(dashboardHref({ ...options, syncMeta: true }), "/dashboard?tab=campaigns&days=7&site=first&syncMeta=1");
+});

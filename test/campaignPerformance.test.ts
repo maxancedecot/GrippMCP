@@ -19,7 +19,7 @@ function dashboard(siteIds = ["site-a"]): SiteAnalyticsDashboardData {
   };
 }
 function environment(mappings: CampaignSiteMapping[], extra: Record<string, string> = {}) {
-  return { CAMPAIGN_PERFORMANCE_SITES: JSON.stringify(mappings), ...extra };
+  return { META_ADS_AUTO_DISCOVERY: "false", CAMPAIGN_PERFORMANCE_SITES: JSON.stringify(mappings), ...extra };
 }
 const googleCredentials = { GOOGLE_ADS_CLIENT_ID: "client", GOOGLE_ADS_CLIENT_SECRET: "secret", GOOGLE_ADS_REFRESH_TOKEN: "refresh" };
 const response = (value: unknown) => Response.json(value);
@@ -951,4 +951,54 @@ test("Google destination failure keeps verified project metrics and does not inv
   assert.match(result.rows[0].googleCampaignPages.message, /Niet alle Google/);
   assert.deepEqual(result.unmatchedCampaigns.map((c) => c.campaignId), ["2"]);
   assert.doesNotMatch(JSON.stringify(result), /provider detail/);
+});
+
+test("automatic Meta discovery adds accounts and campaigns without duplicating website metrics", async () => {
+  const data = dashboard(["site-a", "site-b"]);
+  data.cvrLinks = [conversionLink("site-a", "/brochure", 3), conversionLink("site-b", "/brochure", 2)];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123", campaignIds: ["1"] } }], { META_ADS_ACCESS_TOKEN: "secret", META_ADS_AUTO_DISCOVERY: "true" }),
+    now: new Date("2026-09-16T12:00:00Z"),
+    projectMatches: [{ siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/project"] },
+      { siteId: "site-a", accountId: "123", campaignId: "99", sourcePaths: ["/project"] }],
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/me/adaccounts")) return response({ data: ["123", "456"].map((id) => ({ id: `act_${id}`, name: id, account_status: 1 })) });
+      if (url.pathname.endsWith("/campaigns")) return response({ data: (url.pathname.includes("act_123") ? ["1", "99"] : ["2"]).map((id) => ({ id, name: `Ledoux ${id}`, effective_status: id === "1" ? "PAUSED" : "ACTIVE" })) });
+      if (url.pathname.endsWith("/ads")) {
+        const campaignId = url.pathname.split("/").at(-2)!;
+        const destinations = campaignId === "99" ? ["https://site-a.example/advertised-alias"] : ["https://site-a.example/project", "https://site-b.example/project"];
+        return response({ data: destinations.map((link) => ({ campaign_id: campaignId, creative: { link_url: link } })) });
+      }
+      if (url.pathname.endsWith("/insights")) {
+        const ids = JSON.parse(url.searchParams.get("filtering")!)[0].value as string[];
+        return response({ data: ids.map((id) => ({ campaign_id: id, campaign_name: `Ledoux ${id}`, impressions: "100", clicks: "10", spend: id === "1" ? "5" : id === "99" ? "10" : "20", inline_link_click_ctr: id === "99" ? "2" : "6" })) });
+      }
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.rows.length, 2, "one row per website despite multiple Meta accounts");
+  assert.equal(result.rows[0].facebookAccounts?.length, 2);
+  assert.equal(result.projects.length, 2, "saved project alias takes priority over discovered URL");
+  assert.equal(result.projects[0].campaigns.length, 3);
+  assert.equal(result.projects[1].campaigns.length, 1);
+  assert.equal(result.projects[0].leads, 3);
+  assert.equal(summarizeWebsiteConversions(result.rows.map((row) => row.leads)).count, 5);
+  assert.equal(result.facebookLinkCtr.campaigns, 2);
+  assert.equal(result.facebookLinkCtr.ctr, 4, "shared campaign counted once");
+  assert.deepEqual(summarizeAds(result.rows.flatMap((row) => row.facebookAccounts!.map((account) => account.facebook))).spend, [{ currency: "EUR", amount: 35 }]);
+});
+
+test("Meta account-list failure leaves configured campaigns available with a visible sync error", async () => {
+  const result = await getCampaignPerformance(dashboard(), {
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }], { META_ADS_ACCESS_TOKEN: "secret", META_ADS_AUTO_DISCOVERY: "true" }),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/me/adaccounts")) return new Response("denied", { status: 403 });
+      if (url.pathname.endsWith("/campaigns") || url.pathname.endsWith("/insights")) return response({ data: [] });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.rows[0].facebook.state, "connected");
+  assert.equal(result.metaSync?.state, "unavailable");
 });

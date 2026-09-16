@@ -165,7 +165,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
 
         {view === "campaigns" ? (
           <Suspense fallback={<p className="data-notice" role="status">Campagnegegevens laden uit Google Ads, Facebook Ads en Websiteprestaties…</p>}>
-            <CampaignPerformance dashboard={dashboard} />
+            <CampaignPerformance dashboard={dashboard} discoverySites={connectedDashboard.sites} forceMetaSync={firstParam(params.syncMeta) === "1"}
+              syncHref={dashboardHref({ params, days, siteId, customPeriod, syncMeta: true })} />
           </Suspense>
         ) : <>
         <section className="metric-grid site-analytics-metric-grid" aria-label="Website KPI's">

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
-import { CAMPAIGN_PROJECT_MATCHES_KEY, normalizeProjectPath, parseCampaignProjectMatches } from "./campaignProjects.js";
+import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, normalizeProjectPath, parseCampaignProjectMatches } from "./campaignProjects.js";
 import { getGrippDataCatalog, type AccountManager, type DataManagementOptions, type GrippDataCatalog } from "./dataManagement.js";
 import { getJsonCacheMode, readJsonCache, readJsonCaches, writeJsonCache } from "./jsonCache.js";
 import { getSiteAnalyticsDashboardData, type SiteAnalyticsDashboardData } from "./siteAnalytics.js";
@@ -66,7 +66,8 @@ async function loadProjectPages(options: Options): Promise<ProjectPage[]> {
   }
   const dashboard = await getSiteAnalyticsDashboardData({ days: 90, now });
   if (dashboard.source.mode !== "live") throw new Error("No connected project pages");
-  const matches = parseCampaignProjectMatches(await store.read(CAMPAIGN_PROJECT_MATCHES_KEY));
+  const [saved, discovered] = await store.readMany<unknown>([CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY]);
+  const matches = [...parseCampaignProjectMatches(saved), ...parseCampaignProjectMatches(discovered)];
   const pages = projectPagesFromDashboard(dashboard, matches.flatMap((match) => match.sourcePaths.map((path) => ({ siteId: match.siteId, path }))));
   await store.write(INVENTORY_KEY, { pages, fetchedAt: now.toISOString() });
   return pages;

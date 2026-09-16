@@ -49,12 +49,12 @@ export function dashboardPeriodSelection(params: DashboardSearchParams, now = ne
   }
 }
 
-export function dashboardHref({ params, days, siteId, customPeriod }: {
-  params: DashboardSearchParams; days: number; siteId?: string; customPeriod?: { start: string; end: string };
+export function dashboardHref({ params, days, siteId, customPeriod, syncMeta }: {
+  params: DashboardSearchParams; days: number; siteId?: string; customPeriod?: { start: string; end: string }; syncMeta?: boolean;
 }) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (["days", "site", "start", "end"].includes(key)) continue;
+    if (["days", "site", "start", "end", "syncMeta"].includes(key)) continue;
     for (const item of Array.isArray(value) ? value : value ? [value] : []) search.append(key, item);
   }
   if (customPeriod) {
@@ -62,6 +62,7 @@ export function dashboardHref({ params, days, siteId, customPeriod }: {
     search.set("end", customPeriod.end);
   } else if (days !== 30) search.set("days", String(days));
   if (siteId) search.set("site", siteId);
+  if (syncMeta) search.set("syncMeta", "1");
   const query = search.toString();
   return query ? `/dashboard?${query}` : "/dashboard";
 }

@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { facebookDestinationUrls, matchCampaignPages } from "./campaignDestinations.js";
+import { discoverMetaAccounts, type MetaAccountSync } from "./metaAccountDiscovery.js";
 import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
-import { cvrOverviewRowsFromLinks, type CvrOverviewRow } from "./siteAnalyticsConversions.js";
+import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
 import { readJsonCache, writeJsonCache } from "./jsonCache.js";
-import { CAMPAIGN_PROJECT_MATCHES_KEY, campaignProjectOverview, parseCampaignProjectMatches, type CampaignProjectMatch } from "./campaignProjects.js";
+import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, campaignProjectOverview, parseCampaignProjectMatches, type CampaignProjectMatch } from "./campaignProjects.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -25,6 +27,11 @@ export type CampaignPageMatch = {
   pages: { url: string; path: string; title: string; hasConversionMapping: boolean }[];
 };
 export type WebsiteConversionPerformance = { siteId: string; count: number };
+export type FacebookAccountPerformance = {
+  facebook: CampaignSource<AdPerformance>;
+  facebookLinkCtr: CampaignSource<LinkCtrPerformance>;
+  facebookCampaignPages: CampaignSource<CampaignPageMatch[]>;
+};
 export type CampaignPerformanceRow = {
   siteId: string;
   name: string;
@@ -34,6 +41,7 @@ export type CampaignPerformanceRow = {
   facebook: CampaignSource<AdPerformance>;
   facebookLinkCtr: CampaignSource<LinkCtrPerformance>;
   facebookCampaignPages: CampaignSource<CampaignPageMatch[]>;
+  facebookAccounts?: FacebookAccountPerformance[];
   leads: CampaignSource<WebsiteConversionPerformance>;
   appointments: CampaignSource<WebsiteConversionPerformance>;
   websiteCvr: number | null;
@@ -52,6 +60,7 @@ const mappingSchema = z.object({
   ghl: z.object({ locationId: id, installId: id.optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
+type FacebookAccountScope = NonNullable<CampaignSiteMapping["facebook"]> & { requiredCampaignIds?: string[] };
 type FacebookLinkScope = { adAccountId: string; campaigns: AdCampaign[] };
 type CampaignDestinations = { campaignId: string; urls: string[] }[];
 type CachedCampaignDestinations = { checkedAt: number; data: CampaignDestinations };
@@ -62,6 +71,8 @@ type Options = {
   now?: Date;
   cacheCampaignPages?: boolean;
   projectMatches?: CampaignProjectMatch[];
+  forceMetaSync?: boolean;
+  discoverySites?: { id: string; name: string; url: string }[];
 };
 
 const numeric = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/)]).transform(Number).pipe(z.number().finite().nonnegative());
@@ -95,7 +106,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   try {
     mappings = parseCampaignSiteMappings(env.CAMPAIGN_PERFORMANCE_SITES);
   } catch {
-    return { rows: [] as CampaignPerformanceRow[], ...campaignProjectOverview(dashboard, []), facebookLinkCtr: summarizeLinkCtr([]), message: "De accountkoppelingen zijn ongeldig. Laat de dashboardbeheerder de configuratie nakijken." };
+    return { metaSync: undefined as MetaAccountSync | undefined, rows: [] as CampaignPerformanceRow[], ...campaignProjectOverview(dashboard, []), facebookLinkCtr: summarizeLinkCtr([]), message: "De accountkoppelingen zijn ongeldig. Laat de dashboardbeheerder de configuratie nakijken." };
   }
   let projectMatches: CampaignProjectMatch[] = [], projectMessage = "";
   try {
@@ -105,6 +116,16 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   }
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? new Date();
+  // Do not discover real ad accounts when the dashboard is in demo mode.
+  const sites = dashboard.source.mode === "live" ? dashboard.sites : [];
+  const discovery = await discoverMetaAccounts({ sites: sites.length ? options.discoverySites ?? sites : [], env, now,
+    fetchImpl: options.fetchImpl, force: options.forceMetaSync });
+  const savedMatches = new Set(projectMatches.map((match) => `${match.channel ?? "facebook"}:${match.siteId}:${match.accountId}:${match.campaignId}`));
+  projectMatches.push(...discovery.matches.filter((match) => !savedMatches.has(`facebook:${match.siteId}:${match.accountId}:${match.campaignId}`)));
+  // Also expose verified pages to Data management without querying Meta from that tab.
+  if (!options.fetchImpl && discovery.sync.state === "connected" && !discovery.sync.message) {
+    await writeJsonCache(META_DISCOVERED_PROJECT_MATCHES_KEY, discovery.matches).catch(() => undefined);
+  }
   const signal = AbortSignal.timeout(45_000);
   const request = async (url: string, init: RequestInit = {}): Promise<unknown> => {
     const response = await fetchImpl(url, {
@@ -127,36 +148,30 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     }));
     return token.access_token;
   })();
-  // Do not mix real account data with the WordPress demo sites.
-  const sites = dashboard.source.mode === "live" ? dashboard.sites : [];
   const conversionRows = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
   const rows: CampaignPerformanceRow[] = [];
   const linkCtrRequests = new Map<string, Promise<CampaignSource<LinkCtrPerformance>>>();
   const destinationRequests = new Map<string, Promise<CampaignSource<CampaignDestinations>>>();
-  // Bound concurrency across sites; each site's providers load independently.
+  const facebookRequests = new Map<string, Promise<CampaignSource<AdPerformance>>>();
+  // A website can receive campaigns from several accessible Meta accounts.
   for (let offset = 0; offset < sites.length; offset += 3) {
     rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
       const mapping = mappings.find((item) => item.siteId === site.id);
-      const explicitMatches = projectMatches.filter((match) => (match.channel ?? "facebook") === "facebook" && match.siteId === site.id && match.accountId === mapping?.facebook?.adAccountId);
+      const scopes = new Map<string, FacebookAccountScope>();
+      if (mapping?.facebook) scopes.set(mapping.facebook.adAccountId, { ...mapping.facebook, requiredCampaignIds: mapping.facebook.campaignIds });
+      for (const match of discovery.matches.filter((match) => match.siteId === site.id)) {
+        const scope = scopes.get(match.accountId);
+        if (!scope) scopes.set(match.accountId, { adAccountId: match.accountId, campaignIds: [match.campaignId], requiredCampaignIds: [] });
+        else if (scope.campaignIds) scope.campaignIds = [...new Set([...scope.campaignIds, match.campaignId])];
+      }
       const googleMatches = projectMatches.filter((match) => match.channel === "google" && match.siteId === site.id && match.accountId === mapping?.google?.customerId);
-      const facebookRequest = loadFacebook(mapping?.facebook);
       const googleRequest = loadGoogle(mapping?.google);
-      const [google, facebook, facebookLinkCtr, destinations, googleDestinations] = await Promise.all([
-        googleRequest, facebookRequest, facebookRequest.then(loadCurrentFacebookLinkCtr),
-        facebookRequest.then((source) => loadFacebookDestinations(source.data ? {
-          ...source, data: { ...source.data, campaigns: source.data.campaigns.filter((campaign) => !explicitMatches.some((match) => match.campaignId === campaign.id)) }
-        } : source)),
-        googleRequest.then((source) => loadGoogleDestinations(mapping?.google, source, googleMatches.map((match) => match.campaignId)))
+      const [google, googleDestinations, facebookAccounts] = await Promise.all([
+        googleRequest,
+        googleRequest.then((source) => loadGoogleDestinations(mapping?.google, source, googleMatches.map((match) => match.campaignId))),
+        Promise.all((scopes.size ? [...scopes.values()] : [undefined]).map((scope) => facebookForSite(site, scope)))
       ]);
       const siteProjects = conversionRows.filter((project) => project.siteId === site.id);
-      const explicitPages = explicitMatches.filter((match) => facebook.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
-        .map((match) => ({ campaignId: match.campaignId,
-          pages: matchCampaignPages(site.url, match.sourcePaths.map((path) => new URL(path, site.url).toString()), siteProjects) }));
-      const facebookCampaignPages: CampaignSource<CampaignPageMatch[]> = destinations.data || explicitPages.length ? {
-        state: "connected", message: destinations.state === "unavailable" ? "Niet alle nieuwe campagnes konden aan een projectpagina worden gekoppeld." : destinations.message,
-        data: [...explicitPages, ...(destinations.data ?? []).map((campaign) => ({ campaignId: campaign.campaignId,
-          pages: matchCampaignPages(site.url, campaign.urls, siteProjects) }))]
-      } : destinations;
       const googleExplicitPages = googleMatches.filter((match) => google.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
         .map((match) => ({ campaignId: match.campaignId,
           pages: matchCampaignPages(site.url, match.sourcePaths.map((path) => new URL(path, site.url).toString()), siteProjects) }));
@@ -165,18 +180,8 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         data: [...googleExplicitPages, ...(googleDestinations.data ?? []).map((campaign) => ({ campaignId: campaign.campaignId,
           pages: matchCampaignPages(site.url, campaign.urls, siteProjects) }))]
       } : googleDestinations;
-      // A verified destination on another website must not inherit this site's
-      // CTR merely because both campaigns share an advertising account.
-      const otherSiteCampaigns = new Set(destinations.data?.filter((campaign) => campaign.urls.length > 0
-        && !facebookCampaignPages.data?.find((match) => match.campaignId === campaign.campaignId)?.pages.length).map((campaign) => campaign.campaignId));
-      const scopedCampaigns = facebookLinkCtr.data?.campaigns.filter((campaign) => !otherSiteCampaigns.has(campaign.id));
-      const scopedLinkCtr = facebookLinkCtr.data && scopedCampaigns ? {
-        ...facebookLinkCtr,
-        data: { ...facebookLinkCtr.data, campaigns: scopedCampaigns, ctr: weightedCampaignCtr(scopedCampaigns) },
-        message: facebookLinkCtr.data.campaigns.length > 0 && scopedCampaigns.length === 0 ? "Geen lopende Ledoux-campagne voor deze website" : facebookLinkCtr.message
-      } : facebookLinkCtr;
       return {
-        siteId: site.id, name: site.name, url: site.url, google, googleCampaignPages, facebook, facebookLinkCtr: scopedLinkCtr, facebookCampaignPages,
+        siteId: site.id, name: site.name, url: site.url, google, googleCampaignPages, ...facebookAccounts[0], facebookAccounts,
         leads: websiteConversions(site.id, "brochure"), appointments: websiteConversions(site.id, "appointment"),
         websiteCvr: site.cvrLinkCount > 0 && site.cvrSourceVisitors > 0 ? site.conversionRatePercent : null,
         websiteVisitors: site.cvrSourceVisitors, websiteConversions: site.cvrConversionVisitors
@@ -185,14 +190,47 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   }
   // Use the same campaign measurements for website rows and totals. Deduplicate
   // campaign IDs across overlapping website mappings; never request account CTR.
-  const facebookLinkCtr = summarizeLinkCtr(rows.map((row) => row.facebookLinkCtr)
+  const facebookLinkCtr = summarizeLinkCtr(rows.flatMap((row) => facebookAccountSources(row).map((account) => account.facebookLinkCtr))
     .filter((source) => source.state !== "not_configured"));
+  for (const account of discovery.sync.accounts) {
+    const configuredSites = (options.discoverySites ?? sites).filter((site) => mappings.some((mapping) => mapping.siteId === site.id && mapping.facebook?.adAccountId === account.id));
+    account.siteNames = [...new Set([...account.siteNames, ...configuredSites.map((site) => site.name)])];
+  }
   return {
-    rows, facebookLinkCtr, ...campaignProjectOverview(dashboard, rows),
+    rows, facebookLinkCtr, metaSync: discovery.sync, ...campaignProjectOverview(dashboard, rows),
     message: dashboard.source.mode === "demo"
       ? "Verbind eerst een website via de trackingcode of WordPress-plugin en koppel daarna de advertentieaccounts."
       : projectMessage
   };
+
+  async function facebookForSite(site: SiteAnalyticsDashboardData["sites"][number], config: FacebookAccountScope | undefined): Promise<FacebookAccountPerformance> {
+    const key = JSON.stringify(config);
+    if (!facebookRequests.has(key)) facebookRequests.set(key, loadFacebook(config));
+    const facebook = await facebookRequests.get(key)!;
+    const explicitMatches = projectMatches.filter((match) => (match.channel ?? "facebook") === "facebook" && match.siteId === site.id && match.accountId === config?.adAccountId);
+    const [facebookLinkCtr, destinations] = await Promise.all([
+      loadCurrentFacebookLinkCtr(facebook),
+      loadFacebookDestinations(facebook.data ? { ...facebook, data: { ...facebook.data,
+        campaigns: facebook.data.campaigns.filter((campaign) => !explicitMatches.some((match) => match.campaignId === campaign.id)) } } : facebook)
+    ]);
+    const siteProjects = conversionRows.filter((project) => project.siteId === site.id);
+    const explicitPages = explicitMatches.filter((match) => facebook.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
+      .map((match) => ({ campaignId: match.campaignId,
+        pages: matchCampaignPages(site.url, match.sourcePaths.map((path) => new URL(path, site.url).toString()), siteProjects) }));
+    const facebookCampaignPages: CampaignSource<CampaignPageMatch[]> = destinations.data || explicitPages.length ? {
+      state: "connected", message: destinations.state === "unavailable" ? "Niet alle nieuwe campagnes konden aan een projectpagina worden gekoppeld." : destinations.message,
+      data: [...explicitPages, ...(destinations.data ?? []).map((campaign) => ({ campaignId: campaign.campaignId,
+        pages: matchCampaignPages(site.url, campaign.urls, siteProjects) }))]
+    } : destinations;
+    const otherSiteCampaigns = new Set(destinations.data?.filter((campaign) => campaign.urls.length > 0
+      && !facebookCampaignPages.data?.find((match) => match.campaignId === campaign.campaignId)?.pages.length).map((campaign) => campaign.campaignId));
+    const scopedCampaigns = facebookLinkCtr.data?.campaigns.filter((campaign) => !otherSiteCampaigns.has(campaign.id));
+    const scopedLinkCtr = facebookLinkCtr.data && scopedCampaigns ? {
+      ...facebookLinkCtr, data: { ...facebookLinkCtr.data, campaigns: scopedCampaigns, ctr: weightedCampaignCtr(scopedCampaigns) },
+      message: facebookLinkCtr.data.campaigns.length > 0 && scopedCampaigns.length === 0 ? "Geen lopende Ledoux-campagne voor deze website" : facebookLinkCtr.message
+    } : facebookLinkCtr;
+    return { facebook, facebookLinkCtr: scopedLinkCtr, facebookCampaignPages };
+  }
 
   function loadCurrentFacebookLinkCtr(source: CampaignSource<AdPerformance>): Promise<CampaignSource<LinkCtrPerformance>> {
     if (!source.data) return Promise.resolve({ state: source.state, data: null, message: source.message });
@@ -374,7 +412,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     }, "Google Ads kon niet worden geladen. Controleer de accountkoppeling en toegangsrechten.");
   }
 
-  async function loadFacebook(config: CampaignSiteMapping["facebook"]): Promise<CampaignSource<AdPerformance>> {
+  async function loadFacebook(config: FacebookAccountScope | undefined): Promise<CampaignSource<AdPerformance>> {
     if (!config || !env.META_ADS_ACCESS_TOKEN) return missing("Facebook Ads is nog niet gekoppeld.");
     return safely(async () => {
       const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
@@ -429,7 +467,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         campaign.spend += row.spend;
         campaigns.set(campaign.id, campaign);
       }
-      if (config.campaignIds?.some((campaignId) => !knownIds.has(campaignId))) throw new Error("Campaign mapping not found");
+      if ((config.requiredCampaignIds ?? config.campaignIds)?.some((campaignId) => !knownIds.has(campaignId))) throw new Error("Campaign mapping not found");
       return { accountId: config.adAccountId, currency: currencyCode(account.currency), campaigns: [...campaigns.values()] };
     }, "Facebook Ads kon niet worden geladen. Controleer de accountkoppeling en toegangsrechten.");
   }
@@ -448,41 +486,6 @@ function isLedouxCampaign(name: string) {
   return name.toLowerCase().includes("ledoux");
 }
 
-function facebookDestinationUrls(creative: unknown): string[] {
-  if (!creative || typeof creative !== "object" || Array.isArray(creative)) return [];
-  const record = creative as Record<string, unknown>;
-  const urls = ["link", "website_url", "object_url", "link_url"].flatMap((key) => typeof record[key] === "string" ? [record[key] as string] : []);
-  // Read only destination fields, never match against ad copy or image URLs.
-  for (const key of ["object_story_spec", "link_data", "video_data", "template_data", "call_to_action", "value", "child_attachments", "asset_feed_spec", "link_urls"]) {
-    const value = record[key];
-    for (const child of Array.isArray(value) ? value : [value]) urls.push(...facebookDestinationUrls(child));
-  }
-  return urls;
-}
-
-function matchCampaignPages(siteUrl: string, destinations: string[], projects: CvrOverviewRow[]): CampaignPageMatch["pages"] {
-  const site = new URL(siteUrl);
-  const host = (url: URL) => url.hostname.toLowerCase().replace(/^www\./, "");
-  const pagePath = (url: URL) => (url.pathname.replace(/\/+$/, "") || "/")
-    + (url.searchParams.has("p_slug") ? `?${new URLSearchParams({ p_slug: url.searchParams.get("p_slug")! })}` : "");
-  const pages = new Map<string, CampaignPageMatch["pages"][number]>();
-  const sitePath = site.pathname.replace(/\/+$/, "");
-  for (const destination of destinations) {
-    let url: URL;
-    try { url = new URL(destination); } catch { continue; }
-    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port !== site.port || host(url) !== host(site)) continue;
-    if (sitePath && url.pathname !== sitePath && !url.pathname.startsWith(`${sitePath}/`)) continue;
-    const path = pagePath(url);
-    const project = projects.find((candidate) => pagePath(new URL(candidate.sourcePath, site)) === path);
-    // Keep project selectors; remove tracking parameters and URL fragments.
-    url.search = "";
-    if (path.includes("?")) url.search = path.slice(path.indexOf("?"));
-    url.hash = "";
-    pages.set(path, { url: url.toString(), path, title: project?.sourceTitle || path, hasConversionMapping: !!project });
-  }
-  return [...pages.values()];
-}
-
 function missing<T>(message: string): CampaignSource<T> {
   return { state: "not_configured", data: null, message };
 }
@@ -499,6 +502,10 @@ function currencyCode(value: unknown) {
   const code = z.string().regex(/^[A-Z]{3}$/).parse(value);
   new Intl.NumberFormat("nl-BE", { style: "currency", currency: code });
   return code;
+}
+
+export function facebookAccountSources(row: CampaignPerformanceRow): FacebookAccountPerformance[] {
+  return row.facebookAccounts ?? [row];
 }
 
 export function summarizeAds(sources: CampaignSource<AdPerformance>[]) {

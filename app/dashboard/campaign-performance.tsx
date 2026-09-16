@@ -1,7 +1,8 @@
 import {
-  getCampaignPerformance, summarizeAds, summarizeWebsiteConversions,
+  getCampaignPerformance, facebookAccountSources, summarizeAds, summarizeWebsiteConversions,
   type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type LinkCtrSummary
 } from "../../src/campaignPerformance.js";
+import type { MetaAccountSync } from "../../src/metaAccountDiscovery.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
 import { highestSortValue, liveSortValue } from "../../src/tableSorting.js";
@@ -21,17 +22,20 @@ function rateColor(value: number | null, target: number) {
   return `color-mix(in srgb, var(--${belowTarget ? "danger" : "green"}) ${intensity}%, var(--ink))`;
 }
 
-export async function CampaignPerformance({ dashboard }: { dashboard: SiteAnalyticsDashboardData }) {
-  const { rows, message, facebookLinkCtr, projects, unmatchedCampaigns } = await getCampaignPerformance(dashboard);
+export async function CampaignPerformance({ dashboard, discoverySites, forceMetaSync, syncHref }: {
+  dashboard: SiteAnalyticsDashboardData; discoverySites?: { id: string; name: string; url: string }[]; forceMetaSync?: boolean; syncHref?: string;
+}) {
+  const { rows, message, facebookLinkCtr, projects, unmatchedCampaigns, metaSync } = await getCampaignPerformance(dashboard, { discoverySites, forceMetaSync });
   const managers = await getProjectPageManagementData({ pages: projects.map((project) => ({ siteId: project.siteId, siteName: project.siteName, path: project.sourcePath, title: project.title, url: project.url })) });
-  return <CampaignPerformanceView rows={rows} message={[message, managers.error].filter(Boolean).join(" ")} facebookLinkCtr={facebookLinkCtr} projects={projects} unmatchedCampaigns={unmatchedCampaigns}
-    accountManagers={Object.fromEntries(managers.pages.map((page) => [page.key, page]))} />;
+  return <CampaignPerformanceView rows={rows} message={[message, managers.error, metaSync?.message].filter(Boolean).join(" ")} facebookLinkCtr={facebookLinkCtr} projects={projects} unmatchedCampaigns={unmatchedCampaigns}
+    accountManagers={Object.fromEntries(managers.pages.map((page) => [page.key, page]))} metaSync={metaSync} syncHref={syncHref} />;
 }
 
-export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projects, unmatchedCampaigns, accountManagers }: {
+export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projects, unmatchedCampaigns, accountManagers, metaSync, syncHref }: {
   rows: CampaignPerformanceRow[]; message: string; facebookLinkCtr: LinkCtrSummary;
   projects: CampaignProjectRow[]; unmatchedCampaigns: UnmatchedProjectCampaign[];
   accountManagers: Record<string, ManagedProjectPage>;
+  metaSync?: MetaAccountSync; syncHref?: string;
 }) {
   const leads = summarizeWebsiteConversions(rows.map((row) => row.leads));
   const appointments = summarizeWebsiteConversions(rows.map((row) => row.appointments));
@@ -39,13 +43,19 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   const visitors = measuredSites.reduce((sum, row) => sum + row.websiteVisitors, 0);
   const conversions = measuredSites.reduce((sum, row) => sum + row.websiteConversions, 0);
   const cvr = visitors > 0 ? conversions / visitors * 100 : null;
-  const issues = rows.flatMap((row) => (["google", "facebook", "leads", "appointments"] as const)
-    .filter((key) => row[key].state !== "connected")
-    .map((key) => ({ key: `${row.siteId}:${key}`, site: row.name, message: row[key].message }))
-    .concat(row.facebookLinkCtr.state === "unavailable"
-      ? [{ key: `${row.siteId}:facebookLinkCtr`, site: row.name, message: row.facebookLinkCtr.message }] : [])
-    .concat(row.google.state === "connected" && row.googleCampaignPages.message
-      ? [{ key: `${row.siteId}:googleCampaignPages`, site: row.name, message: row.googleCampaignPages.message }] : []));
+  const facebookAccounts = rows.flatMap(facebookAccountSources);
+  const issues = rows.flatMap((row) => {
+    const basic = (["google", "leads", "appointments"] as const)
+      .filter((key) => row[key].state !== "connected")
+      .map((key) => ({ key: `${row.siteId}:${key}`, site: row.name, message: row[key].message }));
+    const meta = facebookAccountSources(row).flatMap((account, index) =>
+      (["facebook", "facebookLinkCtr", "facebookCampaignPages"] as const)
+        .filter((key) => account[key].state === "unavailable" || (key === "facebook" && account[key].state === "not_configured"))
+        .map((key) => ({ key: `${row.siteId}:${index}:${key}`, site: row.name, message: account[key].message })));
+    const google = row.google.state === "connected" && row.googleCampaignPages.message
+      ? [{ key: `${row.siteId}:googleCampaignPages`, site: row.name, message: row.googleCampaignPages.message }] : [];
+    return [...basic, ...meta, ...google];
+  });
 
   return (
     <div className="campaign-performance">
@@ -61,7 +71,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
 
       <section className="campaign-channel-grid" aria-label="Advertentiekanalen">
         <ChannelPanel name="Google" sources={rows.map((row) => row.google)} />
-        <ChannelPanel name="Facebook" sources={rows.map((row) => row.facebook)} linkCtr={facebookLinkCtr} />
+        <ChannelPanel name="Facebook" sources={facebookAccounts.map((account) => account.facebook)} linkCtr={facebookLinkCtr} />
       </section>
 
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
@@ -120,7 +130,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         <p className="campaign-method-note">Google toont per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een Google-cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. Beweeg over de Facebook-CTR voor de campagnenaam. Spend geldt voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure, Afspraak en CVR komen één keer per project uit Websiteprestaties.</p>
         {unmatchedCampaigns.length > 0 ? <div className="campaign-unmatched">
           <h3>Nog aan een projectpagina te koppelen</h3>
-          <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.channel}:${campaign.siteId}:${campaign.campaignId}`}>
+          <ul>{unmatchedCampaigns.map((campaign) => <li key={`${campaign.channel}:${campaign.siteId}:${campaign.accountId ?? ""}:${campaign.campaignId}`}>
             {campaign.siteName} — {campaign.channel === "google" ? "Google" : "Facebook"}: {campaign.campaignName}
           </li>)}</ul>
         </div> : null}
@@ -129,6 +139,17 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       {issues.length > 0 ? <details className="panel campaign-connection-details" open>
         <summary>Koppelingen aanvullen <span>{issues.length}</span></summary>
         <ul>{issues.map((issue) => <li key={issue.key}><strong>{issue.site}</strong> — {issue.message}</li>)}</ul>
+      </details> : null}
+
+      {metaSync && metaSync.state !== "not_configured" ? <details className="panel campaign-connection-details">
+        <summary>Meta-accounts <span>{metaSync.accounts.length}</span></summary>
+        <p>Nieuwe advertentieaccounts worden automatisch opgehaald bij het laden van dit overzicht. Campagnes worden via hun advertentielinks aan websites gekoppeld; deze controle wordt maximaal vijf minuten bewaard.</p>
+        {syncHref ? <p><a className="header-meta-link" href={syncHref}>Nu synchroniseren</a></p> : null}
+        {metaSync.message ? <p className="data-notice" role="status">{metaSync.message}</p> : null}
+        <ul>{metaSync.accounts.map((account) => <li key={account.id}>
+          <strong>{account.name}</strong> — {account.siteNames.length ? `Gekoppeld aan ${account.siteNames.join(", ")}.` : "Nog niet gekoppeld."}
+          {account.message ? ` ${account.message}` : ""}
+        </li>)}</ul>
       </details> : null}
 
       <p className="campaign-method-note">
@@ -207,8 +228,8 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
       <CampaignStatus sources={sources} />
     </div>
     <p className="campaign-channel-description">{summary.connected > 0
-      ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary)}`
-      : coverage(summary)}</p>
+      ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary, "website-accountkoppelingen")}`
+      : coverage(summary, "website-accountkoppelingen")}</p>
     {linkCtr ? <p className="campaign-channel-description">CTR (taux de clics sur le lien) uit Ads Manager, per lopende Ledoux-campagne in de gekozen periode.</p> : null}
     <dl className="campaign-channel-metrics">
       <div><dt>{linkCtr ? `Facebook link-CTR${linkCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
@@ -239,6 +260,6 @@ function formatSpend(values: { amount: number; currency: string }[]) {
   return values.length ? values.map(({ amount, currency }) => new Intl.NumberFormat("nl-BE", { style: "currency", currency }).format(amount)).join(" + ") : "—";
 }
 
-function coverage({ connected, total }: { connected: number; total: number }) {
-  return connected === 0 ? "Nog geen gegevens beschikbaar" : `${connected} van ${total} sites gekoppeld${connected < total ? " · gedeeltelijk totaal" : ""}`;
+function coverage({ connected, total }: { connected: number; total: number }, label = "sites") {
+  return connected === 0 ? "Nog geen gegevens beschikbaar" : `${connected} van ${total} ${label} gekoppeld${connected < total ? " · gedeeltelijk totaal" : ""}`;
 }
