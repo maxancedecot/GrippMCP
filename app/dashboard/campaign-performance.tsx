@@ -1,7 +1,6 @@
-import type { ReactNode } from "react";
 import {
   getCampaignPerformance, summarizeAds, summarizeWebsiteConversions,
-  type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type WebsiteConversionPerformance, type LinkCtrSummary
+  type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type LinkCtrSummary
 } from "../../src/campaignPerformance.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
@@ -118,33 +117,6 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         </div> : null}
       </section>
 
-      <details className="panel campaign-overview campaign-connection-details">
-        <summary>Totalen per website en advertentieaccount</summary>
-        <div className="panel-heading">
-          <div><p className="eyebrow">Alle kanalen samen</p><h2 id="campaign-overview-title">Performance per website</h2></div>
-          <span className="panel-total">{number.format(rows.length)} {rows.length === 1 ? "site" : "sites"}</span>
-        </div>
-        {rows.length === 0 ? <p className="empty-state">Er zijn nog geen gekoppelde websites met campagnegegevens.</p> : (
-          <div className="table-wrap campaign-table-wrap" role="region" aria-label="Campagneperformance per website" tabIndex={0}>
-            <SortableTable className="campaign-table" columns={[
-              { key: "name", label: "Website", text: true }, { key: "googleLive", label: "Google live" },
-              { key: "facebookLive", label: "Facebook live" }, { key: "leads", label: "Leads" },
-              { key: "appointments", label: "Afspraken" }, { key: "facebookCtr", label: "Facebook link-CTR", description: "Hoogste CTR binnen de website" },
-              { key: "facebookSpend", label: "Facebook spend" }, { key: "googleCtr", label: "Google CTR" },
-              { key: "googleSpend", label: "Google spend" }, { key: "cvr", label: "Website CVR" }
-            ]} rows={rows.map((row) => ({ key: row.siteId, sortValues: websiteSortValues(row), content: <tr key={row.siteId}>
-                <th scope="row"><span className="row-title">{row.name}</span><span className="cell-muted">{displayHost(row.url)}</span></th>
-                <td><CampaignStatus sources={[row.google]} /></td><td><CampaignStatus sources={[row.facebook]} /></td>
-                <td><ConversionValue source={row.leads} /></td><td><ConversionValue source={row.appointments} /></td>
-                <td><FacebookCampaignCtr row={row} /></td>
-                <td><AdValue source={row.facebook} metric="spend" /></td>
-                <td><AdValue source={row.google} metric="ctr" /></td><td><AdValue source={row.google} metric="spend" /></td>
-                <td><strong className="campaign-cvr-value">{percentage(row.websiteCvr)}</strong>{row.websiteCvr === null ? <span className="cell-muted">Geen metingen</span> : null}</td>
-              </tr> }))} />
-          </div>
-        )}
-      </details>
-
       {issues.length > 0 ? <details className="panel campaign-connection-details" open>
         <summary>Koppelingen aanvullen <span>{issues.length}</span></summary>
         <ul>{issues.map((issue) => <li key={issue.key}><strong>{issue.site}</strong> — {issue.message}</li>)}</ul>
@@ -162,19 +134,6 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       </p>
     </div>
   );
-}
-
-function websiteSortValues(row: CampaignPerformanceRow) {
-  const spend = (source: CampaignSource<AdPerformance>) => source.data
-    ? source.data.campaigns.reduce((sum, campaign) => sum + campaign.spend, 0) : null;
-  const live = (source: CampaignSource<AdPerformance>) => source.data
-    ? source.data.campaigns.length ? liveSortValue(source.data.campaigns.map((campaign) => campaign.live)) : 0 : null;
-  return {
-    name: row.name, googleLive: live(row.google), facebookLive: live(row.facebook),
-    leads: row.leads.data?.count ?? null, appointments: row.appointments.data?.count ?? null,
-    facebookCtr: highestSortValue(row.facebookLinkCtr.data?.campaigns.map((campaign) => campaign.ctr) ?? []),
-    facebookSpend: spend(row.facebook), googleCtr: summarizeAds([row.google]).ctr, googleSpend: spend(row.google), cvr: row.websiteCvr
-  };
 }
 
 function ProjectCampaignMetric({ project, metric, channel = "facebook" }: { project: CampaignProjectRow; metric: "ctr" | "spend" | "status"; channel?: "facebook" | "google" }) {
@@ -254,30 +213,6 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
   </article>;
 }
 
-function FacebookCampaignCtr({ row }: { row: CampaignPerformanceRow }) {
-  const source = row.facebookLinkCtr;
-  if (!source.data || source.data.campaigns.length === 0) return <>
-    <DataValue source={source}>—</DataValue>
-    {source.data && source.message ? <span className="cell-muted">{source.message}</span> : null}
-  </>;
-  return <ul className="campaign-ctr-list" aria-label="Link-CTR per Facebook-campagne">
-    {source.data.campaigns.map((campaign) => {
-      const pages = row.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
-      return <li key={campaign.id} data-campaign-id={campaign.id}>
-        <CampaignCtr name={campaign.name} ctr={campaign.ctr} />
-        {campaign.ctr === null ? <span className="cell-muted">Geen vertoningen in deze periode</span> : null}
-        {pages.map((page) => <a key={page.path} className="campaign-project-link" href={page.url} target="_blank" rel="noreferrer">
-          {page.title}{page.hasConversionMapping ? <span className="cell-muted">Gekoppeld aan Websiteprestaties</span> : null}
-        </a>)}
-        {pages.length > 1 ? <span className="cell-muted">Campagne-CTR voor deze pagina’s samen</span> : null}
-        {row.facebookCampaignPages.message && pages.length > 0 ? <span className="cell-muted">{row.facebookCampaignPages.message}</span> : null}
-        {pages.length === 0 ? <span className="cell-muted">{row.facebookCampaignPages.state === "unavailable"
-          ? "Projectpagina kon niet worden gecontroleerd" : "Geen projectpagina op deze website gevonden"}</span> : null}
-      </li>;
-    })}
-  </ul>;
-}
-
 function CampaignStatus({ sources }: { sources: CampaignSource<AdPerformance>[] }) {
   const summary = summarizeAds(sources);
   const unavailable = sources.some((source) => source.state === "unavailable");
@@ -291,29 +226,10 @@ function CampaignStatus({ sources }: { sources: CampaignSource<AdPerformance>[] 
   return <span className={`campaign-status campaign-status--${tone}`}><i aria-hidden="true" />{label}</span>;
 }
 
-function ConversionValue({ source }: { source: CampaignSource<WebsiteConversionPerformance> }) {
-  return <DataValue source={source}>{source.data ? number.format(source.data.count) : "—"}</DataValue>;
-}
-
-function AdValue({ source, metric }: { source: CampaignSource<AdPerformance>; metric: "ctr" | "spend" }) {
-  const summary = summarizeAds([source]);
-  return <DataValue source={source}>{metric === "ctr"
-    ? <span style={{ color: rateColor(summary.ctr, 1) }}>{percentage(summary.ctr)}</span>
-    : formatSpend(summary.spend)}</DataValue>;
-}
-
-function DataValue({ source, children }: { source: CampaignSource<unknown>; children: ReactNode }) {
-  return <><strong>{children}</strong>{!source.data ? <span className="cell-muted">{source.state === "unavailable" ? "Niet beschikbaar" : "Niet gekoppeld"}</span> : null}</>;
-}
-
 function formatSpend(values: { amount: number; currency: string }[]) {
   return values.length ? values.map(({ amount, currency }) => new Intl.NumberFormat("nl-BE", { style: "currency", currency }).format(amount)).join(" + ") : "—";
 }
 
 function coverage({ connected, total }: { connected: number; total: number }) {
   return connected === 0 ? "Nog geen gegevens beschikbaar" : `${connected} van ${total} sites gekoppeld${connected < total ? " · gedeeltelijk totaal" : ""}`;
-}
-
-function displayHost(url: string) {
-  try { return new URL(url).hostname; } catch { return url; }
 }

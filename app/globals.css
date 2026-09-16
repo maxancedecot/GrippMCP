@@ -1680,10 +1680,6 @@ td .inline-bar {
   overflow-wrap: anywhere;
 }
 
-.campaign-table {
-  min-width: 1240px;
-}
-
 .data-management-intro {
   max-width: 76ch;
   color: var(--muted);
@@ -1894,51 +1890,6 @@ td .inline-bar {
 
 .campaign-unmatched {
   margin-top: 20px;
-}
-
-.campaign-table tbody th {
-  text-transform: none;
-  letter-spacing: 0;
-  white-space: normal;
-}
-
-.campaign-table td {
-  font-variant-numeric: tabular-nums;
-}
-
-.campaign-table td .cell-muted {
-  font-size: 11px;
-}
-
-.campaign-ctr-list {
-  display: grid;
-  gap: 12px;
-  min-width: 220px;
-  max-width: 340px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  white-space: normal;
-}
-
-.campaign-ctr-list li {
-  display: grid;
-  gap: 4px;
-  overflow-wrap: anywhere;
-}
-
-.campaign-ctr-list li > span:first-child {
-  font-size: 12px;
-}
-
-.campaign-project-link {
-  font-size: 11px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.campaign-cvr-value {
-  color: var(--good);
 }
 
 .campaign-connection-details summary {
