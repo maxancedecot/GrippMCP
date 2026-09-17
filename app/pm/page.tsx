@@ -362,6 +362,10 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
   const employeeBillabilityTotals = buildEmployeeBillabilityTableTotals(dashboard.employeeBillability, employeeBillabilityOverhead);
   const employeeBillabilityDisplayCount = dashboard.employeeBillability.length + (employeeBillabilityOverhead?.employeeCount ?? 0);
   const agencyCostProfitTotals = buildRevenueCostProfitTotals(dashboard.agencyCostProfitByMonth);
+  const profitPercentage = agencyCostProfitTotals.revenue === 0
+    ? null
+    : (agencyCostProfitTotals.profit / agencyCostProfitTotals.revenue) * 100;
+  const profitPercentageLabel = profitPercentage === null ? "—" : `${formatPercent(profitPercentage)}%`;
 
   return (
     <DashboardFrame>
@@ -385,6 +389,13 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
       <section className="metric-grid pm-metric-grid" aria-label="Kerncijfers management">
         <MetricCard href="#pm-revenue-detail" label="Agency Omzet" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen min creditnota's, excl. btw netto" tone="good" />
         <MetricCard href="#pm-revenue-detail" label="CRM omzet" value={formatCurrency(dashboard.crmRevenue.amount)} detail={crmRevenueMetricDetail(dashboard.crmRevenue)} tone="neutral" />
+        <MetricCard
+          href={`${pmRevenueTabHref(params, "profit")}#pm-revenue-detail`}
+          label="Winstpercentage"
+          value={profitPercentageLabel}
+          detail={profitPercentage === null ? "Niet berekenbaar zonder omzet" : "(Omzet incl. CRM − personeelskost) / omzet × 100"}
+          tone={profitPercentage === null ? "neutral" : agencyCostProfitTotals.profit < 0 ? "warning" : "good"}
+        />
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
         <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Agency Omzet gedeeld door agenda-uren zonder overhead" tone="neutral" />
         <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Agency Omzet gedeeld door billable uren" tone="warning" />
@@ -554,6 +565,9 @@ export default async function PmDashboardPage({ searchParams }: { searchParams?:
                 <span className="panel-total panel-total--cost">Kost {formatCurrency(agencyCostProfitTotals.employeeCost)}</span>
                 <span className={`panel-total ${agencyCostProfitTotals.profit < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
                   Winst {formatCurrency(agencyCostProfitTotals.profit)}
+                </span>
+                <span className={`panel-total ${profitPercentage === null ? "" : agencyCostProfitTotals.profit < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
+                  Winstpercentage {profitPercentageLabel}
                 </span>
               </>
             ) : (
