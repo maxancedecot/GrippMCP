@@ -8,6 +8,9 @@ import { ProjectManagementAutoRefresh } from "./auto-refresh.js";
 import { PROJECT_MANAGEMENT_CACHE_KEY, PROJECT_MANAGEMENT_CACHE_TTL_MS, PROJECT_MANAGEMENT_CACHE_VERSION } from "./cache.js";
 import { CompleteProjectForm } from "./complete-project-form.js";
 import { ProjectTasksModal } from "./project-tasks-modal.js";
+import { ProjectChat } from "./project-chat.js";
+import { projectChatConfigured } from "../../src/projectChat.js";
+import "./project-chat.css";
 
 export const dynamic = "force-dynamic";
 
@@ -133,6 +136,8 @@ export default async function ProjectManagementPage({ searchParams }: { searchPa
         <ProjectMetric label="Extern binnen 14d" value={String(data.upcomingProjects)} detail="Externe oplevering binnen 14 dagen" tone="blue" />
         <ProjectMetric label="Totale waarde" value={formatCurrency(data.totalValue)} detail="Exclusief btw, van zichtbare projecten" tone="neutral" />
       </section>
+
+      <ProjectChat configured={projectChatConfigured()} />
 
       <section className="panel project-list-panel">
         <div className="panel-heading">

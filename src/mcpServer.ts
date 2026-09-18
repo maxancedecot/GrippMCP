@@ -8,6 +8,7 @@ import { JsonValue } from "./types.js";
 
 export type CreateGrippMcpServerOptions = {
   clientOptions?: GrippClientOptions;
+  readOnly?: boolean;
 };
 
 function jsonText(value: unknown) {
@@ -91,6 +92,12 @@ export function createGrippMcpServer(options: CreateGrippMcpServerOptions = {}) 
       return { result };
     })
   );
+
+  // Chat clients only receive the four explicitly read-only tools above.
+  // Generic calls and batches are deliberately excluded as well.
+  if (options.readOnly) {
+    return server;
+  }
 
   server.tool(
     "gripp_create",
