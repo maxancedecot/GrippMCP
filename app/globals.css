@@ -59,6 +59,8 @@
   --border-strong: rgba(255, 255, 255, 0.16);
   --good: #ffc400;
   --good-soft: rgba(255, 196, 0, 0.12);
+  --accent-fill: #ffc400;
+  --accent-fill-ink: #06120b;
   --blue: #ffffff;
   --blue-soft: rgba(255, 255, 255, 0.08);
   --billable: #ff6b5b;
@@ -93,14 +95,22 @@
   --muted-2: #77756e;
   --border: rgba(21, 21, 21, 0.11);
   --border-strong: rgba(21, 21, 21, 0.2);
+  --good: #765900;
   --good-soft: rgba(255, 196, 0, 0.2);
+  --accent-fill: #ffc400;
+  --accent-fill-ink: #151515;
   --blue: #151515;
   --blue-soft: rgba(21, 21, 21, 0.07);
-  --billable-soft: rgba(255, 107, 91, 0.14);
+  --billable: #b42318;
+  --billable-soft: rgba(180, 35, 24, 0.12);
+  --warning: #765900;
   --warning-soft: rgba(255, 196, 0, 0.18);
   --overtime-soft: rgba(86, 84, 78, 0.12);
   --neutral: #6c6a64;
   --neutral-soft: #e4e1d8;
+  --danger: #b42318;
+  --green: #147348;
+  --yellow-deep: #765900;
   --ring: rgba(180, 132, 0, 0.3);
 }
 
@@ -136,6 +146,7 @@ select {
   display: block;
   min-height: 100dvh;
   background: var(--background);
+  color: var(--ink);
 }
 
 .dashboard-app::before {
@@ -399,10 +410,10 @@ select {
 
 .dashboard-sidebar-date-form button {
   min-height: 42px;
-  border: 1px solid var(--good);
+  border: 1px solid var(--accent-fill);
   border-radius: 8px;
-  background: var(--good);
-  color: #06120b;
+  background: var(--accent-fill);
+  color: var(--accent-fill-ink);
   cursor: pointer;
   font-family: var(--font-display);
   font-weight: 800;
