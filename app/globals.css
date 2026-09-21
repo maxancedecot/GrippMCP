@@ -259,6 +259,11 @@ select {
 
 .dashboard-sidebar-section {
   display: grid;
+  gap: 24px;
+}
+
+.dashboard-sidebar-analytics {
+  display: grid;
   gap: 10px;
 }
 
@@ -347,13 +352,17 @@ select {
 
 .dashboard-sidebar-filter {
   display: grid;
-  gap: 8px;
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
+  gap: 14px;
 }
 
-.dashboard-sidebar-filter label {
+.dashboard-sidebar-filter-form,
+.dashboard-sidebar-date-form {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-sidebar-filter label,
+.dashboard-sidebar-date-form label {
   display: grid;
   gap: 7px;
   color: var(--muted);
@@ -361,7 +370,8 @@ select {
   font-weight: 700;
 }
 
-.dashboard-sidebar-filter select {
+.dashboard-sidebar-filter select,
+.dashboard-sidebar-date-form input {
   width: 100%;
   min-height: 42px;
   padding: 8px 10px;
@@ -371,11 +381,45 @@ select {
   color: var(--ink);
 }
 
+.dashboard-sidebar-date-form {
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.dashboard-sidebar-date-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.dashboard-sidebar-date-form input {
+  min-width: 0;
+  padding: 7px 5px;
+  font-size: 12px;
+}
+
+.dashboard-sidebar-date-form button {
+  min-height: 42px;
+  border: 1px solid var(--good);
+  border-radius: 8px;
+  background: var(--good);
+  color: #06120b;
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 800;
+}
+
 .dashboard-sidebar-filter a {
   color: var(--good);
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.dashboard-sidebar-date-form button:focus-visible,
+.dashboard-sidebar-date-form input:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: 2px;
 }
 
 .campaign-filter-summary {
@@ -3415,6 +3459,7 @@ td .inline-bar {
   .dashboard-sidebar-section {
     min-width: 0;
     flex: 1 1 auto;
+    gap: 14px;
   }
 
   .dashboard-sidebar-label {
@@ -3444,8 +3489,10 @@ td .inline-bar {
   .dashboard-sidebar-filter {
     grid-template-columns: minmax(180px, 280px) auto;
     align-items: end;
-    margin-top: 8px;
-    padding-top: 10px;
+  }
+
+  .dashboard-sidebar-date-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dashboard-sidebar-footer {
@@ -3534,6 +3581,11 @@ td .inline-bar {
     flex-direction: column;
     gap: 10px;
     padding: 12px 14px 10px 19px;
+  }
+
+  .dashboard-sidebar-filter {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .dashboard-sidebar-brand img {

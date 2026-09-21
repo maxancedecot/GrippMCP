@@ -7,8 +7,6 @@ import {
   accountManagerHref,
   dashboardPeriodSelection,
   dashboardToday,
-  DASHBOARD_PERIOD_OPTIONS,
-  MAX_DASHBOARD_DAYS,
   type DashboardSearchParams
 } from "../../src/dashboardPeriod.js";
 
@@ -34,7 +32,8 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
 
   return <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}
     customPeriod={customPeriod} managers={performance.managers} selectedManager={performance.selectedManager}
-    clearFilterHref={clearFilterHref} />} sidebarFooter={<DashboardSidebarFooter view="campaigns" params={params}
+    clearFilterHref={clearFilterHref} periodStart={dashboard.period.start} periodEnd={dashboard.period.end}
+    maxDate={dashboardToday(now)} />} sidebarFooter={<DashboardSidebarFooter view="campaigns" params={params}
       days={days} customPeriod={customPeriod} />}>
     <main className="dashboard-shell site-analytics-shell">
       <header className="dashboard-header">
@@ -49,22 +48,6 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
       </header>
 
       {selection.error ? <p className="data-notice" role="alert">{selection.error}</p> : null}
-
-      <div className="site-analytics-controls">
-        <nav className="dashboard-tabs" aria-label="Periode">
-          {DASHBOARD_PERIOD_OPTIONS.map((periodDays) => <a key={periodDays}
-            className={`dashboard-tab ${!selection.custom && dashboard.period.days === periodDays ? "dashboard-tab--active" : ""}`}
-            href={accountManagerHref({ params, days: periodDays })}
-            aria-current={!selection.custom && dashboard.period.days === periodDays ? "page" : undefined}>{periodDays}d</a>)}
-        </nav>
-        <form className="period-form dashboard-date-range" action="/accountmanager" method="get" aria-label="Eigen periode kiezen">
-          {selectedAccountManager ? <input type="hidden" name="manager" value={selectedAccountManager} /> : null}
-          <label>Van<input type="date" name="start" required defaultValue={dashboard.period.start} max={dashboardToday(now)} /></label>
-          <label>Tot en met<input type="date" name="end" required defaultValue={dashboard.period.end} max={dashboardToday(now)} /></label>
-          <button type="submit">Toepassen</button>
-          <span>Max. {MAX_DASHBOARD_DAYS} dagen per periode</span>
-        </form>
-      </div>
 
       <CampaignPerformanceView {...performance} />
     </main>

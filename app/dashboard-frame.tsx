@@ -24,7 +24,6 @@ export function DashboardFrame({ children, showTopMenu = true, className = "", s
             <img src="/ledoux/logo/ledoux-logo.svg" alt="" />
           </a>
           <div className="dashboard-sidebar-section">
-            <p className="dashboard-sidebar-label">Analytics</p>
             {sidebar}
           </div>
           {sidebarFooter ? <div className="dashboard-sidebar-footer">{sidebarFooter}</div> : null}
