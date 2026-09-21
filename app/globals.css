@@ -47,6 +47,7 @@
 }
 
 :root {
+  color-scheme: dark;
   --background: #0a0a0a;
   --surface: #161616;
   --surface-strong: #242424;
@@ -79,6 +80,28 @@
   --clip-sm: polygon(0 0, 100% 0, 100% 100%, 22px 100%, 0 calc(100% - 22px));
   --clip-md: polygon(0 0, 100% 0, 100% 100%, 34px 100%, 0 calc(100% - 34px));
   --clip-tr: polygon(0 0, calc(100% - 34px) 0, 100% 34px, 100% 100%, 0 100%);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #f3f1ea;
+  --surface: #ffffff;
+  --surface-strong: #e8e5dc;
+  --surface-muted: #eeece5;
+  --ink: #151515;
+  --muted: #5f5e59;
+  --muted-2: #77756e;
+  --border: rgba(21, 21, 21, 0.11);
+  --border-strong: rgba(21, 21, 21, 0.2);
+  --good-soft: rgba(255, 196, 0, 0.2);
+  --blue: #151515;
+  --blue-soft: rgba(21, 21, 21, 0.07);
+  --billable-soft: rgba(255, 107, 91, 0.14);
+  --warning-soft: rgba(255, 196, 0, 0.18);
+  --overtime-soft: rgba(86, 84, 78, 0.12);
+  --neutral: #6c6a64;
+  --neutral-soft: #e4e1d8;
+  --ring: rgba(180, 132, 0, 0.3);
 }
 
 * {
@@ -229,6 +252,11 @@ select {
   width: 136px;
 }
 
+:root[data-theme="light"] .dashboard-sidebar-brand img,
+:root[data-theme="light"] .dashboard-brandbar .dashboard-brand img {
+  content: url("/ledoux/logo/ledoux-logo-dark.svg");
+}
+
 .dashboard-sidebar-section {
   display: grid;
   gap: 10px;
@@ -244,14 +272,13 @@ select {
   text-transform: uppercase;
 }
 
-.dashboard-sidebar-nav,
-.dashboard-sidebar-secondary {
+.dashboard-sidebar-nav {
   display: grid;
   gap: 5px;
 }
 
 .dashboard-sidebar-link,
-.dashboard-sidebar-secondary a {
+.dashboard-sidebar-action {
   display: flex;
   min-height: 42px;
   align-items: center;
@@ -266,7 +293,7 @@ select {
 }
 
 .dashboard-sidebar-link:hover,
-.dashboard-sidebar-secondary a:hover {
+.dashboard-sidebar-action:hover {
   background: var(--surface-strong);
   color: var(--ink);
 }
@@ -278,15 +305,83 @@ select {
 }
 
 .dashboard-sidebar-link:focus-visible,
-.dashboard-sidebar-secondary a:focus-visible {
+.dashboard-sidebar-action:focus-visible,
+.dashboard-sidebar-filter select:focus-visible,
+.dashboard-sidebar-filter a:focus-visible {
   outline: 2px solid var(--good);
   outline-offset: 2px;
 }
 
-.dashboard-sidebar-secondary {
+.dashboard-sidebar-footer {
+  display: grid;
+  gap: 8px;
   margin-top: auto;
   padding-top: 20px;
   border-top: 1px solid var(--border);
+}
+
+.dashboard-sidebar-tools {
+  display: grid;
+  gap: 4px;
+}
+
+.dashboard-sidebar-action {
+  width: 100%;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dashboard-theme-toggle {
+  gap: 9px;
+}
+
+.dashboard-theme-toggle span {
+  width: 18px;
+  color: var(--good);
+  font-size: 17px;
+  text-align: center;
+}
+
+.dashboard-sidebar-filter {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.dashboard-sidebar-filter label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dashboard-sidebar-filter select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.dashboard-sidebar-filter a {
+  color: var(--good);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.campaign-filter-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .dashboard-shell {
@@ -3322,8 +3417,7 @@ td .inline-bar {
     flex: 1 1 auto;
   }
 
-  .dashboard-sidebar-label,
-  .dashboard-sidebar-secondary {
+  .dashboard-sidebar-label {
     display: none;
   }
 
@@ -3345,6 +3439,37 @@ td .inline-bar {
 
   .dashboard-sidebar-link--active {
     border-bottom-color: var(--good);
+  }
+
+  .dashboard-sidebar-filter {
+    grid-template-columns: minmax(180px, 280px) auto;
+    align-items: end;
+    margin-top: 8px;
+    padding-top: 10px;
+  }
+
+  .dashboard-sidebar-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 0;
+    padding-top: 8px;
+  }
+
+  .dashboard-sidebar-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .dashboard-sidebar-action,
+  .dashboard-sidebar-footer > .dashboard-sidebar-link {
+    width: auto;
+    min-height: 36px;
+    border-left: 0;
+    padding: 6px 9px;
+    white-space: nowrap;
   }
 
   .dashboard-header {

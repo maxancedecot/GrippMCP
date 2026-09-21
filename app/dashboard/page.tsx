@@ -18,9 +18,8 @@ import { CvrMappingBoard } from "./cvr-mapping-board.js";
 import { CvrTrendChart } from "./cvr-trend-chart.js";
 import { CampaignPerformance } from "./campaign-performance.js";
 import { SortableTable } from "./sortable-table.js";
-import { CrmTrackingCopy } from "./crm-tracking-copy.js";
 import { DataManagementPage } from "./data-management.js";
-import { DashboardViewTabs } from "./view-tabs.js";
+import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
 import { isExcludedAnalyticsLink } from "../../src/analyticsPageFilter.js";
 import { accountManagerHref, dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
@@ -106,7 +105,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
   return (
     <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view={view} params={params} days={days}
-      siteId={dashboard.selectedSiteId} customPeriod={customPeriod} />}>
+      siteId={dashboard.selectedSiteId} customPeriod={customPeriod} />} sidebarFooter={<DashboardSidebarFooter
+        view={view} params={params} days={days} siteId={dashboard.selectedSiteId} customPeriod={customPeriod} />}>
       <main className="dashboard-shell site-analytics-shell">
         <header className="dashboard-header">
           <div>
@@ -114,10 +114,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <h1>{view === "campaigns" ? "Accountmanager dashboard" : "Websiteprestaties"}</h1>
           </div>
           <div className="header-meta">
-            <a className="header-meta-link" href="/api/site-analytics/plugin" download>
-              WordPress-plugin
-            </a>
-            <CrmTrackingCopy />
             <span className={`source-badge source-badge--${dashboard.source.mode}`}>
               {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}
             </span>

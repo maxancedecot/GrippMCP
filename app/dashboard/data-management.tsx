@@ -2,7 +2,7 @@ import { getProjectPageManagementData } from "../../src/projectPageManagement.js
 import { dashboardPeriodSelection, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 import { DataManagementBoard } from "./data-management-board.js";
-import { DashboardViewTabs } from "./view-tabs.js";
+import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
 
 export async function DataManagementPage({ params }: { params: DashboardSearchParams }) {
   const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
@@ -10,7 +10,9 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
   const selection = dashboardPeriodSelection(params);
   return <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view="data-management" params={params}
     days={selection.period.days} siteId={first(params.site)}
-    customPeriod={selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined} />}>
+    customPeriod={selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined} />}
+    sidebarFooter={<DashboardSidebarFooter view="data-management" params={params} days={selection.period.days}
+      siteId={first(params.site)} customPeriod={selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined} />}>
     <main className="dashboard-shell site-analytics-shell">
       <header className="dashboard-header">
         <div><p className="eyebrow">Projectpagina’s en accountmanagers</p><h1>Data management</h1></div>

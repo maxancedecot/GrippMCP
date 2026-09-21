@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 import { DashboardFrame } from "../dashboard-frame.js";
-import { CampaignPerformance } from "../dashboard/campaign-performance.js";
-import { CrmTrackingCopy } from "../dashboard/crm-tracking-copy.js";
-import { DashboardViewTabs } from "../dashboard/view-tabs.js";
+import { CampaignPerformanceView, loadCampaignPerformanceViewData } from "../dashboard/campaign-performance.js";
+import { DashboardSidebarFooter, DashboardViewTabs } from "../dashboard/view-tabs.js";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import {
   accountManagerHref,
@@ -29,15 +27,19 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const customPeriod = selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined;
   const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
   const selectedAccountManager = first(params.manager);
+  const clearFilterHref = accountManagerHref({ params: { ...params, manager: undefined }, days, customPeriod });
+  const performance = await loadCampaignPerformanceViewData({ dashboard, discoverySites: dashboard.sites,
+    selectedAccountManager, forceMetaSync: first(params.syncMeta) === "1",
+    syncHref: accountManagerHref({ params, days, customPeriod, syncMeta: true }) });
 
   return <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}
-    customPeriod={customPeriod} />}>
+    customPeriod={customPeriod} managers={performance.managers} selectedManager={performance.selectedManager}
+    clearFilterHref={clearFilterHref} />} sidebarFooter={<DashboardSidebarFooter view="campaigns" params={params}
+      days={days} customPeriod={customPeriod} />}>
     <main className="dashboard-shell site-analytics-shell">
       <header className="dashboard-header">
         <div><p className="eyebrow">Marketingoverzicht</p><h1>Accountmanager dashboard</h1></div>
         <div className="header-meta">
-          <a className="header-meta-link" href="/api/site-analytics/plugin" download>WordPress-plugin</a>
-          <CrmTrackingCopy />
           <span className={`source-badge source-badge--${dashboard.source.mode}`}>
             {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}
           </span>
@@ -64,14 +66,7 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
         </form>
       </div>
 
-      <Suspense fallback={<p className="data-notice" role="status">Campagnegegevens laden uit Google Ads, Facebook Ads en Websiteprestaties…</p>}>
-        <CampaignPerformance dashboard={dashboard} discoverySites={dashboard.sites}
-          selectedAccountManager={selectedAccountManager}
-          filterPeriod={customPeriod ?? (days !== 30 ? { days } : undefined)}
-          clearFilterHref={accountManagerHref({ params: { ...params, manager: undefined }, days, customPeriod })}
-          forceMetaSync={first(params.syncMeta) === "1"}
-          syncHref={accountManagerHref({ params, days, customPeriod, syncMeta: true })} />
-      </Suspense>
+      <CampaignPerformanceView {...performance} />
     </main>
   </DashboardFrame>;
 }

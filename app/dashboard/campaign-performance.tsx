@@ -24,10 +24,12 @@ function rateColor(value: number | null, target: number) {
   return `color-mix(in srgb, var(--${belowTarget ? "danger" : "green"}) ${intensity}%, var(--ink))`;
 }
 
-export async function CampaignPerformance({ dashboard, discoverySites, forceMetaSync, syncHref, selectedAccountManager, filterPeriod, clearFilterHref }: {
+type CampaignPerformanceProps = {
   dashboard: SiteAnalyticsDashboardData; discoverySites?: { id: string; name: string; url: string }[]; forceMetaSync?: boolean; syncHref?: string;
-  selectedAccountManager?: string; filterPeriod?: { days?: number; start?: string; end?: string }; clearFilterHref?: string;
-}) {
+  selectedAccountManager?: string;
+};
+
+export async function loadCampaignPerformanceViewData({ dashboard, discoverySites, forceMetaSync, syncHref, selectedAccountManager }: CampaignPerformanceProps) {
   const { rows, message, facebookLinkCtr, projects, unmatchedCampaigns, metaSync } = await getCampaignPerformance(dashboard, { discoverySites, forceMetaSync });
   const managers = await getProjectPageManagementData({ pages: projects.map((project) => ({ siteId: project.siteId, siteName: project.siteName, path: project.sourcePath, title: project.title, url: project.url })) });
   const accountManagers = Object.fromEntries(managers.pages.map((page) => [page.key, page]));
@@ -38,22 +40,24 @@ export async function CampaignPerformance({ dashboard, discoverySites, forceMeta
   const filteredMetaSync = filtered.selectedManager && metaSync
     ? { ...metaSync, accounts: metaSync.accounts.filter((account) => filteredMetaAccountIds.has(account.id)) }
     : metaSync;
-  return <CampaignPerformanceView rows={filteredRows} message={[message, managers.error, metaSync?.message].filter(Boolean).join(" ")}
-    facebookLinkCtr={filtered.selectedManager ? filteredProjectLinkCtr(filtered.projects) : facebookLinkCtr}
-    projects={filtered.projects} unmatchedCampaigns={filtered.selectedManager ? [] : unmatchedCampaigns}
-    accountManagers={accountManagers} metaSync={filteredMetaSync} syncHref={syncHref}
-    managers={filtered.managers} selectedManager={filtered.selectedManager} totalProjects={filtered.totalProjects}
-    filterPeriod={filterPeriod} clearFilterHref={clearFilterHref} />;
+  return { rows: filteredRows, message: [message, managers.error, metaSync?.message].filter(Boolean).join(" "),
+    facebookLinkCtr: filtered.selectedManager ? filteredProjectLinkCtr(filtered.projects) : facebookLinkCtr,
+    projects: filtered.projects, unmatchedCampaigns: filtered.selectedManager ? [] : unmatchedCampaigns,
+    accountManagers, metaSync: filteredMetaSync, syncHref,
+    managers: filtered.managers, selectedManager: filtered.selectedManager, totalProjects: filtered.totalProjects };
+}
+
+export async function CampaignPerformance(props: CampaignPerformanceProps) {
+  return <CampaignPerformanceView {...await loadCampaignPerformanceViewData(props)} />;
 }
 
 export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projects, unmatchedCampaigns, accountManagers, metaSync, syncHref,
-  managers = [], selectedManager = "", totalProjects = projects.length, filterPeriod, clearFilterHref }: {
+  selectedManager = "", totalProjects = projects.length }: {
   rows: CampaignPerformanceRow[]; message: string; facebookLinkCtr: LinkCtrSummary;
   projects: CampaignProjectRow[]; unmatchedCampaigns: UnmatchedProjectCampaign[];
   accountManagers: Record<string, ManagedProjectPage>;
   metaSync?: MetaAccountSync; syncHref?: string;
   managers?: [string, string][]; selectedManager?: string; totalProjects?: number;
-  filterPeriod?: { days?: number; start?: string; end?: string }; clearFilterHref?: string;
 }) {
   const projectSummary = summarizeFilteredCampaignProjects(projects);
   const leads = selectedManager
@@ -86,21 +90,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   return (
     <div className="campaign-performance">
       {message ? <p className="data-notice">{message}</p> : null}
-      <form className="campaign-project-filters" action="/accountmanager" method="get" aria-label="Volledig dashboard filteren op accountmanager">
-        {filterPeriod?.days ? <input type="hidden" name="days" value={filterPeriod.days} /> : null}
-        {filterPeriod?.start ? <input type="hidden" name="start" value={filterPeriod.start} /> : null}
-        {filterPeriod?.end ? <input type="hidden" name="end" value={filterPeriod.end} /> : null}
-        <label>Accountmanager
-          <select name="manager" defaultValue={selectedManager}>
-            <option value="">Alle accountmanagers</option>
-            {managers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-            <option value="unassigned">Nog toe te wijzen</option>
-          </select>
-        </label>
-        <button type="submit">Filteren</button>
-        {selectedManager && clearFilterHref ? <a className="header-meta-link" href={clearFilterHref}>Filter wissen</a> : null}
-        {selectedManager ? <span className="cell-muted">{number.format(projects.length)} van {number.format(totalProjects)} projectpagina’s</span> : null}
-      </form>
+      {selectedManager ? <p className="campaign-filter-summary">{number.format(projects.length)} van {number.format(totalProjects)} projectpagina’s</p> : null}
       <section className="metric-grid campaign-metric-grid" aria-label="Campagne KPI's">
         <CampaignMetric label="Leads" value={leads.count === null ? "—" : number.format(leads.count)}
           detail="Brochure uit Websiteprestaties" availability={coverage(leads)} />

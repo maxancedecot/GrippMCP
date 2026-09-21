@@ -7,7 +7,7 @@ const trackingCode = `<script defer
   data-project="ledoux">
 </script>`;
 
-export function CrmTrackingCopy() {
+export function CrmTrackingCopy({ variant = "header" }: { variant?: "header" | "sidebar" } = {}) {
   const [status, setStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export function CrmTrackingCopy() {
   }
 
   return <>
-    <button type="button" className="header-meta-link crm-tracking-copy" onClick={() => void copy()}
+    <button type="button" className={`${variant === "sidebar" ? "dashboard-sidebar-action" : "header-meta-link"} crm-tracking-copy`} onClick={() => void copy()}
       disabled={status === "copying"} aria-label="CRM tracking code kopiëren" title="Kopieer de code om in de header van je CRM-website te plakken">
       {status === "copied" ? "Code gekopieerd!" : "CRM tracking code"}
     </button>

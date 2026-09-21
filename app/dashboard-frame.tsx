@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
-export function DashboardFrame({ children, showTopMenu = true, className = "", sidebar }: {
-  children: ReactNode; showTopMenu?: boolean; className?: string; sidebar?: ReactNode;
+export function DashboardFrame({ children, showTopMenu = true, className = "", sidebar, sidebarFooter }: {
+  children: ReactNode; showTopMenu?: boolean; className?: string; sidebar?: ReactNode; sidebarFooter?: ReactNode;
 }) {
   return (
     <div className={`dashboard-app ${className}`}>
@@ -27,11 +27,7 @@ export function DashboardFrame({ children, showTopMenu = true, className = "", s
             <p className="dashboard-sidebar-label">Analytics</p>
             {sidebar}
           </div>
-          <nav className="dashboard-sidebar-secondary" aria-label="Andere dashboards">
-            <a href="/pm">PM dashboard</a>
-            <a href="/projectmanagement">Projecten</a>
-            <a href="/alice-buyssehof">Kaart 3D</a>
-          </nav>
+          {sidebarFooter ? <div className="dashboard-sidebar-footer">{sidebarFooter}</div> : null}
         </aside>
         <div className="dashboard-main">{children}</div>
       </div> : <div className="dashboard-main">{children}</div>}
