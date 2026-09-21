@@ -48,3 +48,19 @@ test("batched persistent reads preserve missing entries and reject incomplete re
   result = [null];
   await assert.rejects(readJsonCaches(["client:1", "client:2"]), /Incomplete cache response/);
 });
+
+test("persistent cache errors include the provider response", async (t) => {
+  const keys = ["JSON_CACHE_STORE", "KV_REST_API_URL", "KV_REST_API_TOKEN"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  const originalFetch = globalThis.fetch;
+  delete process.env.JSON_CACHE_STORE;
+  process.env.KV_REST_API_URL = "https://cache.example.test";
+  process.env.KV_REST_API_TOKEN = "test-only";
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; });
+  });
+  globalThis.fetch = async () => new Response("request body is too large", { status: 400, statusText: "Bad Request" });
+
+  await assert.rejects(writeJsonCache("oversized", { value: "x" }), /KV command failed \(400\): request body is too large/);
+});

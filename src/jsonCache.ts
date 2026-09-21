@@ -137,11 +137,13 @@ async function kvCommand<T>(command: unknown[]): Promise<T> {
   try {
     payload = JSON.parse(text) as { result?: T; error?: string };
   } catch {
-    throw new Error(`KV command failed: ${response.statusText || "invalid response"}`);
+    const providerError = text.slice(0, 500) || response.statusText || `HTTP ${response.status}`;
+    throw new Error(`KV command failed (${response.status}): ${providerError}`);
   }
 
   if (!response.ok || payload.error) {
-    throw new Error(`KV command failed: ${payload.error ?? response.statusText}`);
+    const providerError = payload.error ?? (text.slice(0, 500) || response.statusText || `HTTP ${response.status}`);
+    throw new Error(`KV command failed (${response.status}): ${providerError}`);
   }
 
   return payload.result as T;

@@ -30,7 +30,11 @@ export async function POST(request: Request) {
   try {
     await recordSiteAnalyticsEvent(payload);
     return json({ ok: true });
-  } catch {
+  } catch (error) {
+    console.error("Site analytics event storage failed", {
+      siteId,
+      error: error instanceof Error ? error.message : String(error)
+    });
     return json({ error: "invalid_event" }, 400);
   }
 }

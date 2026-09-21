@@ -236,6 +236,10 @@ type DailyAccumulator = {
 
 const SITE_ANALYTICS_VERSION = 1;
 const SITE_ANALYTICS_CACHE_PREFIX = `site-analytics:v${SITE_ANALYTICS_VERSION}`;
+// Keep each Redis value comfortably below provider request/value limits. Events
+// for the same page view use the same shard so engagement and scroll updates
+// still modify the page-view record that received the original page view.
+const SITE_ANALYTICS_DAILY_SHARD_COUNT = 16;
 const SITE_ANALYTICS_REGISTRY_CACHE_KEY = `${SITE_ANALYTICS_CACHE_PREFIX}:registry`;
 const SITE_ANALYTICS_CVR_LINKS_CACHE_KEY = `${SITE_ANALYTICS_CACHE_PREFIX}:cvr-links`;
 const MAX_STRING_LENGTH = 300;
@@ -451,9 +455,10 @@ export async function deleteSiteAnalyticsCvrLink(linkId: string): Promise<boolea
 export async function recordSiteAnalyticsEvent(payload: unknown): Promise<{ accepted: true }> {
   const event = normalizeSiteAnalyticsEvent(payload);
   if (isExcludedAnalyticsLink(event.pageUrl) || isExcludedAnalyticsLink(event.pageKey)) return { accepted: true };
-  const daily = await readDailySiteAnalyticsData(event.siteId, event.receivedAt);
+  const shard = dailySiteAnalyticsShard(event.pageViewHash);
+  const daily = await readDailySiteAnalyticsData(event.siteId, event.receivedAt, shard);
   applySiteAnalyticsEvent(daily, event);
-  await writeJsonCache(dailySiteAnalyticsCacheKey(event.siteId, daily.date), daily);
+  await writeJsonCache(dailySiteAnalyticsShardCacheKey(event.siteId, daily.date, shard), daily);
 
   return { accepted: true };
 }
@@ -494,7 +499,12 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
   }
 
   for (const site of siteList) {
-    const storedDays = await readJsonCaches<DailySiteAnalyticsData>(dateKeys.map((date) => dailySiteAnalyticsCacheKey(site.id, date)));
+    // Read the legacy unsharded keys as well, so deploying this change does not
+    // discard any analytics that were already collected.
+    const storedDays = await readJsonCaches<DailySiteAnalyticsData>(dateKeys.flatMap((date) => [
+      dailySiteAnalyticsCacheKey(site.id, date),
+      ...Array.from({ length: SITE_ANALYTICS_DAILY_SHARD_COUNT }, (_, shard) => dailySiteAnalyticsShardCacheKey(site.id, date, shard))
+    ]));
     for (const daily of storedDays) {
       if (!isDailySiteAnalyticsData(daily)) {
         continue;
@@ -859,9 +869,9 @@ function normalizeSiteAnalyticsEvent(payload: unknown): NormalizedSiteAnalyticsE
   };
 }
 
-async function readDailySiteAnalyticsData(siteId: string, receivedAt: string): Promise<DailySiteAnalyticsData> {
+async function readDailySiteAnalyticsData(siteId: string, receivedAt: string, shard: number): Promise<DailySiteAnalyticsData> {
   const date = dateKeyForDate(new Date(receivedAt));
-  const cached = await readJsonCache<DailySiteAnalyticsData>(dailySiteAnalyticsCacheKey(siteId, date));
+  const cached = await readJsonCache<DailySiteAnalyticsData>(dailySiteAnalyticsShardCacheKey(siteId, date, shard));
   if (isDailySiteAnalyticsData(cached)) {
     return cached;
   }
@@ -1540,6 +1550,14 @@ function normalizeReferrerSource(source: string | undefined, medium: string | un
 
 function dailySiteAnalyticsCacheKey(siteId: string, date: string) {
   return `${SITE_ANALYTICS_CACHE_PREFIX}:${siteId}:${date}`;
+}
+
+function dailySiteAnalyticsShardCacheKey(siteId: string, date: string, shard: number) {
+  return `${dailySiteAnalyticsCacheKey(siteId, date)}:shard:${String(shard).padStart(2, "0")}`;
+}
+
+function dailySiteAnalyticsShard(pageViewHash: string) {
+  return Number.parseInt(pageViewHash.slice(0, 8), 16) % SITE_ANALYTICS_DAILY_SHARD_COUNT;
 }
 
 function pageAccumulatorKey(siteId: string, path: string) {
