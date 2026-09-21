@@ -446,6 +446,106 @@ select {
   font-size: 13px;
 }
 
+.accountmanager-loading-region {
+  position: relative;
+  min-width: 0;
+  min-height: 320px;
+}
+
+.accountmanager-loading-overlay {
+  position: absolute;
+  z-index: 20;
+  inset: -8px;
+  display: grid;
+  place-items: start center;
+  min-height: calc(100% + 16px);
+  padding: clamp(72px, 12vh, 148px) 20px 56px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 72%, transparent);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 22% 16%, color-mix(in srgb, var(--good) 18%, transparent), transparent 34%),
+    radial-gradient(circle at 78% 72%, color-mix(in srgb, var(--ink) 10%, transparent), transparent 38%),
+    color-mix(in srgb, var(--surface) 58%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(155%);
+  backdrop-filter: blur(20px) saturate(155%);
+  cursor: wait;
+}
+
+.accountmanager-loading-overlay::before,
+.accountmanager-loading-overlay::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--good) 28%, transparent);
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.accountmanager-loading-overlay::before {
+  top: 8%;
+  left: 9%;
+  width: 110px;
+  height: 110px;
+}
+
+.accountmanager-loading-overlay::after {
+  right: 7%;
+  bottom: 11%;
+  width: 170px;
+  height: 170px;
+  opacity: 0.5;
+}
+
+.accountmanager-loading-card {
+  position: sticky;
+  z-index: 1;
+  top: 32px;
+  display: grid;
+  width: min(100%, 360px);
+  justify-items: center;
+  gap: 10px;
+  padding: 28px;
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--background) 34%, transparent), inset 0 1px 0 color-mix(in srgb, var(--ink) 13%, transparent);
+  color: var(--ink);
+  text-align: center;
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  backdrop-filter: blur(28px) saturate(170%);
+}
+
+.accountmanager-loading-card strong {
+  font-family: var(--font-display);
+  font-size: 20px;
+}
+
+.accountmanager-loading-card > span:last-child {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.accountmanager-loading-spinner {
+  width: 42px;
+  height: 42px;
+  border: 3px solid color-mix(in srgb, var(--good) 22%, transparent);
+  border-top-color: var(--good);
+  border-radius: 50%;
+  animation: accountmanager-loading-spin 800ms linear infinite;
+}
+
+@keyframes accountmanager-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .accountmanager-loading-spinner {
+    animation-duration: 1800ms;
+  }
+}
+
 .dashboard-shell {
   width: min(100%, 1680px);
   min-width: 0;

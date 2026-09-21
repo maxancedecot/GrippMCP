@@ -15,6 +15,7 @@ import {
   dashboardToday,
   type DashboardSearchParams
 } from "../../src/dashboardPeriod.js";
+import { AccountManagerLoadingProvider, AccountManagerLoadingRegion } from "./loading-overlay.js";
 
 export const dynamic = "force-dynamic";
 
@@ -45,29 +46,32 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const performance = filterCampaignPerformanceViewData(snapshot.data.performance, selectedAccountManager,
     accountManagerHref({ params, days, customPeriod, syncMeta: true }));
 
-  return <DashboardFrame showTopMenu={false} className="dashboard-app--accountmanager"
-    sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}
-    customPeriod={customPeriod} managers={performance.managers} selectedManager={performance.selectedManager}
-    clearFilterHref={clearFilterHref} periodStart={dashboard.period.start} periodEnd={dashboard.period.end}
-    maxDate={dashboardToday(now)} />} sidebarFooter={<DashboardSidebarFooter view="campaigns" params={params}
-      days={days} customPeriod={customPeriod} />}>
-    <main className="dashboard-shell site-analytics-shell">
-      <header className="dashboard-header">
-        <div><h1>Accountmanager dashboard</h1></div>
-        <div className="header-meta">
-          <span className={`source-badge source-badge--${dashboard.source.mode}`}>
-            {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}
-          </span>
-          <span>{dashboard.period.label}</span>
-          <span>Bijgewerkt {dashboard.lastUpdated}</span>
-        </div>
-      </header>
+  return <AccountManagerLoadingProvider>
+    <DashboardFrame showTopMenu={false} className="dashboard-app--accountmanager"
+      sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}
+      customPeriod={customPeriod} managers={performance.managers} selectedManager={performance.selectedManager}
+      clearFilterHref={clearFilterHref} periodStart={dashboard.period.start} periodEnd={dashboard.period.end}
+      maxDate={dashboardToday(now)} />} sidebarFooter={<DashboardSidebarFooter view="campaigns" params={params}
+        days={days} customPeriod={customPeriod} />}>
+      <main className="dashboard-shell site-analytics-shell">
+        <header className="dashboard-header">
+          <div><h1>Accountmanager dashboard</h1></div>
+          <div className="header-meta">
+            <span className={`source-badge source-badge--${dashboard.source.mode}`}>
+              {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}
+            </span>
+            <span>{dashboard.period.label}</span>
+            <span>Bijgewerkt {dashboard.lastUpdated}</span>
+          </div>
+        </header>
 
-      {selection.error ? <p className="data-notice" role="alert">{selection.error}</p> : null}
-
-      <CampaignPerformanceView {...performance} />
-    </main>
-  </DashboardFrame>;
+        <AccountManagerLoadingRegion>
+          {selection.error ? <p className="data-notice" role="alert">{selection.error}</p> : null}
+          <CampaignPerformanceView {...performance} />
+        </AccountManagerLoadingRegion>
+      </main>
+    </DashboardFrame>
+  </AccountManagerLoadingProvider>;
 }
 
 function first(value: string | string[] | undefined) {
