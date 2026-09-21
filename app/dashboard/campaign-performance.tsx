@@ -285,7 +285,6 @@ function ChannelPanel({ name, sources, linkCtr, comparison }: {
   return <article className="panel campaign-channel-panel">
     <div className="panel-heading">
       <div><p className="eyebrow">Advertenties</p><h2>{name} Ads</h2></div>
-      <CampaignStatus sources={sources} />
     </div>
     <dl className="campaign-channel-metrics">
       <div><dt>{linkCtr ? `Facebook link-CTR${linkCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
@@ -296,9 +295,7 @@ function ChannelPanel({ name, sources, linkCtr, comparison }: {
     <details className="campaign-channel-info">
       <summary aria-label={`Meer informatie over ${name} Ads`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
       <div className="campaign-info-content">
-        <p>{summary.connected > 0
-          ? `${summary.liveCount} van ${summary.campaignCount} campagnes live · ${coverage(summary, "website-accountkoppelingen")}`
-          : coverage(summary, "website-accountkoppelingen")}</p>
+        <p>{coverage(summary, "website-accountkoppelingen")}</p>
         {linkCtr ? <p>CTR (taux de clics sur le lien) uit Ads Manager, per Ledoux-campagne in de gekozen periode, ook als die nu niet meer live is.</p> : null}
         {linkCtr && linkCtr.campaigns > 1 ? <p>
           Gewogen op vertoningen per campagne. Hieronder zie je het gemiddelde per project; hover toont de afzonderlijke campagnes.
@@ -316,7 +313,7 @@ function belowAverageComparison(values: number[], average: number | null): Below
 function formatBelowAverage(comparison: BelowAverageComparison, singular: string, plural: string, metric: string) {
   if (comparison.average === null) return `Geen gemiddelde ${metric} beschikbaar`;
   if (comparison.measured === 0) return `Geen ${plural} met ${metric}-meting`;
-  return `${number.format(comparison.below)} van ${number.format(comparison.measured)} ${comparison.measured === 1 ? singular : plural} onder gemiddelde ${metric}`;
+  return `Onder gemiddelde ${metric}: ${number.format(comparison.below)} van ${number.format(comparison.measured)} ${comparison.measured === 1 ? singular : plural}`;
 }
 
 function adCampaignCtrValues(sources: CampaignSource<AdPerformance>[]) {
@@ -351,19 +348,6 @@ function facebookLinkCtrValues(rows: CampaignPerformanceRow[]) {
     }
   }
   return [...campaigns.values()];
-}
-
-function CampaignStatus({ sources }: { sources: CampaignSource<AdPerformance>[] }) {
-  const summary = summarizeAds(sources);
-  const unavailable = sources.some((source) => source.state === "unavailable");
-  const incomplete = summary.connected < sources.length;
-  let label = "Niet gekoppeld";
-  let tone = "unknown";
-  if (summary.liveCount > 0) { label = "Live"; tone = "live"; }
-  else if (summary.unknownCount > 0 || (summary.connected > 0 && incomplete)) label = "Onbekend";
-  else if (summary.connected > 0) { label = "Niet live"; tone = "offline"; }
-  else if (unavailable) label = "Niet beschikbaar";
-  return <span className={`campaign-status campaign-status--${tone}`}><i aria-hidden="true" />{label}</span>;
 }
 
 function formatSpend(values: { amount: number; currency: string }[]) {
