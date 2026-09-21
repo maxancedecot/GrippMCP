@@ -66,3 +66,20 @@ export function dashboardHref({ params, days, siteId, customPeriod, syncMeta }: 
   const query = search.toString();
   return query ? `/dashboard?${query}` : "/dashboard";
 }
+
+export function accountManagerHref({ params, days, customPeriod, syncMeta }: {
+  params: DashboardSearchParams; days: number; customPeriod?: { start: string; end: string }; syncMeta?: boolean;
+}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (["days", "site", "start", "end", "syncMeta", "tab", "refresh"].includes(key)) continue;
+    for (const item of Array.isArray(value) ? value : value ? [value] : []) search.append(key, item);
+  }
+  if (customPeriod) {
+    search.set("start", customPeriod.start);
+    search.set("end", customPeriod.end);
+  } else if (days !== 30) search.set("days", String(days));
+  if (syncMeta) search.set("syncMeta", "1");
+  const query = search.toString();
+  return query ? `/accountmanager?${query}` : "/accountmanager";
+}

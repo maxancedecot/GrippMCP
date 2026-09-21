@@ -22,7 +22,7 @@ import { CrmTrackingCopy } from "./crm-tracking-copy.js";
 import { DataManagementPage } from "./data-management.js";
 import { DashboardViewTabs } from "./view-tabs.js";
 import { isExcludedAnalyticsLink } from "../../src/analyticsPageFilter.js";
-import { dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
+import { accountManagerHref, dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +77,12 @@ async function deleteCvrLinkAction(formData: FormData) {
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const params = (await searchParams) ?? {};
   if (firstParam(params.tab) === "data-management") return <DataManagementPage params={params} />;
+  if (firstParam(params.tab) === "campaigns") {
+    const selection = dashboardPeriodSelection(params);
+    redirect(accountManagerHref({ params, days: selection.period.days,
+      customPeriod: selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined,
+      syncMeta: firstParam(params.syncMeta) === "1" }));
+  }
   const now = new Date();
   const selection = dashboardPeriodSelection(params, now);
   const { days } = selection.period;

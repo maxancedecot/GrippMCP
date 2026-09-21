@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dashboardHref, dashboardPeriodSelection, siteAnalyticsPeriod } from "../src/dashboardPeriod.js";
+import { accountManagerHref, dashboardHref, dashboardPeriodSelection, siteAnalyticsPeriod } from "../src/dashboardPeriod.js";
 
 const now = new Date("2026-09-15T12:00:00Z");
 
@@ -55,4 +55,12 @@ test("manual Meta sync keeps filters and does not repeat when navigating", () =>
   const options = { params: { tab: "campaigns", syncMeta: "1" }, days: 7, siteId: "first" };
   assert.equal(dashboardHref(options), "/dashboard?tab=campaigns&days=7&site=first");
   assert.equal(dashboardHref({ ...options, syncMeta: true }), "/dashboard?tab=campaigns&days=7&site=first&syncMeta=1");
+});
+
+test("account manager links use their own page and drop dashboard-only filters", () => {
+  const params = { tab: "campaigns", site: "first", start: "2026-08-01", end: "2026-08-31", refresh: "1", syncMeta: "1" };
+  const customPeriod = { start: "2026-08-01", end: "2026-08-31" };
+  assert.equal(accountManagerHref({ params, days: 31, customPeriod }), "/accountmanager?start=2026-08-01&end=2026-08-31");
+  assert.equal(accountManagerHref({ params, days: 7, syncMeta: true }), "/accountmanager?days=7&syncMeta=1");
+  assert.equal(accountManagerHref({ params: {}, days: 30 }), "/accountmanager");
 });
