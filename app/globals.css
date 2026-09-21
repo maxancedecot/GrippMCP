@@ -1816,11 +1816,6 @@ td .inline-bar {
   margin-bottom: 0;
 }
 
-.campaign-metric-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: start;
-}
-
 .campaign-metric-card > span {
   padding-right: 36px;
 }
@@ -1835,8 +1830,8 @@ td .inline-bar {
 
 .campaign-channel-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
   gap: 14px;
 }
 
@@ -2281,8 +2276,7 @@ td .inline-bar {
 }
 
 @media (max-width: 660px) {
-  .campaign-channel-grid,
-  .campaign-metric-grid {
+  .campaign-channel-grid {
     grid-template-columns: 1fr;
   }
 

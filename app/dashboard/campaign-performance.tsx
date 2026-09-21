@@ -1,5 +1,5 @@
 import {
-  getCampaignPerformance, facebookAccountSources, summarizeAds, summarizeWebsiteConversions,
+  getCampaignPerformance, facebookAccountSources, summarizeAds,
   type AdCampaign, type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type LinkCtrSummary
 } from "../../src/campaignPerformance.js";
 import type { MetaAccountSync } from "../../src/metaAccountDiscovery.js";
@@ -60,12 +60,6 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   managers?: [string, string][]; selectedManager?: string; totalProjects?: number;
 }) {
   const projectSummary = summarizeFilteredCampaignProjects(projects);
-  const leads = selectedManager
-    ? { count: projectSummary.leads, connected: projectSummary.leadProjects, total: projects.length }
-    : summarizeWebsiteConversions(rows.map((row) => row.leads));
-  const appointments = selectedManager
-    ? { count: projectSummary.appointments, connected: projectSummary.appointmentProjects, total: projects.length }
-    : summarizeWebsiteConversions(rows.map((row) => row.appointments));
   const measuredSites = rows.filter((row) => row.websiteCvr !== null);
   const visitors = selectedManager ? projectSummary.visitors : measuredSites.reduce((sum, row) => sum + row.websiteVisitors, 0);
   const conversions = selectedManager ? projectSummary.leads + projectSummary.appointments
@@ -91,20 +85,13 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
     <div className="campaign-performance">
       {message ? <p className="data-notice">{message}</p> : null}
       {selectedManager ? <p className="campaign-filter-summary">{number.format(projects.length)} van {number.format(totalProjects)} projectpagina’s</p> : null}
-      <section className="metric-grid campaign-metric-grid" aria-label="Campagne KPI's">
-        <CampaignMetric label="Leads" value={leads.count === null ? "—" : number.format(leads.count)}
-          detail="Brochure uit Websiteprestaties" availability={coverage(leads)} />
-        <CampaignMetric label="Afspraken" value={appointments.count === null ? "—" : number.format(appointments.count)}
-          detail="Afspraak uit Websiteprestaties" availability={coverage(appointments)} />
+      <section className="campaign-channel-grid" aria-label="Advertentie- en website-KPI's">
+        <ChannelPanel name="Google" sources={googleSources} />
+        <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} />
         <CampaignMetric label="Website CVR" value={percentage(cvr)} detail="Conversieratio van gekoppelde websitepagina’s"
           availability={selectedManager
             ? projectSummary.measuredProjects > 0 ? `${projectSummary.measuredProjects} van ${projects.length} projectpagina’s met metingen` : "Nog geen conversiemetingen"
             : measuredSites.length > 0 ? `${measuredSites.length} van ${rows.length} sites met metingen` : "Nog geen conversiemetingen"} />
-      </section>
-
-      <section className="campaign-channel-grid" aria-label="Advertentiekanalen">
-        <ChannelPanel name="Google" sources={googleSources} />
-        <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} />
       </section>
 
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
