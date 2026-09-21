@@ -14,6 +14,7 @@ import { filterCampaignProjectsByManager, summarizeFilteredCampaignProjects } fr
 const number = new Intl.NumberFormat("nl-BE");
 const percent = new Intl.NumberFormat("nl-BE", { maximumFractionDigits: 2 });
 const percentage = (value: number | null) => value === null ? "—" : `${percent.format(value)}%`;
+type BelowAverageComparison = { below: number; measured: number; average: number | null };
 
 function rateColor(value: number | null, target: number) {
   if (value === null || !Number.isFinite(value)) return undefined;
@@ -68,6 +69,11 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   const facebookAccounts = rows.flatMap(facebookAccountSources);
   const googleSources = selectedManager ? projectAdSources(projects, "google") : rows.map((row) => row.google);
   const facebookSources = selectedManager ? projectAdSources(projects, "facebook") : facebookAccounts.map((account) => account.facebook);
+  const facebookComparison = belowAverageComparison(
+    selectedManager ? projectFacebookCtrValues(projects) : facebookLinkCtrValues(rows), facebookLinkCtr.ctr);
+  const websiteComparison = belowAverageComparison(
+    (selectedManager ? projects.map((project) => project.cvr) : measuredSites.map((row) => row.websiteCvr))
+      .filter((value): value is number => value !== null), cvr);
   const issues = rows.flatMap((row) => {
     const basic = (["google", "leads", "appointments"] as const)
       .filter((key) => row[key].state !== "connected")
@@ -87,8 +93,10 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       {selectedManager ? <p className="campaign-filter-summary">{number.format(projects.length)} van {number.format(totalProjects)} projectpagina’s</p> : null}
       <section className="campaign-channel-grid" aria-label="Advertentie- en website-KPI's">
         <ChannelPanel name="Google" sources={googleSources} />
-        <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} />
+        <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} comparison={facebookComparison} />
         <CampaignMetric label="Website CVR" value={percentage(cvr)} detail="Conversieratio van gekoppelde websitepagina’s"
+          comparison={formatBelowAverage(websiteComparison, selectedManager ? "projectpagina" : "site",
+            selectedManager ? "projectpagina’s" : "sites", "CVR")}
           availability={selectedManager
             ? projectSummary.measuredProjects > 0 ? `${projectSummary.measuredProjects} van ${projects.length} projectpagina’s met metingen` : "Nog geen conversiemetingen"
             : measuredSites.length > 0 ? `${measuredSites.length} van ${rows.length} sites met metingen` : "Nog geen conversiemetingen"} />
@@ -152,21 +160,23 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         </div> : null}
       </section>
 
-      {issues.length > 0 ? <details className="panel campaign-connection-details" open>
-        <summary>Koppelingen aanvullen <span>{issues.length}</span></summary>
-        <ul>{issues.map((issue) => <li key={issue.key}><strong>{issue.site}</strong> — {issue.message}</li>)}</ul>
-      </details> : null}
+      {issues.length > 0 || (metaSync && metaSync.state !== "not_configured") ? <div className="campaign-technical-details">
+        {issues.length > 0 ? <details className="campaign-connection-details">
+          <summary>Koppelingen aanvullen <span>{issues.length}</span></summary>
+          <ul>{issues.map((issue) => <li key={issue.key}><strong>{issue.site}</strong> — {issue.message}</li>)}</ul>
+        </details> : null}
 
-      {metaSync && metaSync.state !== "not_configured" ? <details className="panel campaign-connection-details">
-        <summary>Meta-accounts <span>{metaSync.accounts.length}</span></summary>
-        <p>Nieuwe advertentieaccounts worden automatisch opgehaald bij het laden van dit overzicht. Campagnes worden via hun advertentielinks aan websites gekoppeld; deze controle wordt maximaal vijf minuten bewaard.</p>
-        {syncHref ? <p><a className="header-meta-link" href={syncHref}>Nu synchroniseren</a></p> : null}
-        {metaSync.message ? <p className="data-notice" role="status">{metaSync.message}</p> : null}
-        <ul>{metaSync.accounts.map((account) => <li key={account.id}>
-          <strong>{account.name}</strong> — {account.siteNames.length ? `Gekoppeld aan ${account.siteNames.join(", ")}.` : "Nog niet gekoppeld."}
-          {account.message ? ` ${account.message}` : ""}
-        </li>)}</ul>
-      </details> : null}
+        {metaSync && metaSync.state !== "not_configured" ? <details className="campaign-connection-details">
+          <summary>Meta-accounts <span>{metaSync.accounts.length}</span></summary>
+          <p>Nieuwe advertentieaccounts worden automatisch opgehaald bij het laden van dit overzicht. Campagnes worden via hun advertentielinks aan websites gekoppeld; deze controle wordt maximaal vijf minuten bewaard.</p>
+          {syncHref ? <p><a className="header-meta-link" href={syncHref}>Nu synchroniseren</a></p> : null}
+          {metaSync.message ? <p className="data-notice" role="status">{metaSync.message}</p> : null}
+          <ul>{metaSync.accounts.map((account) => <li key={account.id}>
+            <strong>{account.name}</strong> — {account.siteNames.length ? `Gekoppeld aan ${account.siteNames.join(", ")}.` : "Nog niet gekoppeld."}
+            {account.message ? ` ${account.message}` : ""}
+          </li>)}</ul>
+        </details> : null}
+      </div> : null}
 
       <details className="campaign-method-info">
         <summary aria-label="Meer informatie over de cijfers en databronnen" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /><span>Over deze cijfers</span></summary>
@@ -254,9 +264,12 @@ function filteredProjectLinkCtr(projects: CampaignProjectRow[]): LinkCtrSummary 
   };
 }
 
-function CampaignMetric({ label, value, detail, availability }: { label: string; value: string; detail: string; availability: string }) {
+function CampaignMetric({ label, value, detail, availability, comparison }: {
+  label: string; value: string; detail: string; availability: string; comparison: string;
+}) {
   return <article className={`metric-card campaign-metric-card metric-card--${value === "—" ? "neutral" : "good"}`}>
     <span>{label}</span><strong>{value}</strong>
+    <p className="campaign-benchmark">{comparison}</p>
     <details className="campaign-metric-info">
       <summary aria-label={`Meer informatie over ${label}`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
       <div className="campaign-info-content"><p>{detail}</p><small className="campaign-coverage">{availability}</small></div>
@@ -264,8 +277,11 @@ function CampaignMetric({ label, value, detail, availability }: { label: string;
   </article>;
 }
 
-function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: CampaignSource<AdPerformance>[]; linkCtr?: LinkCtrSummary }) {
+function ChannelPanel({ name, sources, linkCtr, comparison }: {
+  name: string; sources: CampaignSource<AdPerformance>[]; linkCtr?: LinkCtrSummary; comparison?: BelowAverageComparison;
+}) {
   const summary = summarizeAds(sources);
+  const benchmark = comparison ?? belowAverageComparison(adCampaignCtrValues(sources), summary.ctr);
   return <article className="panel campaign-channel-panel">
     <div className="panel-heading">
       <div><p className="eyebrow">Advertenties</p><h2>{name} Ads</h2></div>
@@ -276,6 +292,7 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
         <dd style={{ color: rateColor(linkCtr ? linkCtr.ctr : summary.ctr, 1) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
+    <p className="campaign-benchmark">{formatBelowAverage(benchmark, "campagne", "campagnes", "CTR")}</p>
     <details className="campaign-channel-info">
       <summary aria-label={`Meer informatie over ${name} Ads`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
       <div className="campaign-info-content">
@@ -290,6 +307,50 @@ function ChannelPanel({ name, sources, linkCtr }: { name: string; sources: Campa
       </div>
     </details>
   </article>;
+}
+
+function belowAverageComparison(values: number[], average: number | null): BelowAverageComparison {
+  return { below: average === null ? 0 : values.filter((value) => value < average).length, measured: values.length, average };
+}
+
+function formatBelowAverage(comparison: BelowAverageComparison, singular: string, plural: string, metric: string) {
+  if (comparison.average === null) return `Geen gemiddelde ${metric} beschikbaar`;
+  if (comparison.measured === 0) return `Geen ${plural} met ${metric}-meting`;
+  return `${number.format(comparison.below)} van ${number.format(comparison.measured)} ${comparison.measured === 1 ? singular : plural} onder gemiddelde ${metric}`;
+}
+
+function adCampaignCtrValues(sources: CampaignSource<AdPerformance>[]) {
+  const campaigns = new Map<string, AdCampaign>();
+  for (const source of sources) {
+    if (!source.data) continue;
+    for (const campaign of source.data.campaigns) campaigns.set(`${source.data.accountId}:${campaign.id}`, campaign);
+  }
+  return [...campaigns.values()].filter((campaign) => campaign.impressions > 0)
+    .map((campaign) => campaign.clicks / campaign.impressions * 100);
+}
+
+function projectFacebookCtrValues(projects: CampaignProjectRow[]) {
+  const campaigns = new Map<string, CampaignProjectRow["campaigns"][number]>();
+  for (const project of projects) {
+    for (const campaign of project.campaigns) campaigns.set(`${campaign.accountId}:${campaign.id}`, campaign);
+  }
+  return [...campaigns.values()].filter((campaign) => campaign.impressions > 0 && campaign.ctr !== null)
+    .map((campaign) => campaign.ctr!);
+}
+
+function facebookLinkCtrValues(rows: CampaignPerformanceRow[]) {
+  const campaigns = new Map<string, number>();
+  for (const row of rows) {
+    for (const account of facebookAccountSources(row)) {
+      if (!account.facebookLinkCtr.data) continue;
+      for (const campaign of account.facebookLinkCtr.data.campaigns) {
+        if (campaign.impressions > 0 && campaign.ctr !== null) {
+          campaigns.set(`${account.facebookLinkCtr.data.accountId}:${campaign.id}`, campaign.ctr);
+        }
+      }
+    }
+  }
+  return [...campaigns.values()];
 }
 
 function CampaignStatus({ sources }: { sources: CampaignSource<AdPerformance>[] }) {

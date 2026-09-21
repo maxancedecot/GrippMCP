@@ -329,15 +329,23 @@ select {
 
 .dashboard-sidebar-footer {
   display: grid;
-  gap: 8px;
+  gap: 2px;
   margin-top: auto;
-  padding-top: 20px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 
 .dashboard-sidebar-tools {
   display: grid;
-  gap: 4px;
+  gap: 0;
+}
+
+.dashboard-sidebar-footer .dashboard-sidebar-link,
+.dashboard-sidebar-footer .dashboard-sidebar-action {
+  min-height: 30px;
+  padding: 4px 8px;
+  border-left-width: 2px;
+  font-size: 11px;
 }
 
 .dashboard-sidebar-action {
@@ -350,13 +358,13 @@ select {
 }
 
 .dashboard-theme-toggle {
-  gap: 9px;
+  gap: 5px;
 }
 
 .dashboard-theme-toggle span {
-  width: 18px;
+  width: 14px;
   color: var(--good);
-  font-size: 17px;
+  font-size: 13px;
   text-align: center;
 }
 
@@ -1839,6 +1847,13 @@ td .inline-bar {
   line-height: 1.5;
 }
 
+.campaign-benchmark {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .campaign-channel-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2263,10 +2278,34 @@ td .inline-bar {
   margin-top: 20px;
 }
 
+.campaign-technical-details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.campaign-connection-details {
+  max-width: min(100%, 560px);
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.campaign-connection-details[open] {
+  flex: 1 1 360px;
+}
+
 .campaign-connection-details summary {
   cursor: pointer;
   font-family: var(--font-display);
+  font-size: 11px;
   font-weight: 600;
+  line-height: 1.35;
 }
 
 .campaign-connection-details summary span {
@@ -2275,11 +2314,20 @@ td .inline-bar {
 }
 
 .campaign-connection-details ul {
-  margin: 16px 0 0;
-  padding-left: 20px;
+  margin: 8px 0 0;
+  padding-left: 16px;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.campaign-connection-details > p {
+  margin: 8px 0 0;
+}
+
+.campaign-connection-details .data-notice {
+  padding: 7px 9px;
+  font-size: 11px;
 }
 
 .campaign-method-note {
@@ -3517,9 +3565,9 @@ td .inline-bar {
   .dashboard-sidebar-action,
   .dashboard-sidebar-footer > .dashboard-sidebar-link {
     width: auto;
-    min-height: 36px;
+    min-height: 30px;
     border-left: 0;
-    padding: 6px 9px;
+    padding: 4px 7px;
     white-space: nowrap;
   }
 
