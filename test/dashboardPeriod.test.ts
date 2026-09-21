@@ -63,4 +63,5 @@ test("account manager links use their own page and drop dashboard-only filters",
   assert.equal(accountManagerHref({ params, days: 31, customPeriod }), "/accountmanager?start=2026-08-01&end=2026-08-31");
   assert.equal(accountManagerHref({ params, days: 7, syncMeta: true }), "/accountmanager?days=7&syncMeta=1");
   assert.equal(accountManagerHref({ params: {}, days: 30 }), "/accountmanager");
+  assert.equal(accountManagerHref({ params: { manager: "42" }, days: 7 }), "/accountmanager?manager=42&days=7");
 });

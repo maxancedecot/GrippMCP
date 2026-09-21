@@ -28,6 +28,7 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const { days } = selection.period;
   const customPeriod = selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined;
   const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
+  const selectedAccountManager = first(params.manager);
 
   return <DashboardFrame showTopMenu={false}>
     <main className="dashboard-shell site-analytics-shell">
@@ -55,6 +56,7 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
             aria-current={!selection.custom && dashboard.period.days === periodDays ? "page" : undefined}>{periodDays}d</a>)}
         </nav>
         <form className="period-form dashboard-date-range" action="/accountmanager" method="get" aria-label="Eigen periode kiezen">
+          {selectedAccountManager ? <input type="hidden" name="manager" value={selectedAccountManager} /> : null}
           <label>Van<input type="date" name="start" required defaultValue={dashboard.period.start} max={dashboardToday(now)} /></label>
           <label>Tot en met<input type="date" name="end" required defaultValue={dashboard.period.end} max={dashboardToday(now)} /></label>
           <button type="submit">Toepassen</button>
@@ -64,6 +66,9 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
 
       <Suspense fallback={<p className="data-notice" role="status">Campagnegegevens laden uit Google Ads, Facebook Ads en Websiteprestaties…</p>}>
         <CampaignPerformance dashboard={dashboard} discoverySites={dashboard.sites}
+          selectedAccountManager={selectedAccountManager}
+          filterPeriod={customPeriod ?? (days !== 30 ? { days } : undefined)}
+          clearFilterHref={accountManagerHref({ params: { ...params, manager: undefined }, days, customPeriod })}
           forceMetaSync={first(params.syncMeta) === "1"}
           syncHref={accountManagerHref({ params, days, customPeriod, syncMeta: true })} />
       </Suspense>

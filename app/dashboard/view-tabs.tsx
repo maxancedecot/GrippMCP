@@ -7,7 +7,8 @@ export function DashboardViewTabs({ view, params, days, siteId, customPeriod }: 
   return <nav className="dashboard-tabs site-analytics-view-tabs" aria-label="Dashboardweergave">
     {([{ key: "website", label: "Websiteprestaties" }, { key: "campaigns", label: "Accountmanager dashboard" },
       { key: "data-management", label: "Data management" }] as const).map((tab) => {
-      const cleanParams = { ...params, tab: tab.key === "website" ? undefined : tab.key, refresh: undefined };
+      const cleanParams = { ...params, tab: tab.key === "website" ? undefined : tab.key, refresh: undefined,
+        manager: tab.key === "campaigns" ? params.manager : undefined };
       const href = tab.key === "campaigns"
         ? accountManagerHref({ params: cleanParams, days, customPeriod })
         : dashboardHref({ params: cleanParams, days, siteId, customPeriod });

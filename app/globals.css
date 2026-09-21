@@ -1933,6 +1933,9 @@ td .inline-bar {
 }
 
 .campaign-project-filters {
+  display: flex;
+  align-items: end;
+  gap: 12px;
   margin: 0 0 20px;
 }
 
@@ -1958,6 +1961,23 @@ td .inline-bar {
 .campaign-project-filters select:focus-visible {
   outline: 2px solid var(--good);
   outline-offset: 3px;
+}
+
+.campaign-project-filters button,
+.campaign-project-filters a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.campaign-project-filters button {
+  border: 0;
+  background: var(--ink);
+  color: var(--surface);
+  cursor: pointer;
 }
 
 .campaign-project-table-wrap {
