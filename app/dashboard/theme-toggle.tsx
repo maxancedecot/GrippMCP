@@ -8,14 +8,22 @@ export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>("dark");
 
   useEffect(() => {
-    setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+    const scope = document.querySelector<HTMLElement>(".dashboard-app--accountmanager");
+    if (!scope) return;
+    const saved = window.localStorage.getItem("ledoux-accountmanager-theme");
+    const initial = saved === "light" || saved === "dark"
+      ? saved
+      : window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    scope.dataset.theme = initial;
+    setTheme(initial);
   }, []);
 
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    document.documentElement.style.colorScheme = next;
-    window.localStorage.setItem("ledoux-dashboard-theme", next);
+    const scope = document.querySelector<HTMLElement>(".dashboard-app--accountmanager");
+    if (!scope) return;
+    scope.dataset.theme = next;
+    window.localStorage.setItem("ledoux-accountmanager-theme", next);
     setTheme(next);
   }
 

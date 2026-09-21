@@ -30,7 +30,8 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
     selectedAccountManager, forceMetaSync: first(params.syncMeta) === "1",
     syncHref: accountManagerHref({ params, days, customPeriod, syncMeta: true }) });
 
-  return <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}
+  return <DashboardFrame showTopMenu={false} className="dashboard-app--accountmanager"
+    sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}
     customPeriod={customPeriod} managers={performance.managers} selectedManager={performance.selectedManager}
     clearFilterHref={clearFilterHref} periodStart={dashboard.period.start} periodEnd={dashboard.period.end}
     maxDate={dashboardToday(now)} />} sidebarFooter={<DashboardSidebarFooter view="campaigns" params={params}

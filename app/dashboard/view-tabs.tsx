@@ -43,7 +43,7 @@ export function DashboardSidebarFooter({ view, params, days, siteId, customPerio
     <div className="dashboard-sidebar-tools">
       <a className="dashboard-sidebar-action" href="/api/site-analytics/plugin" download>WordPress-plugin</a>
       <CrmTrackingCopy variant="sidebar" />
-      <ThemeToggle />
+      {view === "campaigns" ? <ThemeToggle /> : null}
     </div>
   </>;
 }

@@ -82,7 +82,7 @@
   --clip-tr: polygon(0 0, calc(100% - 34px) 0, 100% 34px, 100% 100%, 0 100%);
 }
 
-:root[data-theme="light"] {
+.dashboard-app--accountmanager[data-theme="light"] {
   color-scheme: light;
   --background: #f3f1ea;
   --surface: #ffffff;
@@ -252,8 +252,7 @@ select {
   width: 136px;
 }
 
-:root[data-theme="light"] .dashboard-sidebar-brand img,
-:root[data-theme="light"] .dashboard-brandbar .dashboard-brand img {
+.dashboard-app--accountmanager[data-theme="light"] .dashboard-sidebar-brand img {
   content: url("/ledoux/logo/ledoux-logo-dark.svg");
 }
 
