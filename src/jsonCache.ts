@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 export type JsonCacheMode = "upstash_rest" | "file" | "memory";
 
 const memoryStore = new Map<string, string>();
+const memoryLeases = new Map<string, number>();
 
 export async function readJsonCache<T>(key: string): Promise<T | null> {
   const raw = await readRawCache(key);
@@ -33,6 +34,19 @@ export async function writeJsonCache(key: string, value: unknown): Promise<void>
 
 export async function deleteJsonCache(key: string): Promise<void> {
   await deleteRawCache(key);
+}
+
+export async function claimJsonCacheLease(key: string, ttlMs: number): Promise<boolean> {
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new Error("Cache lease TTL must be positive.");
+  if (getJsonCacheMode() === "upstash_rest") {
+    return await kvCommand<string | null>(["SET", key, "1", "NX", "PX", Math.floor(ttlMs)]) === "OK";
+  }
+
+  const now = Date.now();
+  const expiresAt = memoryLeases.get(key) ?? 0;
+  if (expiresAt > now) return false;
+  memoryLeases.set(key, now + ttlMs);
+  return true;
 }
 
 export function getJsonCacheMode(): JsonCacheMode {

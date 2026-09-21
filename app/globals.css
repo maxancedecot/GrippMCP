@@ -1845,12 +1845,8 @@ td .inline-bar {
 
 .campaign-benchmark,
 .metric-card p.campaign-benchmark {
-  min-height: 36px;
   margin: 14px 0 0;
-  padding: 8px 10px;
-  border-left: 3px solid var(--good);
-  background: var(--good-soft);
-  color: var(--ink);
+  color: var(--muted);
   font-family: var(--font-display);
   font-size: 13px;
   font-weight: 700;

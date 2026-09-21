@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
 import { DashboardFrame } from "../dashboard-frame.js";
-import { CampaignPerformanceView, loadCampaignPerformanceViewData } from "../dashboard/campaign-performance.js";
+import {
+  CampaignPerformanceView,
+  filterCampaignPerformanceViewData,
+  loadCampaignPerformanceBaseData
+} from "../dashboard/campaign-performance.js";
 import { DashboardSidebarFooter, DashboardViewTabs } from "../dashboard/view-tabs.js";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
+import { loadScheduledSnapshot } from "../../src/scheduledSnapshot.js";
 import {
   accountManagerHref,
   dashboardPeriodSelection,
@@ -23,12 +28,20 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const selection = dashboardPeriodSelection(params, now);
   const { days } = selection.period;
   const customPeriod = selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined;
-  const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
   const selectedAccountManager = first(params.manager);
+  const forceMetaSync = first(params.syncMeta) === "1";
+  const snapshotKey = selection.custom
+    ? `accountmanager-dashboard:v1:custom:${selection.period.start}:${selection.period.end}`
+    : `accountmanager-dashboard:v1:rolling:${days}`;
+  const snapshot = await loadScheduledSnapshot({ key: snapshotKey, now, force: forceMetaSync, load: async () => {
+    const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
+    const performance = await loadCampaignPerformanceBaseData({ dashboard, discoverySites: dashboard.sites, forceMetaSync });
+    return { dashboard, performance };
+  } });
+  const { dashboard } = snapshot.data;
   const clearFilterHref = accountManagerHref({ params: { ...params, manager: undefined }, days, customPeriod });
-  const performance = await loadCampaignPerformanceViewData({ dashboard, discoverySites: dashboard.sites,
-    selectedAccountManager, forceMetaSync: first(params.syncMeta) === "1",
-    syncHref: accountManagerHref({ params, days, customPeriod, syncMeta: true }) });
+  const performance = filterCampaignPerformanceViewData(snapshot.data.performance, selectedAccountManager,
+    accountManagerHref({ params, days, customPeriod, syncMeta: true }));
 
   return <DashboardFrame showTopMenu={false} className="dashboard-app--accountmanager"
     sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}

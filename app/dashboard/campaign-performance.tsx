@@ -30,22 +30,33 @@ type CampaignPerformanceProps = {
   selectedAccountManager?: string;
 };
 
-export async function loadCampaignPerformanceViewData({ dashboard, discoverySites, forceMetaSync, syncHref, selectedAccountManager }: CampaignPerformanceProps) {
+export async function loadCampaignPerformanceBaseData({ dashboard, discoverySites, forceMetaSync }: Omit<CampaignPerformanceProps, "syncHref" | "selectedAccountManager">) {
   const { rows, message, facebookLinkCtr, projects, unmatchedCampaigns, metaSync } = await getCampaignPerformance(dashboard, { discoverySites, forceMetaSync });
   const managers = await getProjectPageManagementData({ pages: projects.map((project) => ({ siteId: project.siteId, siteName: project.siteName, path: project.sourcePath, title: project.title, url: project.url })) });
   const accountManagers = Object.fromEntries(managers.pages.map((page) => [page.key, page]));
-  const filtered = filterCampaignProjectsByManager(projects, accountManagers, selectedAccountManager);
+  return { rows, message: [message, managers.error, metaSync?.message].filter(Boolean).join(" "), facebookLinkCtr,
+    projects, unmatchedCampaigns, accountManagers, metaSync, managers: managers.pages };
+}
+
+export type CampaignPerformanceBaseData = Awaited<ReturnType<typeof loadCampaignPerformanceBaseData>>;
+
+export function filterCampaignPerformanceViewData(base: CampaignPerformanceBaseData, selectedAccountManager?: string, syncHref?: string) {
+  const filtered = filterCampaignProjectsByManager(base.projects, base.accountManagers, selectedAccountManager);
   const filteredSiteIds = new Set(filtered.projects.map((project) => project.siteId));
-  const filteredRows = filtered.selectedManager ? rows.filter((row) => filteredSiteIds.has(row.siteId)) : rows;
+  const filteredRows = filtered.selectedManager ? base.rows.filter((row) => filteredSiteIds.has(row.siteId)) : base.rows;
   const filteredMetaAccountIds = new Set(filtered.projects.flatMap((project) => project.campaigns.map((campaign) => `act_${campaign.accountId}`)));
-  const filteredMetaSync = filtered.selectedManager && metaSync
-    ? { ...metaSync, accounts: metaSync.accounts.filter((account) => filteredMetaAccountIds.has(account.id)) }
-    : metaSync;
-  return { rows: filteredRows, message: [message, managers.error, metaSync?.message].filter(Boolean).join(" "),
-    facebookLinkCtr: filtered.selectedManager ? filteredProjectLinkCtr(filtered.projects) : facebookLinkCtr,
-    projects: filtered.projects, unmatchedCampaigns: filtered.selectedManager ? [] : unmatchedCampaigns,
-    accountManagers, metaSync: filteredMetaSync, syncHref,
+  const filteredMetaSync = filtered.selectedManager && base.metaSync
+    ? { ...base.metaSync, accounts: base.metaSync.accounts.filter((account) => filteredMetaAccountIds.has(account.id)) }
+    : base.metaSync;
+  return { ...base, rows: filteredRows,
+    facebookLinkCtr: filtered.selectedManager ? filteredProjectLinkCtr(filtered.projects) : base.facebookLinkCtr,
+    projects: filtered.projects, unmatchedCampaigns: filtered.selectedManager ? [] : base.unmatchedCampaigns,
+    metaSync: filteredMetaSync, syncHref,
     managers: filtered.managers, selectedManager: filtered.selectedManager, totalProjects: filtered.totalProjects };
+}
+
+export async function loadCampaignPerformanceViewData({ selectedAccountManager, syncHref, ...props }: CampaignPerformanceProps) {
+  return filterCampaignPerformanceViewData(await loadCampaignPerformanceBaseData(props), selectedAccountManager, syncHref);
 }
 
 export async function CampaignPerformance(props: CampaignPerformanceProps) {
@@ -61,19 +72,14 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   managers?: [string, string][]; selectedManager?: string; totalProjects?: number;
 }) {
   const projectSummary = summarizeFilteredCampaignProjects(projects);
-  const measuredSites = rows.filter((row) => row.websiteCvr !== null);
-  const visitors = selectedManager ? projectSummary.visitors : measuredSites.reduce((sum, row) => sum + row.websiteVisitors, 0);
-  const conversions = selectedManager ? projectSummary.leads + projectSummary.appointments
-    : measuredSites.reduce((sum, row) => sum + row.websiteConversions, 0);
-  const cvr = selectedManager ? projectSummary.conversionRate : visitors > 0 ? conversions / visitors * 100 : null;
+  const cvr = projectSummary.conversionRate;
   const facebookAccounts = rows.flatMap(facebookAccountSources);
   const googleSources = selectedManager ? projectAdSources(projects, "google") : rows.map((row) => row.google);
   const facebookSources = selectedManager ? projectAdSources(projects, "facebook") : facebookAccounts.map((account) => account.facebook);
-  const facebookComparison = belowAverageComparison(
-    selectedManager ? projectFacebookCtrValues(projects) : facebookLinkCtrValues(rows), facebookLinkCtr.ctr);
-  const websiteComparison = belowAverageComparison(
-    (selectedManager ? projects.map((project) => project.cvr) : measuredSites.map((row) => row.websiteCvr))
-      .filter((value): value is number => value !== null), cvr);
+  const googleComparison = belowAverageComparison(projectCtrValues(projects, "google"), summarizeAds(googleSources).ctr);
+  const facebookComparison = belowAverageComparison(projectCtrValues(projects, "facebook"), facebookLinkCtr.ctr);
+  const websiteComparison = belowAverageComparison(projects.map((project) => project.cvr)
+    .filter((value): value is number => value !== null), cvr);
   const issues = rows.flatMap((row) => {
     const basic = (["google", "leads", "appointments"] as const)
       .filter((key) => row[key].state !== "connected")
@@ -92,14 +98,11 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       {message ? <p className="data-notice">{message}</p> : null}
       {selectedManager ? <p className="campaign-filter-summary">{number.format(projects.length)} van {number.format(totalProjects)} projectpagina’s</p> : null}
       <section className="campaign-channel-grid" aria-label="Advertentie- en website-KPI's">
-        <ChannelPanel name="Google" sources={googleSources} />
+        <ChannelPanel name="Google" sources={googleSources} comparison={googleComparison} />
         <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} comparison={facebookComparison} />
-        <WebsiteCvrPanel value={percentage(cvr)} detail="Conversieratio van gekoppelde websitepagina’s"
-          comparison={formatBelowAverage(websiteComparison, selectedManager ? "projectpagina" : "site",
-            selectedManager ? "projectpagina’s" : "sites", "CVR")}
-          availability={selectedManager
-            ? projectSummary.measuredProjects > 0 ? `${projectSummary.measuredProjects} van ${projects.length} projectpagina’s met metingen` : "Nog geen conversiemetingen"
-            : measuredSites.length > 0 ? `${measuredSites.length} van ${rows.length} sites met metingen` : "Nog geen conversiemetingen"} />
+        <WebsiteCvrPanel value={percentage(cvr)} detail="Conversieratio van gekoppelde projectpagina’s"
+          comparison={formatBelowAverage(websiteComparison, "project", "projecten", "CVR")}
+          availability={projectSummary.measuredProjects > 0 ? `${projectSummary.measuredProjects} van ${projects.length} projectpagina’s met metingen` : "Nog geen conversiemetingen"} />
       </section>
 
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
@@ -168,7 +171,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
 
         {metaSync && metaSync.state !== "not_configured" ? <details className="campaign-connection-details">
           <summary>Meta-accounts <span>{metaSync.accounts.length}</span></summary>
-          <p>Nieuwe advertentieaccounts worden automatisch opgehaald bij het laden van dit overzicht. Campagnes worden via hun advertentielinks aan websites gekoppeld; deze controle wordt maximaal vijf minuten bewaard.</p>
+          <p>De databronnen worden op werkdagen tussen 08:00 en 19:00 maximaal één keer per uur vernieuwd. Campagnes worden via hun advertentielinks aan websites gekoppeld.</p>
           {syncHref ? <p><a className="header-meta-link" href={syncHref}>Nu synchroniseren</a></p> : null}
           {metaSync.message ? <p className="data-notice" role="status">{metaSync.message}</p> : null}
           <ul>{metaSync.accounts.map((account) => <li key={account.id}>
@@ -283,10 +286,9 @@ function WebsiteCvrPanel({ value, detail, availability, comparison }: {
 }
 
 function ChannelPanel({ name, sources, linkCtr, comparison }: {
-  name: string; sources: CampaignSource<AdPerformance>[]; linkCtr?: LinkCtrSummary; comparison?: BelowAverageComparison;
+  name: string; sources: CampaignSource<AdPerformance>[]; linkCtr?: LinkCtrSummary; comparison: BelowAverageComparison;
 }) {
   const summary = summarizeAds(sources);
-  const benchmark = comparison ?? belowAverageComparison(adCampaignCtrValues(sources), summary.ctr);
   return <article className="panel campaign-channel-panel">
     <div className="panel-heading">
       <h2>{name} Ads</h2>
@@ -296,7 +298,7 @@ function ChannelPanel({ name, sources, linkCtr, comparison }: {
         <dd style={{ color: rateColor(linkCtr ? linkCtr.ctr : summary.ctr, 1) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
-    <p className="campaign-benchmark">{formatBelowAverage(benchmark, "campagne", "campagnes", "CTR")}</p>
+    <p className="campaign-benchmark">{formatBelowAverage(comparison, "project", "projecten", "CTR")}</p>
     <details className="campaign-channel-info">
       <summary aria-label={`Meer informatie over ${name} Ads`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
       <div className="campaign-info-content">
@@ -318,41 +320,14 @@ function belowAverageComparison(values: number[], average: number | null): Below
 function formatBelowAverage(comparison: BelowAverageComparison, singular: string, plural: string, metric: string) {
   if (comparison.average === null) return `Geen gemiddelde ${metric} beschikbaar`;
   if (comparison.measured === 0) return `Geen ${plural} met ${metric}-meting`;
-  return `Onder gemiddelde ${metric}: ${number.format(comparison.below)} van ${number.format(comparison.measured)} ${comparison.measured === 1 ? singular : plural}`;
+  return `${number.format(comparison.below)} van ${number.format(comparison.measured)} ${comparison.measured === 1 ? singular : plural} onder gemiddelde ${metric}`;
 }
 
-function adCampaignCtrValues(sources: CampaignSource<AdPerformance>[]) {
-  const campaigns = new Map<string, AdCampaign>();
-  for (const source of sources) {
-    if (!source.data) continue;
-    for (const campaign of source.data.campaigns) campaigns.set(`${source.data.accountId}:${campaign.id}`, campaign);
-  }
-  return [...campaigns.values()].filter((campaign) => campaign.impressions > 0)
-    .map((campaign) => campaign.clicks / campaign.impressions * 100);
-}
-
-function projectFacebookCtrValues(projects: CampaignProjectRow[]) {
-  const campaigns = new Map<string, CampaignProjectRow["campaigns"][number]>();
-  for (const project of projects) {
-    for (const campaign of project.campaigns) campaigns.set(`${campaign.accountId}:${campaign.id}`, campaign);
-  }
-  return [...campaigns.values()].filter((campaign) => campaign.impressions > 0 && campaign.ctr !== null)
-    .map((campaign) => campaign.ctr!);
-}
-
-function facebookLinkCtrValues(rows: CampaignPerformanceRow[]) {
-  const campaigns = new Map<string, number>();
-  for (const row of rows) {
-    for (const account of facebookAccountSources(row)) {
-      if (!account.facebookLinkCtr.data) continue;
-      for (const campaign of account.facebookLinkCtr.data.campaigns) {
-        if (campaign.impressions > 0 && campaign.ctr !== null) {
-          campaigns.set(`${account.facebookLinkCtr.data.accountId}:${campaign.id}`, campaign.ctr);
-        }
-      }
-    }
-  }
-  return [...campaigns.values()];
+function projectCtrValues(projects: CampaignProjectRow[], channel: "facebook" | "google") {
+  return projects.map((project) => channel === "google"
+    ? summarizeGoogleProjectCampaigns(project.googleCampaigns).ctr
+    : summarizeFacebookProjectCampaigns(project.campaigns).ctr)
+    .filter((value): value is number => value !== null);
 }
 
 function formatSpend(values: { amount: number; currency: string }[]) {
