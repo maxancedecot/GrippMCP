@@ -38,7 +38,7 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
       days={days} customPeriod={customPeriod} />}>
     <main className="dashboard-shell site-analytics-shell">
       <header className="dashboard-header">
-        <div><p className="eyebrow">Marketingoverzicht</p><h1>Accountmanager dashboard</h1></div>
+        <div><h1>Accountmanager dashboard</h1></div>
         <div className="header-meta">
           <span className={`source-badge source-badge--${dashboard.source.mode}`}>
             {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}

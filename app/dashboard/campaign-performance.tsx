@@ -94,7 +94,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       <section className="campaign-channel-grid" aria-label="Advertentie- en website-KPI's">
         <ChannelPanel name="Google" sources={googleSources} />
         <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} comparison={facebookComparison} />
-        <CampaignMetric label="Website CVR" value={percentage(cvr)} detail="Conversieratio van gekoppelde websitepagina’s"
+        <WebsiteCvrPanel value={percentage(cvr)} detail="Conversieratio van gekoppelde websitepagina’s"
           comparison={formatBelowAverage(websiteComparison, selectedManager ? "projectpagina" : "site",
             selectedManager ? "projectpagina’s" : "sites", "CVR")}
           availability={selectedManager
@@ -264,14 +264,19 @@ function filteredProjectLinkCtr(projects: CampaignProjectRow[]): LinkCtrSummary 
   };
 }
 
-function CampaignMetric({ label, value, detail, availability, comparison }: {
-  label: string; value: string; detail: string; availability: string; comparison: string;
+function WebsiteCvrPanel({ value, detail, availability, comparison }: {
+  value: string; detail: string; availability: string; comparison: string;
 }) {
-  return <article className={`metric-card campaign-metric-card metric-card--${value === "—" ? "neutral" : "good"}`}>
-    <span>{label}</span><strong>{value}</strong>
+  return <article className="panel campaign-channel-panel">
+    <div className="panel-heading">
+      <h2>Website CVR</h2>
+    </div>
+    <dl className="campaign-channel-metrics campaign-channel-metrics--single">
+      <div><dt>Conversieratio</dt><dd>{value}</dd></div>
+    </dl>
     <p className="campaign-benchmark">{comparison}</p>
-    <details className="campaign-metric-info">
-      <summary aria-label={`Meer informatie over ${label}`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
+    <details className="campaign-channel-info">
+      <summary aria-label="Meer informatie over Website CVR" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
       <div className="campaign-info-content"><p>{detail}</p><small className="campaign-coverage">{availability}</small></div>
     </details>
   </article>;
@@ -284,7 +289,7 @@ function ChannelPanel({ name, sources, linkCtr, comparison }: {
   const benchmark = comparison ?? belowAverageComparison(adCampaignCtrValues(sources), summary.ctr);
   return <article className="panel campaign-channel-panel">
     <div className="panel-heading">
-      <div><p className="eyebrow">Advertenties</p><h2>{name} Ads</h2></div>
+      <h2>{name} Ads</h2>
     </div>
     <dl className="campaign-channel-metrics">
       <div><dt>{linkCtr ? `Facebook link-CTR${linkCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
