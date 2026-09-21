@@ -8,7 +8,9 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
   const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
   const data = await getProjectPageManagementData({ force: first(params.refresh) === "1" });
   const selection = dashboardPeriodSelection(params);
-  return <DashboardFrame showTopMenu={false}>
+  return <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view="data-management" params={params}
+    days={selection.period.days} siteId={first(params.site)}
+    customPeriod={selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined} />}>
     <main className="dashboard-shell site-analytics-shell">
       <header className="dashboard-header">
         <div><p className="eyebrow">Projectpagina’s en accountmanagers</p><h1>Data management</h1></div>
@@ -17,8 +19,6 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
           {data.fetchedAt ? <span>Bijgewerkt {new Intl.DateTimeFormat("nl-BE", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Brussels" }).format(new Date(data.fetchedAt))}</span> : null}
         </div>
       </header>
-      <DashboardViewTabs view="data-management" params={params} days={selection.period.days} siteId={first(params.site)}
-        customPeriod={selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined} />
       <p className="data-management-intro">Projectpagina’s volgen waar mogelijk de accountmanager uit Gripp. Hier wijs je pagina’s zonder duidelijke koppeling toe. Handmatige toewijzingen worden alleen in dit dashboard bewaard.</p>
       {data.error ? <p className="data-notice" role="alert">{data.error}</p> : null}
       {data.fetchedAt ? <DataManagementBoard key={data.fetchedAt} data={data} /> : null}

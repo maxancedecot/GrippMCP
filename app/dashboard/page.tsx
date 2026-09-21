@@ -105,7 +105,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const overallConversionRatePercent = totalCvrSourceVisitors > 0 ? (totalCvrConversionVisitors / totalCvrSourceVisitors) * 100 : 0;
 
   return (
-    <DashboardFrame showTopMenu={false}>
+    <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view={view} params={params} days={days}
+      siteId={dashboard.selectedSiteId} customPeriod={customPeriod} />}>
       <main className="dashboard-shell site-analytics-shell">
         <header className="dashboard-header">
           <div>
@@ -124,8 +125,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <span>Bijgewerkt {dashboard.lastUpdated}</span>
           </div>
         </header>
-
-        <DashboardViewTabs view={view} params={params} days={days} siteId={dashboard.selectedSiteId} customPeriod={customPeriod} />
 
         {view === "website" && dashboard.source.message ? <p className="data-notice">{dashboard.source.message}</p> : null}
 

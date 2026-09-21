@@ -30,7 +30,8 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
   const selectedAccountManager = first(params.manager);
 
-  return <DashboardFrame showTopMenu={false}>
+  return <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}
+    customPeriod={customPeriod} />}>
     <main className="dashboard-shell site-analytics-shell">
       <header className="dashboard-header">
         <div><p className="eyebrow">Marketingoverzicht</p><h1>Accountmanager dashboard</h1></div>
@@ -45,7 +46,6 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
         </div>
       </header>
 
-      <DashboardViewTabs view="campaigns" params={params} days={days} customPeriod={customPeriod} />
       {selection.error ? <p className="data-notice" role="alert">{selection.error}</p> : null}
 
       <div className="site-analytics-controls">
