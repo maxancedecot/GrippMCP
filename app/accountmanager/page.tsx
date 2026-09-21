@@ -8,6 +8,7 @@ import {
 import { DashboardSidebarFooter, DashboardViewTabs } from "../dashboard/view-tabs.js";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { loadScheduledSnapshot } from "../../src/scheduledSnapshot.js";
+import { getProjectPageGroupRevision } from "../../src/projectPageGroupStore.js";
 import {
   accountManagerHref,
   dashboardPeriodSelection,
@@ -30,9 +31,10 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const customPeriod = selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined;
   const selectedAccountManager = first(params.manager);
   const forceMetaSync = first(params.syncMeta) === "1";
+  const projectGroupRevision = await getProjectPageGroupRevision();
   const snapshotKey = selection.custom
-    ? `accountmanager-dashboard:v1:custom:${selection.period.start}:${selection.period.end}`
-    : `accountmanager-dashboard:v1:rolling:${days}`;
+    ? `accountmanager-dashboard:v2:custom:${selection.period.start}:${selection.period.end}:${projectGroupRevision}`
+    : `accountmanager-dashboard:v2:rolling:${days}:${projectGroupRevision}`;
   const snapshot = await loadScheduledSnapshot({ key: snapshotKey, now, force: forceMetaSync, load: async () => {
     const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
     const performance = await loadCampaignPerformanceBaseData({ dashboard, discoverySites: dashboard.sites, forceMetaSync });

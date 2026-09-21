@@ -2075,6 +2075,143 @@ td .inline-bar {
   line-height: 1.6;
 }
 
+.project-group-site,
+.project-group-fields label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.project-group-site {
+  max-width: 360px;
+  margin-bottom: 18px;
+}
+
+.project-group-form fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.project-group-form legend {
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.project-group-candidates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.project-group-candidate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.project-group-candidate:has(input:checked) {
+  border-color: var(--good);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--good) 18%, transparent);
+}
+
+.project-group-candidate--disabled {
+  opacity: .58;
+  cursor: default;
+}
+
+.project-group-candidate input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--good);
+}
+
+.project-group-candidate span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.project-group-candidate strong,
+.project-group-candidate small {
+  overflow-wrap: anywhere;
+}
+
+.project-group-candidate small,
+.project-group-candidate em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.project-group-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.project-group-fields button,
+.project-group-list button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--good);
+  color: var(--accent-fill-ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.project-group-fields button:disabled,
+.project-group-list button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.project-group-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.project-group-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.project-group-list article > div {
+  display: grid;
+  gap: 4px;
+}
+
+.project-group-list button {
+  min-height: 36px;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
 .data-management-client {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 1fr);
@@ -2166,6 +2303,9 @@ td .inline-bar {
   .data-management-client { grid-template-columns: minmax(0, 1fr); }
   .data-management-filters { flex-direction: column; align-items: stretch; }
   .data-management-projects li { flex-direction: column; gap: 4px; }
+  .project-group-candidates,
+  .project-group-fields { grid-template-columns: minmax(0, 1fr); }
+  .project-group-list article { align-items: flex-start; flex-direction: column; }
 }
 
 .campaign-project-filters {

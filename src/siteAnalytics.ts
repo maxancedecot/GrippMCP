@@ -1,7 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readJsonCache, readJsonCaches, writeJsonCache } from "./jsonCache.js";
 import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
-import { normalizeProjectPath, projectPageGroupsForSite } from "./projectPageGroups.js";
+import { normalizeProjectPath } from "./projectPageGroups.js";
+import { getProjectPageGroupsForSites } from "./projectPageGroupStore.js";
 import { siteAnalyticsPeriod, type SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 export type { SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 
@@ -118,8 +119,21 @@ export type SiteAnalyticsDashboardData = {
   referrerRows: SiteAnalyticsReferrerRow[];
   cvrPageCandidates: SiteAnalyticsCvrPageCandidate[];
   cvrLinks: SiteAnalyticsCvrLinkRow[];
-  projectPageGroups?: { siteId: string; sourcePath: string; visitors: number; leads: number | null; appointments: number | null }[];
+  projectPageGroups?: SiteAnalyticsProjectPageGroup[];
   lastUpdated: string;
+};
+
+export type SiteAnalyticsProjectPageGroup = {
+  groupId: string;
+  siteId: string;
+  title: string;
+  sourcePath: string;
+  sourcePaths: string[];
+  managed: boolean;
+  visitors: number;
+  pageViews: number;
+  leads: number | null;
+  appointments: number | null;
 };
 
 export type SiteAnalyticsDashboardOptions = {
@@ -476,6 +490,7 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
   }
 
   const siteList = selectedSiteId && selectedSites.length === 0 ? publicSites : selectedSites;
+  const projectPageGroupDefinitions = await getProjectPageGroupsForSites(siteList);
   const dateKeys = dateKeysForPeriod(period);
   const dailyRows = new Map<string, DailyAccumulator>();
   const siteAccumulators = new Map<string, SiteAccumulator>();
@@ -565,13 +580,15 @@ export async function getSiteAnalyticsDashboardData(options: SiteAnalyticsDashbo
     referrerRows,
     cvrPageCandidates,
     cvrLinks,
-    projectPageGroups: siteList.flatMap((site) => projectPageGroupsForSite(site.url).map((group) => {
+    projectPageGroups: siteList.flatMap((site) => projectPageGroupDefinitions.filter((group) => group.siteId === site.id).map((group) => {
       const links = storedCvrLinks.filter((link) => link.siteId === site.id && group.sourcePaths.includes(normalizeProjectPath(link.sourcePath)));
       const pages = [...pageAccumulators.values()].filter((page) => page.siteId === site.id);
       const visitorsFor = (paths: string[]) => new Set(pages.filter((page) => paths.includes(normalizeProjectPath(page.path)))
         .flatMap((page) => [...page.visitors])).size;
       const isBrochure = (link: SiteAnalyticsCvrLink) => /brochure/i.test(`${link.targetPath} ${link.targetTitle}`);
-      return { siteId: site.id, sourcePath: group.sourcePath, visitors: visitorsFor(group.sourcePaths),
+      return { groupId: group.id, siteId: site.id, title: group.title, sourcePath: group.sourcePath,
+        sourcePaths: group.sourcePaths, managed: group.managed, visitors: visitorsFor(group.sourcePaths),
+        pageViews: pages.filter((page) => group.sourcePaths.includes(normalizeProjectPath(page.path))).reduce((sum, page) => sum + page.pageViews, 0),
         leads: links.length ? visitorsFor(links.filter(isBrochure).map((link) => normalizeProjectPath(link.targetPath))) : null,
         appointments: links.length ? visitorsFor(links.filter((link) => !isBrochure(link)).map((link) => normalizeProjectPath(link.targetPath))) : null };
     })),

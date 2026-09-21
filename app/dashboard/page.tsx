@@ -10,6 +10,7 @@ import {
   type SiteAnalyticsCvrLinkRow,
   type SiteAnalyticsMetricSummary,
   type SiteAnalyticsPeriod,
+  type SiteAnalyticsProjectPageGroup,
   type SiteAnalyticsReferrerRow
 } from "../../src/siteAnalytics.js";
 import { cvrOverviewRowsFromLinks, type CvrOverviewMetric, type CvrOverviewRow } from "../../src/siteAnalyticsConversions.js";
@@ -203,7 +204,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               </div>
               <span className="panel-total">{overviewCvrLinks.length} koppelingen</span>
             </div>
-            <CvrOverviewTable rows={overviewCvrLinks} />
+            <CvrOverviewTable rows={overviewCvrLinks} groups={dashboard.projectPageGroups ?? []} />
           </article>
 
           <article className="panel">
@@ -221,6 +222,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           sites={siteTabs}
           pages={dashboard.cvrPageCandidates}
           links={dashboard.cvrLinks}
+          projectGroups={dashboard.projectPageGroups ?? []}
           selectedSiteId={dashboard.selectedSiteId}
           returnTo={dashboardHref({ params, days: dashboard.period.days, siteId: dashboard.selectedSiteId, customPeriod })}
           createAction={createCvrLinkAction}
@@ -252,8 +254,8 @@ function MetricCard({
   );
 }
 
-function CvrOverviewTable({ rows }: { rows: SiteAnalyticsCvrLinkRow[] }) {
-  const projectRows = cvrOverviewRowsFromLinks(rows);
+function CvrOverviewTable({ rows, groups }: { rows: SiteAnalyticsCvrLinkRow[]; groups: SiteAnalyticsProjectPageGroup[] }) {
+  const projectRows = cvrOverviewRowsFromLinks(rows, groups);
 
   if (projectRows.length === 0) {
     return <p className="empty-state">Geen projectpagina's gekoppeld aan bedankingspagina's.</p>;

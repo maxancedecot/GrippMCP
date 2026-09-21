@@ -61,7 +61,8 @@ test("Brusselskaai merges Facebook and Google language destinations without dupl
   const data = dashboard(["brussels", "other"]);
   data.sites[0].url = "https://brusselskaai.be";
   data.cvrLinks = [conversionLink("brussels", "/thanks", 2, "/home-fr/"), conversionLink("other", "/thanks", 2, "/home-fr/")];
-  data.projectPageGroups = [{ siteId: "brussels", sourcePath: "/", visitors: 8, leads: 2, appointments: 1 }];
+  data.projectPageGroups = [{ groupId: "preset", siteId: "brussels", title: "Brusselskaai", sourcePath: "/",
+    sourcePaths: ["/", "/home-fr", "/home-eng"], managed: false, visitors: 8, pageViews: 12, leads: 2, appointments: 1 }];
   const { rows } = await getCampaignPerformance(data, { env: {} });
   const ads: AdPerformance = { accountId: "123", currency: "EUR", campaigns: [
       { id: "1", name: "Ledoux NL", clicks: 10, impressions: 100, spend: 5, live: false },

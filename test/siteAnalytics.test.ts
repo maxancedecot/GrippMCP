@@ -13,6 +13,7 @@ import {
   getSiteAnalyticsDashboardData,
   registerSiteAnalyticsSite,
   recordSiteAnalyticsEvent,
+  type SiteAnalyticsDashboardData,
   upsertSiteAnalyticsCvrLink,
   verifySiteAnalyticsToken
 } from "../src/siteAnalytics.js";
@@ -411,19 +412,25 @@ test("Brusselskaai groups language pages using unique visitors and conversion vi
         page_view_id: `group-view-${index}`, page_url: `https://www.brusselskaai.be${path}`, path, page_title: path });
     }
     const before = await getSiteAnalyticsDashboardData({ siteId, start: today, end: today });
-    assert.deepEqual(before.projectPageGroups, [{ siteId, sourcePath: "/", visitors: 4, leads: null, appointments: null }]);
+    assert.deepEqual(groupMetrics(before), [{ siteId, sourcePath: "/", visitors: 4, leads: null, appointments: null }]);
     for (const [source, target] of [["/", "/bedankt-brochure"], ["/home-fr/", "/bedankt-brochure-fr"], ["/home-eng", "/bedankt-brochure"], ["/", "/bedankt-afspraak"]]) {
       await upsertSiteAnalyticsCvrLink({ site_id: siteId, source_path: source, target_path: target });
     }
     const current = await getSiteAnalyticsDashboardData({ siteId, start: today, end: today });
-    assert.deepEqual(current.projectPageGroups, [{ siteId, sourcePath: "/", visitors: 4, leads: 2, appointments: 1 }]);
+    assert.deepEqual(groupMetrics(current), [{ siteId, sourcePath: "/", visitors: 4, leads: 2, appointments: 1 }]);
     assert.deepEqual(current.pageRows, before.pageRows, "Individual website measurements remain available");
     const result = await getCampaignPerformance(current, { env: {} });
     const project = result.projects.find((project) => project.key === `${siteId}:/`)!;
     assert.equal(result.projects.length, 1);
     assert.deepEqual([project.title, project.visitors, project.leads, project.appointments, project.cvr], ["Brusselskaai", 4, 2, 1, 75]);
     const historical = await getSiteAnalyticsDashboardData({ siteId, start: yesterday, end: yesterday });
-    assert.deepEqual(historical.projectPageGroups, [{ siteId, sourcePath: "/", visitors: 0, leads: 0, appointments: 0 }]);
+    assert.deepEqual(groupMetrics(historical), [{ siteId, sourcePath: "/", visitors: 0, leads: 0, appointments: 0 }]);
     for (const link of current.cvrLinks) await deleteSiteAnalyticsCvrLink(link.id);
   });
 });
+
+function groupMetrics(dashboard: SiteAnalyticsDashboardData) {
+  return dashboard.projectPageGroups?.map(({ siteId, sourcePath, visitors, leads, appointments }) => ({
+    siteId, sourcePath, visitors, leads, appointments
+  }));
+}

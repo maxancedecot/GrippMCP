@@ -1,4 +1,5 @@
 import { getProjectPageManagementData } from "../../src/projectPageManagement.js";
+import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { dashboardPeriodSelection, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 import { DataManagementBoard } from "./data-management-board.js";
@@ -6,7 +7,10 @@ import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
 
 export async function DataManagementPage({ params }: { params: DashboardSearchParams }) {
   const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
-  const data = await getProjectPageManagementData({ force: first(params.refresh) === "1" });
+  const [data, dashboard] = await Promise.all([
+    getProjectPageManagementData({ force: first(params.refresh) === "1" }),
+    getSiteAnalyticsDashboardData({ days: 90 })
+  ]);
   const selection = dashboardPeriodSelection(params);
   return <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view="data-management" params={params}
     days={selection.period.days} siteId={first(params.site)}
@@ -23,7 +27,8 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
       </header>
       <p className="data-management-intro">Projectpagina’s volgen waar mogelijk de accountmanager uit Gripp. Hier wijs je pagina’s zonder duidelijke koppeling toe. Handmatige toewijzingen worden alleen in dit dashboard bewaard.</p>
       {data.error ? <p className="data-notice" role="alert">{data.error}</p> : null}
-      {data.fetchedAt ? <DataManagementBoard key={data.fetchedAt} data={data} /> : null}
+      {data.fetchedAt ? <DataManagementBoard key={`${data.fetchedAt}:${(dashboard.projectPageGroups ?? []).map((group) => group.groupId).join(",")}`}
+        data={data} mergePages={dashboard.cvrPageCandidates} projectGroups={dashboard.projectPageGroups ?? []} /> : null}
     </main>
   </DashboardFrame>;
 }

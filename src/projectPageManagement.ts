@@ -4,7 +4,7 @@ import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
 import { projectPageGroup } from "./projectPageGroups.js";
 import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, normalizeProjectPath, parseCampaignProjectMatches } from "./campaignProjects.js";
 import { getGrippDataCatalog, type AccountManager, type DataManagementOptions, type GrippDataCatalog } from "./dataManagement.js";
-import { getJsonCacheMode, readJsonCache, readJsonCaches, writeJsonCache } from "./jsonCache.js";
+import { deleteJsonCache, getJsonCacheMode, readJsonCache, readJsonCaches, writeJsonCache } from "./jsonCache.js";
 import { getSiteAnalyticsDashboardData, type SiteAnalyticsDashboardData } from "./siteAnalytics.js";
 
 const localPath = z.string().min(1).max(1000).refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\") && !isExcludedAnalyticsLink(value)).transform(normalizeProjectPath);
@@ -80,7 +80,8 @@ export function projectPagesFromDashboard(dashboard: SiteAnalyticsDashboardData,
     const site = dashboard.sites.find((site) => site.id === siteId);
     if (!site || isExcludedAnalyticsLink(site.url) || isExcludedAnalyticsLink(path)) return;
     if (!explicit && isUtilityPage(path)) return;
-    const group = projectPageGroup(site.url, path);
+    const group = dashboard.projectPageGroups?.find((item) => item.siteId === siteId && item.sourcePaths.includes(normalizeProjectPath(path)))
+      ?? projectPageGroup(site.url, path);
     const normalized = group?.sourcePath ?? normalizeProjectPath(path);
     const page = { siteId, siteName: site.name, path: normalized, title: group?.title || title || (normalized === "/" ? site.name : normalized), url: new URL(normalized, site.url).toString() };
     pages.set(projectPageKey(page), page);
@@ -95,6 +96,10 @@ export function projectPagesFromDashboard(dashboard: SiteAnalyticsDashboardData,
     if (!pages.has(projectPageKey(saved))) add(saved.siteId, saved.path, candidate?.title, true);
   }
   return [...pages.values()].sort((a, b) => a.siteName.localeCompare(b.siteName, "nl-BE") || a.path.localeCompare(b.path));
+}
+
+export async function invalidateProjectPageInventory() {
+  await deleteJsonCache(INVENTORY_KEY);
 }
 
 function isUtilityPage(path: string) {

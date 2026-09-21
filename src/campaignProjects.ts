@@ -93,9 +93,12 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
   const conversions = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
   for (const site of sites) {
     if (isExcludedAnalyticsLink(site.url)) continue;
-    const projectPath = (path: string) => projectPageGroup(site.url, path)?.sourcePath ?? normalizeProjectPath(path);
+    const dashboardGroups = dashboard.projectPageGroups?.filter((group) => group.siteId === site.siteId) ?? [];
+    const groupForPath = (path: string) => dashboardGroups.find((group) => group.sourcePaths.includes(normalizeProjectPath(path)))
+      ?? projectPageGroup(site.url, path);
+    const projectPath = (path: string) => groupForPath(path)?.sourcePath ?? normalizeProjectPath(path);
     const ensureProject = (sourcePath: string, title = ""): CampaignProjectRow => {
-      const group = projectPageGroup(site.url, sourcePath);
+      const group = groupForPath(sourcePath);
       const path = projectPath(sourcePath);
       const key = `${site.siteId}:${path}`;
       const existing = projects.get(key);

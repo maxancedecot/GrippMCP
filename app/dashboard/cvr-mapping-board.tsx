@@ -4,8 +4,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefO
 import type {
   SiteAnalyticsCvrLinkRow,
   SiteAnalyticsCvrPageCandidate,
+  SiteAnalyticsProjectPageGroup,
   SiteAnalyticsPublicSite
 } from "../../src/siteAnalytics.js";
+import { normalizeProjectPath } from "../../src/projectPageGroups.js";
 
 type DashboardAction = (formData: FormData) => void | Promise<void>;
 
@@ -13,6 +15,7 @@ type CvrMappingBoardProps = {
   sites: SiteAnalyticsPublicSite[];
   pages: SiteAnalyticsCvrPageCandidate[];
   links: SiteAnalyticsCvrLinkRow[];
+  projectGroups: SiteAnalyticsProjectPageGroup[];
   selectedSiteId?: string;
   returnTo: string;
   createAction: DashboardAction;
@@ -64,6 +67,7 @@ export function CvrMappingBoard({
   sites,
   pages,
   links,
+  projectGroups,
   selectedSiteId,
   returnTo,
   createAction,
@@ -105,13 +109,14 @@ export function CvrMappingBoard({
 
   const activePages = useMemo(() => pages.filter((page) => page.siteId === activeSiteId), [activeSiteId, pages]);
   const activeLinks = useMemo(() => links.filter((link) => link.siteId === activeSiteId), [activeSiteId, links]);
-  const sourceLinkCounts = useMemo(() => cvrLinkCountsByPath(activeLinks, "sourcePath"), [activeLinks]);
+  const activeGroups = useMemo(() => projectGroups.filter((group) => group.siteId === activeSiteId), [activeSiteId, projectGroups]);
+  const sourceLinkCounts = useMemo(() => cvrLinkCountsByPath(activeLinks, "sourcePath", (path) => mergedSourcePath(path, activeGroups)), [activeGroups, activeLinks]);
   const targetLinkCounts = useMemo(() => cvrLinkCountsByPath(activeLinks, "targetPath"), [activeLinks]);
   const sourceLinkedPaths = useMemo(() => new Set(sourceLinkCounts.keys()), [sourceLinkCounts]);
   const targetLinkedPaths = useMemo(() => new Set(targetLinkCounts.keys()), [targetLinkCounts]);
   const sourcePages = useMemo(
-    () => sortSourcePages(activePages.filter((page) => !isThankYouPage(page) || sourceLinkedPaths.has(page.path)), sourceLinkedPaths),
-    [activePages, sourceLinkedPaths]
+    () => sortSourcePages(mergedSourcePages(activePages, activeGroups).filter((page) => !isThankYouPage(page) || sourceLinkedPaths.has(page.path)), sourceLinkedPaths),
+    [activeGroups, activePages, sourceLinkedPaths]
   );
   const targetPages = useMemo(
     () => sortTargetPages(activePages.filter((page) => isThankYouPage(page) || targetLinkedPaths.has(page.path)), targetLinkedPaths),
@@ -119,10 +124,10 @@ export function CvrMappingBoard({
   );
   const sourcePathValue = normalizeClientPagePath(sourceInputValue);
   const targetPathValue = normalizeClientPagePath(targetInputValue);
-  const sourceTitleValue = activePages.find((page) => page.path === sourcePathValue)?.title ?? "";
+  const sourceTitleValue = sourcePages.find((page) => page.path === sourcePathValue)?.title ?? "";
   const targetTitleValue = activePages.find((page) => page.path === targetPathValue)?.title ?? "";
   const targetLooksValid = !targetInputValue.trim() || isThankYouPath(targetInputValue);
-  const selectedLinkExists = activeLinks.some((link) => link.sourcePath === sourcePathValue && link.targetPath === targetPathValue);
+  const selectedLinkExists = activeLinks.some((link) => mergedSourcePath(link.sourcePath, activeGroups) === sourcePathValue && link.targetPath === targetPathValue);
   const samePathSelected = Boolean(sourcePathValue && targetPathValue && sourcePathValue === targetPathValue);
   const canCreate = Boolean(activeSiteId && sourcePathValue && targetPathValue && targetLooksValid && !selectedLinkExists && !samePathSelected);
   const selectedSourceLinkCount = sourceLinkCounts.get(sourcePathValue) ?? 0;
@@ -130,7 +135,7 @@ export function CvrMappingBoard({
     () => {
       const pairs: LinePair[] = activeLinks.map((link) => ({
         key: link.id,
-        sourcePath: link.sourcePath,
+        sourcePath: mergedSourcePath(link.sourcePath, activeGroups),
         targetPath: link.targetPath,
         preview: false
       }));
@@ -145,7 +150,7 @@ export function CvrMappingBoard({
 
       return pairs;
     },
-    [activeLinks, canCreate, sourcePathValue, targetPathValue]
+    [activeGroups, activeLinks, canCreate, sourcePathValue, targetPathValue]
   );
 
   useLayoutEffect(() => {
@@ -331,11 +336,13 @@ export function CvrMappingBoard({
             {activeLinks.length === 0 ? (
               <p className="empty-state">Geen CVR-koppelingen voor deze site.</p>
             ) : (
-              activeLinks.map((link) => (
-            <div className="cvr-link-row" key={link.id}>
+              activeLinks.map((link) => {
+                const group = projectGroupForPath(link.sourcePath, activeGroups);
+                const sourceVisitors = group?.visitors ?? link.sourceVisitors;
+                return <div className="cvr-link-row" key={link.id}>
               <div>
-                <span className="row-title">{link.sourceTitle}</span>
-                <span className="cell-muted">{link.sourcePath}</span>
+                <span className="row-title">{group?.title ?? link.sourceTitle}</span>
+                <span className="cell-muted">{group?.sourcePath ?? link.sourcePath}</span>
               </div>
               <span className="cvr-link-arrow">naar</span>
               <div>
@@ -343,8 +350,8 @@ export function CvrMappingBoard({
                 <span className="cell-muted">{link.targetPath}</span>
               </div>
               <div className="cvr-link-result">
-                <strong>{formatConversionRate(link.conversionRatePercent)}%</strong>
-                <span>{formatNumber(link.targetVisitors)} / {formatNumber(link.sourceVisitors)} bezoekers</span>
+                <strong>{formatConversionRate(sourceVisitors > 0 ? link.targetVisitors / sourceVisitors * 100 : 0)}%</strong>
+                <span>{formatNumber(link.targetVisitors)} / {formatNumber(sourceVisitors)} bezoekers</span>
               </div>
               <form action={deleteAction}>
                 <input type="hidden" name="link_id" value={link.id} />
@@ -353,8 +360,8 @@ export function CvrMappingBoard({
                   Verwijderen
                 </button>
               </form>
-            </div>
-              ))
+            </div>;
+              })
             )}
           </div>
         </>
@@ -466,15 +473,37 @@ function siteOptionsFromData(
   return Array.from(byId.values()).sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function cvrLinkCountsByPath(links: SiteAnalyticsCvrLinkRow[], pathKey: "sourcePath" | "targetPath") {
+function cvrLinkCountsByPath(links: SiteAnalyticsCvrLinkRow[], pathKey: "sourcePath" | "targetPath", normalize = (path: string) => path) {
   const counts = new Map<string, number>();
 
   for (const link of links) {
-    const path = link[pathKey];
+    const path = normalize(link[pathKey]);
     counts.set(path, (counts.get(path) ?? 0) + 1);
   }
 
   return counts;
+}
+
+function mergedSourcePages(pages: SiteAnalyticsCvrPageCandidate[], groups: SiteAnalyticsProjectPageGroup[]) {
+  const groupedPaths = new Set(groups.flatMap((group) => group.sourcePaths.map(normalizeProjectPath)));
+  const regular = pages.filter((page) => !groupedPaths.has(normalizeProjectPath(page.path)));
+  const merged = groups.map((group): SiteAnalyticsCvrPageCandidate => ({
+    siteId: group.siteId,
+    siteName: pages.find((page) => page.siteId === group.siteId)?.siteName ?? group.siteId,
+    path: group.sourcePath,
+    title: group.title,
+    uniqueVisitors: group.visitors,
+    pageViews: group.pageViews
+  }));
+  return [...regular, ...merged];
+}
+
+function projectGroupForPath(path: string, groups: SiteAnalyticsProjectPageGroup[]) {
+  return groups.find((group) => group.sourcePaths.includes(normalizeProjectPath(path)));
+}
+
+function mergedSourcePath(path: string, groups: SiteAnalyticsProjectPageGroup[]) {
+  return projectGroupForPath(path, groups)?.sourcePath ?? normalizeClientPagePath(path);
 }
 
 function sortSourcePages(pages: SiteAnalyticsCvrPageCandidate[], linkedPaths: Set<string>) {
