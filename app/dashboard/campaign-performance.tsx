@@ -10,11 +10,16 @@ import { liveSortValue } from "../../src/tableSorting.js";
 import { CampaignProjectTable } from "./campaign-project-table.js";
 import { getProjectPageManagementData, projectPageKey, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 import { filterCampaignProjectsByManager, summarizeFilteredCampaignProjects } from "../../src/campaignAccountManagerFilter.js";
+import {
+  CAMPAIGN_CTR_BENCHMARK_PERCENT,
+  PROJECT_CVR_BENCHMARK_PERCENT,
+  campaignBenchmarkComparison,
+  type CampaignBenchmarkComparison
+} from "../../src/campaignBenchmarks.js";
 
 const number = new Intl.NumberFormat("nl-BE");
 const percent = new Intl.NumberFormat("nl-BE", { maximumFractionDigits: 2 });
 const percentage = (value: number | null) => value === null ? "—" : `${percent.format(value)}%`;
-type BelowAverageComparison = { below: number; measured: number; average: number | null };
 
 function rateColor(value: number | null, target: number) {
   if (value === null || !Number.isFinite(value)) return undefined;
@@ -76,10 +81,10 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   const facebookAccounts = rows.flatMap(facebookAccountSources);
   const googleSources = selectedManager ? projectAdSources(projects, "google") : rows.map((row) => row.google);
   const facebookSources = selectedManager ? projectAdSources(projects, "facebook") : facebookAccounts.map((account) => account.facebook);
-  const googleComparison = belowAverageComparison(projectCtrValues(projects, "google"), summarizeAds(googleSources).ctr);
-  const facebookComparison = belowAverageComparison(projectCtrValues(projects, "facebook"), facebookLinkCtr.ctr);
-  const websiteComparison = belowAverageComparison(projects.map((project) => project.cvr)
-    .filter((value): value is number => value !== null), cvr);
+  const googleComparison = campaignBenchmarkComparison(projectCtrValues(projects, "google"), CAMPAIGN_CTR_BENCHMARK_PERCENT);
+  const facebookComparison = campaignBenchmarkComparison(projectCtrValues(projects, "facebook"), CAMPAIGN_CTR_BENCHMARK_PERCENT);
+  const websiteComparison = campaignBenchmarkComparison(projects.map((project) => project.cvr)
+    .filter((value): value is number => value !== null), PROJECT_CVR_BENCHMARK_PERCENT);
   const issues = rows.flatMap((row) => {
     const basic = (["google", "leads", "appointments"] as const)
       .filter((key) => row[key].state !== "connected")
@@ -150,7 +155,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
               <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
               <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
-              <td><strong className="campaign-project-cvr-value" style={{ color: rateColor(project.cvr, 2) }}>{percentage(project.cvr)}</strong>
+              <td><strong className="campaign-project-cvr-value" style={{ color: rateColor(project.cvr, PROJECT_CVR_BENCHMARK_PERCENT) }}>{percentage(project.cvr)}</strong>
                 {!project.hasConversionMapping ? <span className="cell-muted">Bedankpagina nog niet gekoppeld</span> : null}</td>
             </tr>
           };
@@ -220,7 +225,7 @@ function ProjectCampaignMetric({ project, summary, metric, channel }: {
   return <span className="campaign-project-summary campaign-ctr-trigger" tabIndex={0} title={title} aria-label={`${value}. ${title}`}>
     {metric === "status" ? <span className={`campaign-status campaign-status--${summary.live === true ? "live" : summary.live === false ? "offline" : "unknown"}`}>
       <i aria-hidden="true" />{value}
-    </span> : <strong style={metric === "ctr" ? { color: rateColor(summary.ctr, 1) } : undefined}>{value}</strong>}
+    </span> : <strong style={metric === "ctr" ? { color: rateColor(summary.ctr, CAMPAIGN_CTR_BENCHMARK_PERCENT) } : undefined}>{value}</strong>}
   </span>;
 }
 
@@ -286,7 +291,7 @@ function WebsiteCvrPanel({ value, detail, availability, comparison }: {
 }
 
 function ChannelPanel({ name, sources, linkCtr, comparison }: {
-  name: string; sources: CampaignSource<AdPerformance>[]; linkCtr?: LinkCtrSummary; comparison: BelowAverageComparison;
+  name: string; sources: CampaignSource<AdPerformance>[]; linkCtr?: LinkCtrSummary; comparison: CampaignBenchmarkComparison;
 }) {
   const summary = summarizeAds(sources);
   return <article className="panel campaign-channel-panel">
@@ -295,7 +300,7 @@ function ChannelPanel({ name, sources, linkCtr, comparison }: {
     </div>
     <dl className="campaign-channel-metrics">
       <div><dt>{linkCtr ? `Facebook link-CTR${linkCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
-        <dd style={{ color: rateColor(linkCtr ? linkCtr.ctr : summary.ctr, 1) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
+        <dd style={{ color: rateColor(linkCtr ? linkCtr.ctr : summary.ctr, CAMPAIGN_CTR_BENCHMARK_PERCENT) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
     <p className="campaign-benchmark">{formatBelowAverage(comparison, "project", "projecten", "CTR")}</p>
@@ -313,14 +318,9 @@ function ChannelPanel({ name, sources, linkCtr, comparison }: {
   </article>;
 }
 
-function belowAverageComparison(values: number[], average: number | null): BelowAverageComparison {
-  return { below: average === null ? 0 : values.filter((value) => value < average).length, measured: values.length, average };
-}
-
-function formatBelowAverage(comparison: BelowAverageComparison, singular: string, plural: string, metric: string) {
-  if (comparison.average === null) return `Geen gemiddelde ${metric} beschikbaar`;
+function formatBelowAverage(comparison: CampaignBenchmarkComparison, singular: string, plural: string, metric: string) {
   if (comparison.measured === 0) return `Geen ${plural} met ${metric}-meting`;
-  return `${number.format(comparison.below)} van ${number.format(comparison.measured)} ${comparison.measured === 1 ? singular : plural} onder gemiddelde ${metric}`;
+  return `${number.format(comparison.below)} van ${number.format(comparison.measured)} ${comparison.measured === 1 ? singular : plural} onder het gemiddelde (${metric} lager dan ${percent.format(comparison.benchmark)}%)`;
 }
 
 function projectCtrValues(projects: CampaignProjectRow[], channel: "facebook" | "google") {
