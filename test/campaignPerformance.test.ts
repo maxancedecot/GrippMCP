@@ -373,20 +373,38 @@ test("unavailable campaign status blocks link CTR instead of including unrelated
   assert.doesNotMatch(JSON.stringify(result), /private-provider-error/);
 });
 
-test("ad provider failures do not block existing website conversions or expose secrets", async () => {
+test("ad provider failures do not block brochure conversions and CRM failures stay visible", async () => {
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 4), conversionLink("site-a", "/bedankt-afspraak", 2)];
   const result = await getCampaignPerformance(data, {
     env: environment([{ siteId: "site-a", google: { customerId: "123" }, ghl: { locationId: "legacy-location" } }], googleCredentials),
     fetchImpl: async (input) => {
-      assert.match(String(input), /google/); // A legacy CRM mapping must not request contacts or calendars.
+      assert.match(String(input), /google/);
       return response({ error: "secret-token" });
     }
   });
   assert.equal(result.rows[0].google.state, "unavailable");
   assert.equal(result.rows[0].leads.data?.count, 4);
-  assert.equal(result.rows[0].appointments.data?.count, 2);
+  assert.equal(result.rows[0].appointments.state, "unavailable");
+  assert.equal(result.rows[0].appointments.data, null);
   assert.doesNotMatch(JSON.stringify(result), /secret-token|legacy-location/);
+});
+
+test("configured GoHighLevel pipelines replace link-based appointment totals", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 4), conversionLink("site-a", "/bedankt-afspraak", 99)];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineIds: ["project"] } }]),
+    ghlCall: async ({ path }) => path.endsWith("/pipelines")
+      ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "appointment", name: "Appointment booked" }] }] }
+      : { opportunities: [
+        { id: "a", pipelineId: "project", pipelineStageId: "appointment", lastStageChangeAt: "2026-09-10T10:00:00Z" },
+        { id: "b", pipelineId: "project", pipelineStageId: "appointment", lastStageChangeAt: "2026-08-10T10:00:00Z" }
+      ], meta: {} }
+  });
+  assert.equal(result.rows[0].leads.data?.count, 4);
+  assert.equal(result.rows[0].appointments.data?.count, 1);
+  assert.equal(result.rows[0].appointments.data?.siteId, "site-a");
 });
 
 test("campaign conversions match Brochure and Afspraak across projects and sites without CRM", async () => {

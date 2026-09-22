@@ -5,6 +5,7 @@ import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
 import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
 import { readJsonCache, writeJsonCache } from "./jsonCache.js";
 import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, campaignProjectOverview, parseCampaignProjectMatches, type CampaignProjectMatch } from "./campaignProjects.js";
+import { countGhlAppointments, type GhlReadCall } from "./ghl/appointmentConversions.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -56,8 +57,7 @@ const mappingSchema = z.object({
   siteId: id,
   google: z.object({ customerId: googleId, loginCustomerId: googleId.optional(), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
   facebook: z.object({ adAccountId: id.transform((value) => value.replace(/^act_/, "")).pipe(numericId), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
-  // Accepted for existing configurations; dashboard conversions now come from WordPress.
-  ghl: z.object({ locationId: id, installId: id.optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
+  ghl: z.object({ locationId: id, installId: id.optional(), pipelineIds: z.array(id).min(1).optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
 type FacebookAccountScope = NonNullable<CampaignSiteMapping["facebook"]> & { requiredCampaignIds?: string[] };
@@ -73,6 +73,7 @@ type Options = {
   projectMatches?: CampaignProjectMatch[];
   forceMetaSync?: boolean;
   discoverySites?: { id: string; name: string; url: string }[];
+  ghlCall?: GhlReadCall;
 };
 
 const numeric = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/)]).transform(Number).pipe(z.number().finite().nonnegative());
@@ -166,10 +167,11 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       }
       const googleMatches = projectMatches.filter((match) => match.channel === "google" && match.siteId === site.id && match.accountId === mapping?.google?.customerId);
       const googleRequest = loadGoogle(mapping?.google);
-      const [google, googleDestinations, facebookAccounts] = await Promise.all([
+      const [google, googleDestinations, facebookAccounts, appointments] = await Promise.all([
         googleRequest,
         googleRequest.then((source) => loadGoogleDestinations(mapping?.google, source, googleMatches.map((match) => match.campaignId))),
-        Promise.all((scopes.size ? [...scopes.values()] : [undefined]).map((scope) => facebookForSite(site, scope)))
+        Promise.all((scopes.size ? [...scopes.values()] : [undefined]).map((scope) => facebookForSite(site, scope))),
+        loadGhlAppointments(site.id, mapping?.ghl)
       ]);
       const siteProjects = conversionRows.filter((project) => project.siteId === site.id);
       const googleExplicitPages = googleMatches.filter((match) => google.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
@@ -182,7 +184,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       } : googleDestinations;
       return {
         siteId: site.id, name: site.name, url: site.url, google, googleCampaignPages, ...facebookAccounts[0], facebookAccounts,
-        leads: websiteConversions(site.id, "brochure"), appointments: websiteConversions(site.id, "appointment"),
+        leads: websiteConversions(site.id, "brochure"), appointments,
         websiteCvr: site.cvrLinkCount > 0 && site.cvrSourceVisitors > 0 ? site.conversionRatePercent : null,
         websiteVisitors: site.cvrSourceVisitors, websiteConversions: site.cvrConversionVisitors
       };
@@ -511,6 +513,18 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       state: "connected", message: "",
       data: { siteId, count: projects.reduce((sum, row) => sum + row[column].visitors, 0) }
     };
+  }
+
+  async function loadGhlAppointments(siteId: string, config: CampaignSiteMapping["ghl"]): Promise<CampaignSource<WebsiteConversionPerformance>> {
+    if (!config) return websiteConversions(siteId, "appointment");
+    try {
+      return { state: "connected", message: "", data: {
+        siteId,
+        count: await countGhlAppointments(config, dashboard.period, options.ghlCall)
+      } };
+    } catch {
+      return { state: "unavailable", data: null, message: "Afspraken konden niet uit GoHighLevel worden geladen." };
+    }
   }
 }
 

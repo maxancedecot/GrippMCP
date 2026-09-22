@@ -1,5 +1,5 @@
 import {
-  getCampaignPerformance, facebookAccountSources, summarizeAds,
+  getCampaignPerformance, facebookAccountSources, summarizeAds, summarizeWebsiteConversions,
   type AdCampaign, type AdPerformance, type CampaignPerformanceRow, type CampaignSource, type LinkCtrSummary
 } from "../../src/campaignPerformance.js";
 import type { MetaAccountSync } from "../../src/metaAccountDiscovery.js";
@@ -85,6 +85,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   const facebookComparison = campaignBenchmarkComparison(projectCtrValues(projects, "facebook"), CAMPAIGN_CTR_BENCHMARK_PERCENT);
   const websiteComparison = campaignBenchmarkComparison(projects.map((project) => project.cvr)
     .filter((value): value is number => value !== null), PROJECT_CVR_BENCHMARK_PERCENT);
+  const leadSummary = summarizeWebsiteConversions(rows.map((row) => row.leads));
+  const appointmentSummary = summarizeWebsiteConversions(rows.map((row) => row.appointments));
   const issues = rows.flatMap((row) => {
     const basic = (["google", "leads", "appointments"] as const)
       .filter((key) => row[key].state !== "connected")
@@ -105,6 +107,9 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       <section className="campaign-channel-grid" aria-label="Advertentie- en website-KPI's">
         <ChannelPanel name="Google" sources={googleSources} comparison={googleComparison} />
         <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} comparison={facebookComparison} />
+        <ConversionPanel name="Brochure" summary={leadSummary} detail="Websitebezoekers van gekoppelde brochure-bedankpagina’s." />
+        <ConversionPanel name="Afspraken" summary={appointmentSummary}
+          detail="Uit afspraakachtige GoHighLevel-pipelinefasen; zonder CRM-koppeling uit de gekoppelde afspraak-bedankpagina’s." />
         <WebsiteCvrPanel value={percentage(cvr)} detail="Conversieratio van gekoppelde projectpagina’s"
           comparison={formatBelowAverage(websiteComparison, "project", "projecten", "CVR")}
           availability={projectSummary.measuredProjects > 0 ? `${projectSummary.measuredProjects} van ${projects.length} projectpagina’s met metingen` : "Nog geen conversiemetingen"} />
@@ -193,8 +198,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         Facebook link-CTR is het gemiddelde van de campagnepercentages, gewogen op vertoningen in de gekozen periode, ook bij gestopte campagnes.
         Facebook-cijfers tellen alleen campagnes met “Ledoux” in de naam, inclusief hun Instagram-plaatsingen.
         Projectpagina’s worden gekoppeld via vastgelegde campagnekoppelingen of de bestemmingslink van de advertenties.
-        Leads = Brochure en Afspraken = Afspraak uit Websiteprestaties, voor dezelfde website en periode.
-        Dit zijn bezoekers van gekoppelde bedankpagina’s; ze zijn niet uitsluitend aan advertenties toegeschreven.
+        Leads = Brochure uit Websiteprestaties. Afspraken komen bij gekoppelde sites uit afspraakachtige GoHighLevel-pipelinefasen,
+        en anders uit de gekoppelde afspraak-bedankpagina’s. Ze zijn niet uitsluitend aan advertenties toegeschreven.
         Websitemetingen gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
         Bij onvolledige koppelingen tonen de kaarten alleen de beschikbare gegevens.
         </p></div>
@@ -270,6 +275,21 @@ function filteredProjectLinkCtr(projects: CampaignProjectRow[]): LinkCtrSummary 
     ctr: unavailable || impressions === 0 ? null
       : measured.reduce((sum, campaign) => sum + campaign.ctr! * campaign.impressions, 0) / impressions
   };
+}
+
+function ConversionPanel({ name, summary, detail }: {
+  name: string; summary: ReturnType<typeof summarizeWebsiteConversions>; detail: string;
+}) {
+  return <article className="panel campaign-channel-panel">
+    <div className="panel-heading"><h2>{name}</h2></div>
+    <dl className="campaign-channel-metrics campaign-channel-metrics--single">
+      <div><dt>Conversies</dt><dd>{summary.count === null ? "—" : number.format(summary.count)}</dd></div>
+    </dl>
+    <details className="campaign-channel-info">
+      <summary aria-label={`Meer informatie over ${name}`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
+      <div className="campaign-info-content"><p>{detail}</p><small className="campaign-coverage">{coverage(summary)}</small></div>
+    </details>
+  </article>;
 }
 
 function WebsiteCvrPanel({ value, detail, availability, comparison }: {
