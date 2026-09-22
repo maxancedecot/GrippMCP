@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import {
   deleteSiteAnalyticsCvrLink,
+  deleteSiteAnalyticsSiteFromDashboard,
+  getDeletableSiteAnalyticsSiteIds,
   getPublicSiteAnalyticsSites,
   getSiteAnalyticsDashboardData,
   upsertSiteAnalyticsCvrLink,
@@ -21,6 +23,7 @@ import { CampaignPerformance } from "./campaign-performance.js";
 import { SortableTable } from "./sortable-table.js";
 import { DataManagementPage } from "./data-management.js";
 import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
+import { SiteDeleteForm } from "./site-delete-form.js";
 import { isExcludedAnalyticsLink } from "../../src/analyticsPageFilter.js";
 import { accountManagerHref, dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
@@ -74,6 +77,14 @@ async function deleteCvrLinkAction(formData: FormData) {
   redirect(returnTo);
 }
 
+async function deleteSiteAction(formData: FormData) {
+  "use server";
+
+  await deleteSiteAnalyticsSiteFromDashboard(stringFromFormValue(formData.get("site_id")));
+  revalidatePath("/dashboard");
+  redirect(dashboardReturnPathFromForm(formData.get("return_to")));
+}
+
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const params = (await searchParams) ?? {};
   if (firstParam(params.tab) === "data-management") return <DataManagementPage params={params} />;
@@ -93,10 +104,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const siteId = view === "campaigns" ? undefined : firstParam(params.site);
   const dashboardPromise = getSiteAnalyticsDashboardData({ ...analyticsOptions, siteId });
   const connectedDashboardPromise = siteId ? getSiteAnalyticsDashboardData(analyticsOptions) : dashboardPromise;
-  const [dashboard, connectedDashboard, configuredSites] = await Promise.all([
+  const [dashboard, connectedDashboard, configuredSites, deletableSiteIds] = await Promise.all([
     dashboardPromise,
     connectedDashboardPromise,
-    getPublicSiteAnalyticsSites()
+    getPublicSiteAnalyticsSites(),
+    getDeletableSiteAnalyticsSiteIds()
   ]);
   const overviewCvrLinks = dashboard.cvrLinks;
   const siteTabs = (configuredSites.length > 0 ? configuredSites : connectedDashboard.sites).filter((site) => !isExcludedAnalyticsLink(site.url));
@@ -169,6 +181,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               </a>
             ))}
           </nav> : null}
+
+          {view === "website" && dashboard.selectedSiteId && deletableSiteIds.includes(dashboard.selectedSiteId) ? (
+            <SiteDeleteForm
+              site={siteTabs.find((site) => site.id === dashboard.selectedSiteId)}
+              returnTo={dashboardHref({ params, days: dashboard.period.days, customPeriod })}
+              action={deleteSiteAction}
+            />
+          ) : null}
         </div>
 
         {view === "campaigns" ? (

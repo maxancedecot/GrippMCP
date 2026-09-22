@@ -3133,6 +3133,40 @@ td .inline-bar {
   background: rgba(255, 107, 91, 0.12);
 }
 
+.site-delete-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.site-delete-form > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.site-delete-button {
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: var(--surface);
+  clip-path: var(--clip-sm);
+  color: var(--danger);
+  padding: 7px 11px;
+  font-size: 13px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.site-delete-button:hover {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+}
+
+.site-delete-button:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .site-analytics-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);

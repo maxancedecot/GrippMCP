@@ -96,6 +96,20 @@ export async function deleteProjectPageGroup(groupId: string, options: { now?: D
   return true;
 }
 
+export async function deleteProjectPageGroupsForSite(siteId: string, options: { now?: Date; store?: Store } = {}): Promise<number> {
+  const normalizedSiteId = z.string().trim().min(1).max(200).parse(siteId);
+  const store = options.store ?? defaultStore;
+  const registry = await readRegistry(store);
+  const remainingGroups = registry.groups.filter((group) => group.siteId !== normalizedSiteId);
+  const deletedCount = registry.groups.length - remainingGroups.length;
+  if (deletedCount === 0) return 0;
+
+  registry.groups = remainingGroups;
+  registry.updatedAt = (options.now ?? new Date()).toISOString();
+  await store.write(STORE_KEY, registry);
+  return deletedCount;
+}
+
 export async function getProjectPageGroupRevision(options: { store?: Store } = {}) {
   return (await readRegistry(options.store ?? defaultStore)).updatedAt ?? "0";
 }

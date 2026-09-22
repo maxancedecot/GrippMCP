@@ -7,6 +7,7 @@ import { readJsonCache, writeJsonCache } from "../src/jsonCache.js";
 import { isExcludedAnalyticsLink } from "../src/analyticsPageFilter.js";
 import {
   deleteRegisteredSiteAnalyticsSite,
+  deleteSiteAnalyticsSiteFromDashboard,
   deleteSiteAnalyticsCvrLink,
   getConfiguredSiteAnalyticsSites,
   getPublicSiteAnalyticsSites,
@@ -105,6 +106,28 @@ test("site analytics auto-registers sites and validates generated tokens", async
     assert.equal(await deleteRegisteredSiteAnalyticsSite(registration.site.id, "wrong-token"), false);
     assert.equal(await deleteRegisteredSiteAnalyticsSite(registration.site.id, registration.siteToken), true);
     assert.equal((await getPublicSiteAnalyticsSites()).some((site) => site.id === registration.site.id), false);
+  });
+});
+
+test("dashboard deletion removes a registered site and its CVR links without a site token", async () => {
+  await withSiteAnalyticsMemory(async () => {
+    const unique = Date.now();
+    const registration = await registerSiteAnalyticsSite({
+      site_url: `https://dashboard-delete-${unique}.example`,
+      site_name: "Delete from dashboard",
+      installation_id: `dashboard-delete-${unique}`
+    });
+    await upsertSiteAnalyticsCvrLink({
+      site_id: registration.site.id,
+      source_path: "/project",
+      target_path: "/bedankt-brochure"
+    });
+
+    assert.equal(await deleteSiteAnalyticsSiteFromDashboard(registration.site.id), true);
+    assert.equal(await deleteSiteAnalyticsSiteFromDashboard(registration.site.id), false);
+    assert.equal((await getPublicSiteAnalyticsSites()).some((site) => site.id === registration.site.id), false);
+    const links = await readJsonCache<{ links: Array<{ siteId: string }> }>("site-analytics:v1:cvr-links");
+    assert.equal(links?.links.some((link) => link.siteId === registration.site.id), false);
   });
 });
 

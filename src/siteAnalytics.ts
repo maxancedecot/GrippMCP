@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readJsonCache, readJsonCaches, writeJsonCache } from "./jsonCache.js";
 import { isExcludedAnalyticsLink } from "./analyticsPageFilter.js";
 import { normalizeProjectPath } from "./projectPageGroups.js";
-import { getProjectPageGroupsForSites } from "./projectPageGroupStore.js";
+import { deleteProjectPageGroupsForSite, getProjectPageGroupsForSites } from "./projectPageGroupStore.js";
 import { siteAnalyticsPeriod, type SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 export type { SiteAnalyticsPeriod } from "./dashboardPeriod.js";
 
@@ -317,6 +317,10 @@ export async function getPublicSiteAnalyticsSites(): Promise<SiteAnalyticsPublic
   return (await getSiteAnalyticsSites()).map(({ token: _token, ...site }) => site);
 }
 
+export async function getDeletableSiteAnalyticsSiteIds(): Promise<string[]> {
+  return (await readSiteAnalyticsRegistry()).sites.map((site) => site.id);
+}
+
 export async function verifySiteAnalyticsToken(siteId: string, token: string) {
   const normalizedSiteId = normalizeIdentifier(siteId);
   const site = (await getSiteAnalyticsSites()).find((candidate) => candidate.id === normalizedSiteId);
@@ -406,6 +410,35 @@ export async function deleteRegisteredSiteAnalyticsSite(siteId: string, token: s
   registry.updatedAt = new Date().toISOString();
   await writeJsonCache(SITE_ANALYTICS_REGISTRY_CACHE_KEY, registry);
 
+  return true;
+}
+
+/** Dashboard-only deletion. Unlike the public registration endpoint, this is called
+ * from a server action and deliberately does not accept a site-owned token. */
+export async function deleteSiteAnalyticsSiteFromDashboard(siteId: string): Promise<boolean> {
+  const normalizedSiteId = normalizeIdentifier(siteId);
+  if (!normalizedSiteId) return false;
+
+  const registry = await readSiteAnalyticsRegistry();
+  const existingIndex = registry.sites.findIndex((site) => site.id === normalizedSiteId);
+  if (existingIndex < 0) return false;
+
+  registry.sites.splice(existingIndex, 1);
+  registry.updatedAt = new Date().toISOString();
+
+  const cvrRegistry = await readSiteAnalyticsCvrLinkData();
+  const remainingLinks = cvrRegistry.links.filter((link) => link.siteId !== normalizedSiteId);
+  const cvrChanged = remainingLinks.length !== cvrRegistry.links.length;
+  if (cvrChanged) {
+    cvrRegistry.links = remainingLinks;
+    cvrRegistry.updatedAt = registry.updatedAt;
+  }
+
+  await Promise.all([
+    writeJsonCache(SITE_ANALYTICS_REGISTRY_CACHE_KEY, registry),
+    ...(cvrChanged ? [writeJsonCache(SITE_ANALYTICS_CVR_LINKS_CACHE_KEY, cvrRegistry)] : []),
+    deleteProjectPageGroupsForSite(normalizedSiteId)
+  ]);
   return true;
 }
 
