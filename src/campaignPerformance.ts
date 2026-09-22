@@ -4,8 +4,8 @@ import { discoverMetaAccounts, type MetaAccountSync } from "./metaAccountDiscove
 import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
 import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
 import { readJsonCache, writeJsonCache } from "./jsonCache.js";
-import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, campaignProjectOverview, parseCampaignProjectMatches, type CampaignProjectMatch } from "./campaignProjects.js";
-import { countGhlAppointments, type GhlReadCall } from "./ghl/appointmentConversions.js";
+import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, campaignProjectOverview, normalizeProjectPath, parseCampaignProjectMatches, type CampaignProjectMatch } from "./campaignProjects.js";
+import { ghlAppointmentsByPipeline, type GhlReadCall } from "./ghl/appointmentConversions.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -57,7 +57,8 @@ const mappingSchema = z.object({
   siteId: id,
   google: z.object({ customerId: googleId, loginCustomerId: googleId.optional(), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
   facebook: z.object({ adAccountId: id.transform((value) => value.replace(/^act_/, "")).pipe(numericId), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
-  ghl: z.object({ locationId: id, installId: id.optional(), pipelineIds: z.array(id).min(1).optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
+  ghl: z.object({ locationId: id, installId: id.optional(), pipelineIds: z.array(id).min(1).optional(),
+    pipelineProjects: z.array(z.object({ pipelineId: id, sourcePath: id })).optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
 type FacebookAccountScope = NonNullable<CampaignSiteMapping["facebook"]> & { requiredCampaignIds?: string[] };
@@ -150,6 +151,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     return token.access_token;
   })();
   const conversionRows = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
+  const ghlProjects = await getGhlProjectAppointments(dashboard, { env, ghlCall: options.ghlCall, mappings });
   const rows: CampaignPerformanceRow[] = [];
   const linkCtrRequests = new Map<string, Promise<CampaignSource<LinkCtrPerformance>>>();
   const destinationRequests = new Map<string, Promise<CampaignSource<CampaignDestinations>>>();
@@ -171,7 +173,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
         googleRequest,
         googleRequest.then((source) => loadGoogleDestinations(mapping?.google, source, googleMatches.map((match) => match.campaignId))),
         Promise.all((scopes.size ? [...scopes.values()] : [undefined]).map((scope) => facebookForSite(site, scope))),
-        loadGhlAppointments(site.id, mapping?.ghl)
+        loadGhlAppointments(site.id, mapping?.ghl, ghlProjects)
       ]);
       const siteProjects = conversionRows.filter((project) => project.siteId === site.id);
       const googleExplicitPages = googleMatches.filter((match) => google.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
@@ -199,7 +201,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     account.siteNames = [...new Set([...account.siteNames, ...configuredSites.map((site) => site.name)])];
   }
   return {
-    rows, facebookLinkCtr, metaSync: discovery.sync, ...campaignProjectOverview(dashboard, rows),
+    rows, facebookLinkCtr, metaSync: discovery.sync, ...campaignProjectOverview(dashboard, rows, ghlProjects.counts),
     message: dashboard.source.mode === "demo"
       ? "Verbind eerst een website via de trackingcode of WordPress-plugin en koppel daarna de advertentieaccounts."
       : projectMessage
@@ -515,17 +517,42 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     };
   }
 
-  async function loadGhlAppointments(siteId: string, config: CampaignSiteMapping["ghl"]): Promise<CampaignSource<WebsiteConversionPerformance>> {
+  async function loadGhlAppointments(siteId: string, config: CampaignSiteMapping["ghl"], result: GhlProjectAppointments): Promise<CampaignSource<WebsiteConversionPerformance>> {
     if (!config) return websiteConversions(siteId, "appointment");
-    try {
-      return { state: "connected", message: "", data: {
-        siteId,
-        count: await countGhlAppointments(config, dashboard.period, options.ghlCall)
-      } };
-    } catch {
-      return { state: "unavailable", data: null, message: "Afspraken konden niet uit GoHighLevel worden geladen." };
-    }
+    if (result.errors.has(siteId)) return { state: "unavailable", data: null, message: "Afspraken konden niet uit GoHighLevel worden geladen." };
+    return { state: "connected", message: "", data: { siteId,
+      count: [...result.counts].filter(([key]) => key.startsWith(`${siteId}:`)).reduce((sum, [, count]) => sum + count, 0) } };
   }
+}
+
+export type GhlProjectAppointments = { counts: Map<string, number>; errors: Set<string> };
+export async function getGhlProjectAppointments(dashboard: SiteAnalyticsDashboardData, options: {
+  env?: Env; ghlCall?: GhlReadCall; mappings?: CampaignSiteMapping[];
+} = {}): Promise<GhlProjectAppointments> {
+  const mappings = options.mappings ?? parseCampaignSiteMappings((options.env ?? process.env).CAMPAIGN_PERFORMANCE_SITES);
+  const projects = cvrOverviewRowsFromLinks(dashboard.cvrLinks, dashboard.projectPageGroups ?? []);
+  const counts = new Map<string, number>(), errors = new Set<string>();
+  await Promise.all(dashboard.sites.map(async (site) => {
+    const config = mappings.find((mapping) => mapping.siteId === site.id)?.ghl;
+    if (!config) return;
+    try {
+      const pipelines = await ghlAppointmentsByPipeline(config, dashboard.period, options.ghlCall);
+      for (const pipeline of pipelines) {
+        const explicit = config.pipelineProjects?.find((item) => item.pipelineId === pipeline.pipelineId)?.sourcePath;
+        const pipelineKey = projectNameKey(pipeline.pipelineName);
+        const candidates = projects.filter((project) => project.siteId === site.id && (explicit
+          ? normalizeProjectPath(project.sourcePath) === normalizeProjectPath(explicit)
+          : pipelineKey.length > 0 && projectNameKey(project.sourceTitle) === pipelineKey));
+        if (candidates.length === 1) counts.set(`${site.id}:${normalizeProjectPath(candidates[0]!.sourcePath)}`, pipeline.count);
+      }
+    } catch { errors.add(site.id); }
+  }));
+  return { counts, errors };
+}
+
+function projectNameKey(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/\b(?:pipeline|project|residentie|residence|nieuwbouw)\b/g, "").replace(/[^a-z0-9]/g, "");
 }
 
 function isLedouxCampaign(name: string) {

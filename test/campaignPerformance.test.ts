@@ -394,7 +394,8 @@ test("configured GoHighLevel pipelines replace link-based appointment totals", a
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 4), conversionLink("site-a", "/bedankt-afspraak", 99)];
   const result = await getCampaignPerformance(data, {
-    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineIds: ["project"] } }]),
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineIds: ["project"],
+      pipelineProjects: [{ pipelineId: "project", sourcePath: "/project" }] } }]),
     ghlCall: async ({ path }) => path.endsWith("/pipelines")
       ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "appointment", name: "Appointment booked" }] }] }
       : { opportunities: [
@@ -405,6 +406,8 @@ test("configured GoHighLevel pipelines replace link-based appointment totals", a
   assert.equal(result.rows[0].leads.data?.count, 4);
   assert.equal(result.rows[0].appointments.data?.count, 1);
   assert.equal(result.rows[0].appointments.data?.siteId, "site-a");
+  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.appointments, 1);
+  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 10);
 });
 
 test("campaign conversions match Brochure and Afspraak across projects and sites without CRM", async () => {

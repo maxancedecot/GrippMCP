@@ -37,6 +37,7 @@ export type GhlAppointmentConfig = {
   installId?: string;
   pipelineIds?: string[];
 };
+export type GhlPipelineAppointmentCount = { pipelineId: string; pipelineName: string; count: number };
 
 export function isAppointmentStage(name: string) {
   const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -45,6 +46,11 @@ export function isAppointmentStage(name: string) {
 }
 
 export async function countGhlAppointments(config: GhlAppointmentConfig, period: { start: string; end: string }, call?: GhlReadCall) {
+  const counts = await ghlAppointmentsByPipeline(config, period, call);
+  return counts.reduce((sum, pipeline) => sum + pipeline.count, 0);
+}
+
+export async function ghlAppointmentsByPipeline(config: GhlAppointmentConfig, period: { start: string; end: string }, call?: GhlReadCall) {
   const installId = config.installId ?? await installIdForLocation(config.locationId);
   const read: GhlReadCall = call ?? (async (input) => new GhlClient(input.installId).call({
     method: "GET", path: input.path, query: input.query, apiVersion: input.apiVersion, readOnly: true
@@ -54,10 +60,11 @@ export async function countGhlAppointments(config: GhlAppointmentConfig, period:
   })).pipelines.filter((pipeline) => !config.pipelineIds || config.pipelineIds.includes(pipeline.id));
   const stages = new Map(pipelines.flatMap((pipeline) => pipeline.stages
     .filter((stage) => isAppointmentStage(stage.name)).map((stage) => [stage.id, pipeline.id] as const)));
-  if (stages.size === 0) return 0;
+  if (stages.size === 0) return [];
 
-  const appointments = new Set<string>();
+  const counts: GhlPipelineAppointmentCount[] = [];
   for (const pipeline of pipelines.filter((item) => item.stages.some((stage) => stages.has(stage.id)))) {
+    const appointments = new Set<string>();
     for (let page = 1; page <= 100; page++) {
       const result = opportunityResponse.parse(await read({
         installId, path: "/opportunities/search",
@@ -73,8 +80,9 @@ export async function countGhlAppointments(config: GhlAppointmentConfig, period:
       if (result.opportunities.length < 100 || result.meta?.nextPage == null) break;
       if (page === 100) throw new Error("GoHighLevel opportunity pagination limit reached");
     }
+    counts.push({ pipelineId: pipeline.id, pipelineName: pipeline.name, count: appointments.size });
   }
-  return appointments.size;
+  return counts;
 }
 
 function brusselsDateKey(timestamp: number) {

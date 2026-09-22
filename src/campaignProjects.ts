@@ -87,7 +87,7 @@ export type CampaignProjectRow = {
 };
 export type UnmatchedProjectCampaign = { channel: "facebook" | "google"; siteId: string; siteName: string; accountId?: string; campaignId: string; campaignName: string };
 
-export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, sites: CampaignPerformanceRow[]) {
+export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, sites: CampaignPerformanceRow[], ghlAppointments = new Map<string, number>()) {
   const projects = new Map<string, CampaignProjectRow>();
   const unmatchedCampaigns: UnmatchedProjectCampaign[] = [];
   const conversions = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
@@ -172,6 +172,13 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
           unavailable: false, projectCount: uniquePages.length });
       }
     }
+  }
+  for (const project of projects.values()) {
+    const appointments = ghlAppointments.get(project.key);
+    if (appointments === undefined) continue;
+    project.appointments = appointments;
+    project.cvr = project.visitors === null ? null : project.visitors > 0 ? ((project.leads ?? 0) + appointments) / project.visitors * 100 : 0;
+    project.hasConversionMapping = true;
   }
   return {
     projects: [...projects.values()].sort((a, b) => a.siteName.localeCompare(b.siteName) || a.title.localeCompare(b.title)),

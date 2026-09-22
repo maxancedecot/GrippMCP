@@ -20,6 +20,7 @@ import { DashboardFrame } from "../dashboard-frame.js";
 import { CvrMappingBoard } from "./cvr-mapping-board.js";
 import { CvrTrendChart } from "./cvr-trend-chart.js";
 import { CampaignPerformance } from "./campaign-performance.js";
+import { getGhlProjectAppointments } from "../../src/campaignPerformance.js";
 import { SortableTable } from "./sortable-table.js";
 import { DataManagementPage } from "./data-management.js";
 import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
@@ -112,8 +113,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   ]);
   const overviewCvrLinks = dashboard.cvrLinks;
   const siteTabs = (configuredSites.length > 0 ? configuredSites : connectedDashboard.sites).filter((site) => !isExcludedAnalyticsLink(site.url));
+  const ghlAppointments = view === "website" ? await getGhlProjectAppointments(dashboard).catch(() => ({ counts: new Map<string, number>(), errors: new Set<string>() })) : null;
   const totalCvrSourceVisitors = dashboard.sites.reduce((sum, site) => sum + site.cvrSourceVisitors, 0);
-  const totalCvrConversionVisitors = dashboard.sites.reduce((sum, site) => sum + site.cvrConversionVisitors, 0);
+  const websiteProjects = cvrOverviewRowsFromLinks(dashboard.cvrLinks, dashboard.projectPageGroups ?? []);
+  const appointmentAdjustment = websiteProjects.reduce((sum, project) => {
+    const crm = ghlAppointments?.counts.get(project.key);
+    return sum + (crm === undefined ? 0 : crm - project.appointment.visitors);
+  }, 0);
+  const totalCvrConversionVisitors = dashboard.sites.reduce((sum, site) => sum + site.cvrConversionVisitors, 0) + appointmentAdjustment;
   const overallConversionRatePercent = totalCvrSourceVisitors > 0 ? (totalCvrConversionVisitors / totalCvrSourceVisitors) * 100 : 0;
 
   return (
@@ -224,7 +231,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               </div>
               <span className="panel-total">{overviewCvrLinks.length} koppelingen</span>
             </div>
-            <CvrOverviewTable rows={overviewCvrLinks} groups={dashboard.projectPageGroups ?? []} />
+            <CvrOverviewTable rows={overviewCvrLinks} groups={dashboard.projectPageGroups ?? []} ghlAppointments={ghlAppointments?.counts} />
           </article>
 
           <article className="panel">
@@ -274,8 +281,14 @@ function MetricCard({
   );
 }
 
-function CvrOverviewTable({ rows, groups }: { rows: SiteAnalyticsCvrLinkRow[]; groups: SiteAnalyticsProjectPageGroup[] }) {
+function CvrOverviewTable({ rows, groups, ghlAppointments = new Map() }: {
+  rows: SiteAnalyticsCvrLinkRow[]; groups: SiteAnalyticsProjectPageGroup[]; ghlAppointments?: Map<string, number>;
+}) {
   const projectRows = cvrOverviewRowsFromLinks(rows, groups);
+  for (const row of projectRows) {
+    const count = ghlAppointments.get(row.key);
+    if (count !== undefined) row.appointment.visitors = count;
+  }
 
   if (projectRows.length === 0) {
     return <p className="empty-state">Geen projectpagina's gekoppeld aan bedankingspagina's.</p>;

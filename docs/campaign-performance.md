@@ -91,10 +91,15 @@ Configureer de CRM-koppeling in dezelfde site-entry. `installId` mag wegblijven 
   "ghl": {
     "locationId": "location-id",
     "installId": "oauth-install-id",
-    "pipelineIds": ["project-pipeline-id"]
+    "pipelineIds": ["project-pipeline-id"],
+    "pipelineProjects": [
+      { "pipelineId": "project-pipeline-id", "sourcePath": "/projectnaam" }
+    ]
   }
 }
 ```
+
+Het dashboard koppelt een pipeline automatisch wanneer de opgeschoonde pipelinenaam exact overeenkomt met één projecttitel. Gebruik `pipelineProjects` wanneer namen afwijken. Zo komt elke afspraak uitsluitend bij de juiste project- en campagnerij terecht. Dezelfde verdeling wordt gebruikt in Accountmanager dashboard en Websiteprestaties.
 
 De geselecteerde website en periode worden op de WordPress-metingen toegepast voordat de conversies worden opgeteld. Een site zonder paginakoppelingen toont “Niet gekoppeld”. Bij bestaande koppelingen zonder conversies wordt nul getoond, net als in de andere view. De totaalkaarten tellen de zichtbare websites op.
 
