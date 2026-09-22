@@ -12,6 +12,18 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
     getSiteAnalyticsDashboardData({ days: 90 })
   ]);
   const selection = dashboardPeriodSelection(params);
+  const measuredPages = new Map(dashboard.cvrPageCandidates.map((page) => [`${page.siteId}:${page.path}`, page]));
+  const mergePages = data.pages.map((page) => {
+    const measured = measuredPages.get(`${page.siteId}:${page.path}`);
+    return {
+      siteId: page.siteId,
+      siteName: page.siteName,
+      path: page.path,
+      title: page.title,
+      uniqueVisitors: measured?.uniqueVisitors ?? 0,
+      pageViews: measured?.pageViews ?? 0
+    };
+  });
   return <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view="data-management" params={params}
     days={selection.period.days} siteId={first(params.site)}
     customPeriod={selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined} />}
@@ -28,7 +40,7 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
       <p className="data-management-intro">Projectpagina’s volgen waar mogelijk de accountmanager uit Gripp. Hier wijs je pagina’s zonder duidelijke koppeling toe. Handmatige toewijzingen worden alleen in dit dashboard bewaard.</p>
       {data.error ? <p className="data-notice" role="alert">{data.error}</p> : null}
       {data.fetchedAt ? <DataManagementBoard key={`${data.fetchedAt}:${(dashboard.projectPageGroups ?? []).map((group) => group.groupId).join(",")}`}
-        data={data} mergePages={dashboard.cvrPageCandidates} projectGroups={dashboard.projectPageGroups ?? []} /> : null}
+        data={data} mergePages={mergePages} projectGroups={dashboard.projectPageGroups ?? []} /> : null}
     </main>
   </DashboardFrame>;
 }

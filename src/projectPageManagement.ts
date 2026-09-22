@@ -83,7 +83,11 @@ export function projectPagesFromDashboard(dashboard: SiteAnalyticsDashboardData,
     const group = dashboard.projectPageGroups?.find((item) => item.siteId === siteId && item.sourcePaths.includes(normalizeProjectPath(path)))
       ?? projectPageGroup(site.url, path);
     const normalized = group?.sourcePath ?? normalizeProjectPath(path);
-    const page = { siteId, siteName: site.name, path: normalized, title: group?.title || title || (normalized === "/" ? site.name : normalized), url: new URL(normalized, site.url).toString() };
+    // Homepage titles are frequently stale after CRM funnels are cloned. The
+    // registered site name is authoritative and prevents another project's
+    // title from leaking into this site's management list.
+    const displayTitle = group?.title || (normalized === "/" ? site.name : title || normalized);
+    const page = { siteId, siteName: site.name, path: normalized, title: displayTitle, url: new URL(normalized, site.url).toString() };
     pages.set(projectPageKey(page), page);
   };
   for (const site of dashboard.sites) add(site.id, "/", site.name);

@@ -124,3 +124,24 @@ test("inventory uses actual website pages and saved project links, excluding too
   assert.deepEqual(pages.map((page) => page.path), ["/", "/aanbod/hugo-verriest", "/aanbod/nieuw-project"]);
   assert.equal(pages[1].title, "Hugo Verriest");
 });
+
+test("homepage inventory uses its own site name instead of a stale cloned-project title", () => {
+  const dashboard = {
+    sites: [{ id: "eliani", name: "eliani.be", url: "https://eliani.be" }],
+    cvrPageCandidates: [
+      { siteId: "eliani", siteName: "eliani.be", path: "/", title: "Home-Alice Buyssehof -" },
+      { siteId: "eliani", siteName: "eliani.be", path: "/home---eliani", title: "Eliani | Nieuwbouw Woningen | Aalst | Te Koop" }
+    ],
+    cvrLinks: []
+  } as unknown as SiteAnalyticsDashboardData;
+
+  const pages = projectPagesFromDashboard(dashboard, [
+    { siteId: "eliani", path: "/home" },
+    { siteId: "eliani", path: "/home---eliani" }
+  ]);
+  assert.deepEqual(pages.map(({ path, title }) => ({ path, title })), [
+    { path: "/", title: "eliani.be" },
+    { path: "/home", title: "/home" },
+    { path: "/home---eliani", title: "Eliani | Nieuwbouw Woningen | Aalst | Te Koop" }
+  ]);
+});

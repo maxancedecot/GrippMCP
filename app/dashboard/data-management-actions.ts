@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { deleteProjectPageGroup, saveProjectPageGroup, type ResolvedProjectPageGroup } from "../../src/projectPageGroupStore.js";
-import { invalidateProjectPageInventory, saveProjectPageManager, type ManagedProjectPage } from "../../src/projectPageManagement.js";
+import { getProjectPageManagementData, invalidateProjectPageInventory, saveProjectPageManager, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 
 export async function saveAccountManagerAction(siteId: string, path: string, managerId: number | null): Promise<
   { ok: true; page: ManagedProjectPage } | { ok: false; error: string }
@@ -24,8 +24,12 @@ export async function saveProjectPageGroupAction(input: {
   sourcePaths: string[];
 }): Promise<{ ok: true; group: ResolvedProjectPageGroup } | { ok: false; error: string }> {
   try {
-    const dashboard = await getSiteAnalyticsDashboardData({ days: 90 });
-    const group = await saveProjectPageGroup(input, { sites: dashboard.sites, pages: dashboard.cvrPageCandidates });
+    const [dashboard, projectData] = await Promise.all([
+      getSiteAnalyticsDashboardData({ days: 90 }),
+      getProjectPageManagementData()
+    ]);
+    if (!projectData.fetchedAt) throw new Error("Project inventory unavailable");
+    const group = await saveProjectPageGroup(input, { sites: dashboard.sites, pages: projectData.pages });
     await invalidateProjectPageInventory();
     revalidatePath("/dashboard");
     revalidatePath("/accountmanager");
