@@ -247,9 +247,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
         <CvrMappingBoard
           sites={siteTabs}
-          pages={dashboard.cvrPageCandidates}
-          links={dashboard.cvrLinks}
-          projectGroups={dashboard.projectPageGroups ?? []}
+          pages={connectedDashboard.cvrPageCandidates}
+          links={connectedDashboard.cvrLinks}
+          projectGroups={connectedDashboard.projectPageGroups ?? []}
           selectedSiteId={dashboard.selectedSiteId}
           returnTo={dashboardHref({ params, days: dashboard.period.days, siteId: dashboard.selectedSiteId, customPeriod })}
           createAction={createCvrLinkAction}
