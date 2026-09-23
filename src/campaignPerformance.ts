@@ -53,15 +53,9 @@ export type CampaignPerformanceRow = {
 const id = z.string().trim().min(1);
 const numericId = id.regex(/^\d+$/);
 const googleId = id.transform((value) => value.replace(/-/g, "")).pipe(numericId);
-const googleCampaignNameProject = z.object({
-  campaignNameIncludes: id,
-  sourcePath: id.refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"), "Use a local project path")
-    .transform(normalizeProjectPath)
-}).strict();
 const mappingSchema = z.object({
   siteId: id,
-  google: z.object({ customerId: googleId, loginCustomerId: googleId.optional(), campaignIds: z.array(numericId).min(1).optional(),
-    campaignNameProjects: z.array(googleCampaignNameProject).min(1).optional() }).strict().optional(),
+  google: z.object({ customerId: googleId, loginCustomerId: googleId.optional(), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
   facebook: z.object({ adAccountId: id.transform((value) => value.replace(/^act_/, "")).pipe(numericId), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
   ghl: z.object({ locationId: id, installId: id.optional(), pipelineIds: z.array(id).min(1).optional(),
     pipelineProjects: z.array(z.object({ pipelineId: id, sourcePath: id })).optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
@@ -184,10 +178,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       const googleExplicitPages = googleMatches.filter((match) => google.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
         .map((match) => ({ campaignId: match.campaignId,
           pages: matchCampaignPages(site.url, match.sourcePaths.map((path) => new URL(path, site.url).toString()), siteProjects) }));
-      const googleNamePages = (mapping?.google?.campaignNameProjects ?? []).flatMap((rule) =>
-        (google.data?.campaigns ?? []).filter((campaign) => campaign.name?.toLocaleLowerCase().includes(rule.campaignNameIncludes.toLocaleLowerCase()))
-          .map((campaign) => ({ campaignId: campaign.id,
-            pages: matchCampaignPages(site.url, [new URL(rule.sourcePath, site.url).toString()], siteProjects) })));
+      const googleNamePages = matchGoogleCampaignNames(site.url, google.data?.campaigns ?? [], siteProjects);
       const fixedGoogleIds = [...new Set([...googleMatches.map((match) => match.campaignId), ...googleNamePages.map((match) => match.campaignId)])];
       const googleDestinations = await loadGoogleDestinations(mapping?.google, google, fixedGoogleIds);
       const googleCampaignPages: CampaignSource<CampaignPageMatch[]> = googleDestinations.data || googleExplicitPages.length || googleNamePages.length ? {
@@ -534,6 +525,25 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     return { state: "connected", message: "", data: { siteId,
       count: [...result.counts].filter(([key]) => key.startsWith(`${siteId}:`)).reduce((sum, [, count]) => sum + count, 0) } };
   }
+}
+
+function matchGoogleCampaignNames(siteUrl: string, campaigns: AdCampaign[], projects: ReturnType<typeof cvrOverviewRowsFromLinks>) {
+  const normalize = (value: string) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const candidates = projects.map((project) => {
+    const path = normalizeProjectPath(project.sourcePath);
+    const url = new URL(path, siteUrl);
+    const slug = normalize(url.searchParams.get("p_slug") ?? url.pathname.split("/").filter(Boolean).at(-1) ?? "");
+    const title = normalize(project.sourceTitle ?? "");
+    return { project, keys: [...new Set([slug, title].filter((key) => key.length >= 4))] };
+  });
+  return campaigns.flatMap((campaign) => {
+    const name = normalize(campaign.name ?? "");
+    const matches = candidates.filter((candidate) => candidate.keys.some((key) => name.includes(key)));
+    if (matches.length !== 1) return [];
+    return [{ campaignId: campaign.id,
+      pages: matchCampaignPages(siteUrl, [new URL(matches[0].project.sourcePath, siteUrl).toString()], projects) }];
+  });
 }
 
 export type GhlProjectAppointments = { counts: Map<string, number>; errors: Set<string> };
