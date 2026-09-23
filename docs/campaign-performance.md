@@ -22,7 +22,7 @@ Websitebezoekers, Brochure, Afspraak, CVR, Google- en Meta-insights gebruiken ex
 
 ## Accounts koppelen
 
-Meta-accounts worden standaard automatisch ontdekt via de bestaande serverkoppeling. Voor Google en bestaande handmatige basiskoppelingen: configureer `CAMPAIGN_PERFORMANCE_SITES` als JSON in de serveromgeving. `siteId` moet overeenkomen met een geregistreerde WordPress-site of een ID in `SITE_ANALYTICS_SITES`. Eén configuratie per site:
+Meta-accounts worden standaard automatisch ontdekt via de bestaande serverkoppeling. Google-campagnes kunnen zonder siteconfiguratie worden gekoppeld via **Data management → Google Ads**: vul het klantnummer in, laad de campagnes en kies de juiste projectpagina. Die opgeslagen koppeling levert zelf het account en de campagne-ID aan het dashboard. `CAMPAIGN_PERFORMANCE_SITES` blijft beschikbaar voor bestaande handmatige basiskoppelingen. `siteId` moet overeenkomen met een geregistreerde WordPress-site of een ID in `SITE_ANALYTICS_SITES`. Eén configuratie per site:
 
 ```json
 [
@@ -46,6 +46,8 @@ Meta-accounts worden standaard automatisch ontdekt via de bestaande serverkoppel
 ### Google Ads
 
 Zet `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET` en `GOOGLE_ADS_REFRESH_TOKEN` in de serveromgeving. De refresh token moet bij dit OAuth-clientpaar horen, met de scope `https://www.googleapis.com/auth/adwords`, en toegang geven tot de gekoppelde klantaccounts. De server wisselt de refresh token in voor een access token. Gebruik een refresh token uit de normale OAuth-toestemmingsflow van het Google Cloud-project. Een apart ingestelde Google Ads MCP-koppeling maakt deze servervariabelen niet automatisch beschikbaar aan de dashboardapp.
+
+De OAuth-gegevens blijven de enige globale Google Ads-variabelen. Nieuwe klantaccounts, campagnes en projectmatches hoeven niet aan Vercel te worden toegevoegd: Data management bewaart die koppelingen in dezelfde persistente dashboardopslag als de overige beheergegevens. Verwijderen in Data management haalt de campagne weer uit de projectkoppeling.
 
 `GOOGLE_ADS_API_VERSION` is standaard `v25`. `GOOGLE_ADS_DEVELOPER_TOKEN` wordt alleen meegestuurd wanneer ingesteld. Sinds 9 september 2026 bepaalt Google Ads de toegang via het Google Cloud-project van de OAuth-client; controleer de toegang van dat project. Zie [Google Ads-toegang](https://developers.google.com/google-ads/api/docs/api-policy/developer-token) en [REST-rapportage](https://developers.google.com/google-ads/api/rest/common/search).
 

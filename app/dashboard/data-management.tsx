@@ -4,12 +4,14 @@ import { dashboardPeriodSelection, type DashboardSearchParams } from "../../src/
 import { DashboardFrame } from "../dashboard-frame.js";
 import { DataManagementBoard } from "./data-management-board.js";
 import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
+import { readGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
 
 export async function DataManagementPage({ params }: { params: DashboardSearchParams }) {
   const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
-  const [data, dashboard] = await Promise.all([
+  const [data, dashboard, googleCampaignMatches] = await Promise.all([
     getProjectPageManagementData({ force: first(params.refresh) === "1" }),
-    getSiteAnalyticsDashboardData({ days: 90 })
+    getSiteAnalyticsDashboardData({ days: 90 }),
+    readGoogleCampaignMatches()
   ]);
   const selection = dashboardPeriodSelection(params);
   const measuredPages = new Map(dashboard.cvrPageCandidates.map((page) => [`${page.siteId}:${page.path}`, page]));
@@ -40,7 +42,7 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
       <p className="data-management-intro">Projectpagina’s volgen waar mogelijk de accountmanager uit Gripp. Hier wijs je pagina’s zonder duidelijke koppeling toe. Handmatige toewijzingen worden alleen in dit dashboard bewaard.</p>
       {data.error ? <p className="data-notice" role="alert">{data.error}</p> : null}
       {data.fetchedAt ? <DataManagementBoard key={`${data.fetchedAt}:${(dashboard.projectPageGroups ?? []).map((group) => group.groupId).join(",")}`}
-        data={data} mergePages={mergePages} projectGroups={dashboard.projectPageGroups ?? []} /> : null}
+        data={data} mergePages={mergePages} projectGroups={dashboard.projectPageGroups ?? []} googleCampaignMatches={googleCampaignMatches} /> : null}
     </main>
   </DashboardFrame>;
 }

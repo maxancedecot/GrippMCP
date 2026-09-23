@@ -961,6 +961,25 @@ test("Google campaign names automatically map a unique shared-account campaign t
   assert.equal(project.googleState, "connected");
 });
 
+test("a saved Google campaign match supplies its account without a Vercel site mapping", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt", 3, "/project")];
+  const result = await getCampaignPerformance(data, {
+    env: environment([], googleCredentials),
+    projectMatches: [{ channel: "google", siteId: "site-a", accountId: "5365783098", campaignId: "10", sourcePaths: ["/project"] }],
+    fetchImpl: async (input, init) => {
+      if (String(input).includes("oauth2")) return response({ access_token: "access" });
+      const query = JSON.parse(String(init?.body)).query as string;
+      if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
+      if (query.includes("primary_status")) return response([{ results: [{ campaign: { id: "10", name: "Ledoux project", status: "ENABLED", primaryStatus: "ELIGIBLE" } }] }]);
+      if (query.includes("metrics.clicks")) return response([{ results: [{ campaign: { id: "10", name: "Ledoux project" }, metrics: { clicks: 8, impressions: 100, costMicros: 9000000 } }] }]);
+      assert.fail(`Saved campaign match must avoid destination lookup: ${query}`);
+    }
+  });
+  const project = result.projects.find((row) => row.sourcePath === "/project")!;
+  assert.deepEqual(project.googleCampaigns.map(({ id, spend }) => ({ id, spend })), [{ id: "10", spend: 9 }]);
+});
+
 test("Google project summaries weight CTR by impressions, total spend and combine live status", () => {
   const campaign = (id: string, clicks: number, impressions: number, spend: number, live: boolean | null, currency = "EUR"): GoogleProjectCampaign => ({
     id, accountId: "123", name: id, clicks, impressions, spend, live, currency,

@@ -116,6 +116,14 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   } catch {
     projectMessage = "De opgeslagen projectkoppelingen konden niet worden geladen. Alleen gecontroleerde advertentielinks worden gebruikt.";
   }
+  for (const match of projectMatches.filter((item) => item.channel === "google")) {
+    const existing = mappings.find((mapping) => mapping.siteId === match.siteId);
+    if (!existing) mappings.push({ siteId: match.siteId, google: { customerId: match.accountId, campaignIds: [match.campaignId] } });
+    else if (!existing.google) existing.google = { customerId: match.accountId, campaignIds: [match.campaignId] };
+    else if (existing.google.customerId === match.accountId) {
+      existing.google.campaignIds = [...new Set([...(existing.google.campaignIds ?? []), match.campaignId])];
+    }
+  }
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? new Date();
   // Do not discover real ad accounts when the dashboard is in demo mode.
