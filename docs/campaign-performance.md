@@ -31,7 +31,10 @@ Meta-accounts worden standaard automatisch ontdekt via de bestaande serverkoppel
     "google": {
       "customerId": "1234567890",
       "loginCustomerId": "9876543210",
-      "campaignIds": ["111111111"]
+      "campaignIds": ["111111111"],
+      "campaignNameProjects": [
+        { "campaignNameIncludes": "Graanmolenhof", "sourcePath": "/graanmolenhof" }
+      ]
     },
     "facebook": {
       "adAccountId": "123456789012345",
@@ -41,7 +44,7 @@ Meta-accounts worden standaard automatisch ontdekt via de bestaande serverkoppel
 ]
 ```
 
-`google`, `facebook` en `ghl` zijn afzonderlijk optioneel. Zonder een handmatige of automatisch gevonden advertentiekoppeling verschijnt “Niet gekoppeld”. Laat `campaignIds` weg om het volledige advertentieaccount als basis te gebruiken. Voor Facebook tellen altijd alleen campagnes met “Ledoux” in hun naam mee, ongeacht hoofdletters; de naamfilter wordt ook toegepast op expliciete campagne-ID’s. Een lege lijst wordt afgewezen om onbedoeld het hele account in te laden te voorkomen. Gebruik specifieke campagne-ID’s als meerdere websites één advertentieaccount delen. `loginCustomerId` is optioneel en kan ook globaal via `GOOGLE_ADS_LOGIN_CUSTOMER_ID` worden gezet. Google-ID’s mogen streepjes bevatten; Facebook-account-ID’s mogen met `act_` beginnen.
+`google`, `facebook` en `ghl` zijn afzonderlijk optioneel. Zonder een handmatige of automatisch gevonden advertentiekoppeling verschijnt “Niet gekoppeld”. Laat `campaignIds` weg om het volledige advertentieaccount als basis te gebruiken. Met `campaignNameProjects` kan een Google-campagne uit een gedeeld account aan een lokaal projectpad worden gekoppeld wanneer haar naam de opgegeven tekst bevat; de vergelijking is niet hoofdlettergevoelig. Gebruik een projectspecifieke tekst om meervoudige matches te vermijden. Voor Facebook tellen altijd alleen campagnes met “Ledoux” in hun naam mee, ongeacht hoofdletters; de naamfilter wordt ook toegepast op expliciete campagne-ID’s. Een lege lijst wordt afgewezen om onbedoeld het hele account in te laden te voorkomen. Gebruik specifieke campagne-ID’s als meerdere websites één advertentieaccount delen. `loginCustomerId` is optioneel en kan ook globaal via `GOOGLE_ADS_LOGIN_CUSTOMER_ID` worden gezet. Google-ID’s mogen streepjes bevatten; Facebook-account-ID’s mogen met `act_` beginnen.
 
 ### Google Ads
 
@@ -49,7 +52,7 @@ Zet `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET` en `GOOGLE_ADS_REFRESH_TO
 
 `GOOGLE_ADS_API_VERSION` is standaard `v25`. `GOOGLE_ADS_DEVELOPER_TOKEN` wordt alleen meegestuurd wanneer ingesteld. Sinds 9 september 2026 bepaalt Google Ads de toegang via het Google Cloud-project van de OAuth-client; controleer de toegang van dat project. Zie [Google Ads-toegang](https://developers.google.com/google-ads/api/docs/api-policy/developer-token) en [REST-rapportage](https://developers.google.com/google-ads/api/rest/common/search).
 
-Google-campagnes staan ook in **Performance per projectpagina**. Een opgeslagen Google-projectmatch heeft voorrang; voor overige campagnes leest de server de definitieve desktop- en mobiele bestemmingslinks uit `ad_group_ad` en `asset_group` (Performance Max). Verwijderde advertenties en assetgroepen worden uitgesloten. Alleen bestemmingen op het domein en binnen het pad van de gekoppelde website worden gekoppeld, op exact projectpad met behoud van `p_slug`. Een geverifieerde homepagevariant kan expliciet worden vastgelegd, zoals `/` naar `/home`. Campagnenamen worden niet gebruikt om een project te raden.
+Google-campagnes staan ook in **Performance per projectpagina**. Een opgeslagen Google-projectmatch of expliciete `campaignNameProjects`-regel heeft voorrang; voor overige campagnes leest de server de definitieve desktop- en mobiele bestemmingslinks uit `ad_group_ad` en `asset_group` (Performance Max). Verwijderde advertenties en assetgroepen worden uitgesloten. Alleen bestemmingen op het domein en binnen het pad van de gekoppelde website worden gekoppeld, op exact projectpad met behoud van `p_slug`. Een geverifieerde homepagevariant kan expliciet worden vastgelegd, zoals `/` naar `/home`. Buiten expliciete `campaignNameProjects`-regels worden campagnenamen niet gebruikt om een project te raden.
 
 De projecttabel toont Google CTR als totale klikken ÷ totale vertoningen van de gekoppelde campagnes in de gekozen periode: een gemiddelde gewogen op vertoningen, ook voor campagnes die nu gepauzeerd zijn. Campagnes zonder vertoningen verlagen het gemiddelde niet. Google spend is de som van de campagnebedragen; Live geldt zodra minstens één campagne live is, Niet live alleen als alle campagnes bevestigd niet live zijn, en anders Onbekend. De drie kolommen bevatten één waarde per project. Hun hovertekst toont elke campagne apart met naam, CTR, spend en huidige status. Bij meerdere bestemmingspagina’s zijn CTR en spend gedeelde campagnetotalen, geen afzonderlijke paginacijfers. Zonder vertoningen blijft CTR leeg; bevestigde nuluitgaven blijven nul. Ontbrekende of niet controleerbare bestemmingen geven geen verzonnen projectcijfers. Fouten in het lezen van bestemmingslinks blokkeren bestaande opgeslagen matches of de Google-overzichtscijfers niet.
 

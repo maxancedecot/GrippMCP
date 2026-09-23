@@ -53,9 +53,15 @@ export type CampaignPerformanceRow = {
 const id = z.string().trim().min(1);
 const numericId = id.regex(/^\d+$/);
 const googleId = id.transform((value) => value.replace(/-/g, "")).pipe(numericId);
+const googleCampaignNameProject = z.object({
+  campaignNameIncludes: id,
+  sourcePath: id.refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"), "Use a local project path")
+    .transform(normalizeProjectPath)
+}).strict();
 const mappingSchema = z.object({
   siteId: id,
-  google: z.object({ customerId: googleId, loginCustomerId: googleId.optional(), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
+  google: z.object({ customerId: googleId, loginCustomerId: googleId.optional(), campaignIds: z.array(numericId).min(1).optional(),
+    campaignNameProjects: z.array(googleCampaignNameProject).min(1).optional() }).strict().optional(),
   facebook: z.object({ adAccountId: id.transform((value) => value.replace(/^act_/, "")).pipe(numericId), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
   ghl: z.object({ locationId: id, installId: id.optional(), pipelineIds: z.array(id).min(1).optional(),
     pipelineProjects: z.array(z.object({ pipelineId: id, sourcePath: id })).optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
@@ -169,9 +175,8 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       }
       const googleMatches = projectMatches.filter((match) => match.channel === "google" && match.siteId === site.id && match.accountId === mapping?.google?.customerId);
       const googleRequest = loadGoogle(mapping?.google);
-      const [google, googleDestinations, facebookAccounts, appointments] = await Promise.all([
+      const [google, facebookAccounts, appointments] = await Promise.all([
         googleRequest,
-        googleRequest.then((source) => loadGoogleDestinations(mapping?.google, source, googleMatches.map((match) => match.campaignId))),
         Promise.all((scopes.size ? [...scopes.values()] : [undefined]).map((scope) => facebookForSite(site, scope))),
         loadGhlAppointments(site.id, mapping?.ghl, ghlProjects)
       ]);
@@ -179,9 +184,15 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       const googleExplicitPages = googleMatches.filter((match) => google.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
         .map((match) => ({ campaignId: match.campaignId,
           pages: matchCampaignPages(site.url, match.sourcePaths.map((path) => new URL(path, site.url).toString()), siteProjects) }));
-      const googleCampaignPages: CampaignSource<CampaignPageMatch[]> = googleDestinations.data || googleExplicitPages.length ? {
+      const googleNamePages = (mapping?.google?.campaignNameProjects ?? []).flatMap((rule) =>
+        (google.data?.campaigns ?? []).filter((campaign) => campaign.name?.toLocaleLowerCase().includes(rule.campaignNameIncludes.toLocaleLowerCase()))
+          .map((campaign) => ({ campaignId: campaign.id,
+            pages: matchCampaignPages(site.url, [new URL(rule.sourcePath, site.url).toString()], siteProjects) })));
+      const fixedGoogleIds = [...new Set([...googleMatches.map((match) => match.campaignId), ...googleNamePages.map((match) => match.campaignId)])];
+      const googleDestinations = await loadGoogleDestinations(mapping?.google, google, fixedGoogleIds);
+      const googleCampaignPages: CampaignSource<CampaignPageMatch[]> = googleDestinations.data || googleExplicitPages.length || googleNamePages.length ? {
         state: "connected", message: googleDestinations.state === "unavailable" ? "Niet alle Google-campagnes konden aan een projectpagina worden gekoppeld." : "",
-        data: [...googleExplicitPages, ...(googleDestinations.data ?? []).map((campaign) => ({ campaignId: campaign.campaignId,
+        data: [...googleExplicitPages, ...googleNamePages, ...(googleDestinations.data ?? []).map((campaign) => ({ campaignId: campaign.campaignId,
           pages: matchCampaignPages(site.url, campaign.urls, siteProjects) }))]
       } : googleDestinations;
       return {

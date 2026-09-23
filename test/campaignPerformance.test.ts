@@ -43,6 +43,7 @@ test("campaign mappings reject ambiguous sites, empty scopes and unsafe IDs", ()
   assert.throws(() => parseCampaignSiteMappings('[{"siteId":"a","google":{"customerId":"123 OR 1=1"}}]'));
   assert.throws(() => parseCampaignSiteMappings('[{"siteId":"a","facebook":{"adAccountId":"123","campaignIds":[]}}]'));
   assert.equal(parseCampaignSiteMappings('[{"siteId":"a","google":{"customerId":"123-456-7890"}}]')[0].google?.customerId, "1234567890");
+  assert.throws(() => parseCampaignSiteMappings('[{"siteId":"a","google":{"customerId":"123","campaignNameProjects":[{"campaignNameIncludes":"Project","sourcePath":"https://other.example"}]}}]'));
 });
 
 test("saved project matches require scoped campaign IDs and local project paths", () => {
@@ -931,6 +932,36 @@ test("Google project metrics use exact landing pages and campaign IDs, including
   assert.deepEqual(project.campaigns, []);
   assert.deepEqual(result.unmatchedCampaigns.map((c) => [c.channel, c.campaignId]), [["google", "4"]]);
   assert.equal(summarizeAds([result.rows[0].google]).spend[0].amount, 10, "Shared project campaigns are not duplicated in totals");
+});
+
+test("Google campaign names can map a shared account campaign to one project path", async () => {
+  const data = dashboard();
+  data.sites[0].url = "https://buurt.eu";
+  data.cvrLinks = [conversionLink("site-a", "/bedankt", 3, "/graanmolenhof")];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", google: { customerId: "536-578-3098", campaignNameProjects: [
+      { campaignNameIncludes: "Graanmolenhof", sourcePath: "/graanmolenhof" }
+    ] } }], googleCredentials),
+    fetchImpl: async (input, init) => {
+      if (String(input).includes("oauth2")) return response({ access_token: "access" });
+      const query = JSON.parse(String(init?.body)).query as string;
+      if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
+      if (query.includes("primary_status")) return response([{ results: [
+        { campaign: { id: "10", name: "Ledoux x Graanmolenhof: LOCAL", status: "ENABLED", primaryStatus: "ELIGIBLE" } },
+        { campaign: { id: "20", name: "Ledoux x Ander project: LOCAL", status: "ENABLED", primaryStatus: "ELIGIBLE" } }
+      ] }]);
+      if (query.includes("metrics.clicks")) return response([{ results: [
+        { campaign: { id: "10", name: "Ledoux x Graanmolenhof: LOCAL" }, metrics: { clicks: 12, impressions: 100, costMicros: 15000000 } }
+      ] }]);
+      assert.match(query, /campaign.id IN \(20\)/);
+      return response([{ results: [] }]);
+    }
+  });
+  const project = result.projects.find((row) => row.sourcePath === "/graanmolenhof")!;
+  assert.deepEqual(project.googleCampaigns.map(({ id, name, spend }) => ({ id, name, spend })), [
+    { id: "10", name: "Ledoux x Graanmolenhof: LOCAL", spend: 15 }
+  ]);
+  assert.equal(project.googleState, "connected");
 });
 
 test("Google project summaries weight CTR by impressions, total spend and combine live status", () => {
