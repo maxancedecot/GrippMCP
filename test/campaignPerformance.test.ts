@@ -407,6 +407,8 @@ test("configured GoHighLevel pipelines replace link-based appointment totals", a
   assert.equal(result.rows[0].appointments.data?.count, 1);
   assert.equal(result.rows[0].appointments.data?.siteId, "site-a");
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.appointments, 1);
+  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.leadSource, "website");
+  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.appointmentSource, "crm");
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 10);
 });
 

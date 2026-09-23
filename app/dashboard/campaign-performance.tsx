@@ -158,8 +158,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               <td data-metric="google-ctr"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="ctr" /></td>
               <td data-metric="google-spend"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="spend" /></td>
               <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
-              <td><strong>{project.leads === null ? "—" : number.format(project.leads)}</strong></td>
-              <td><strong>{project.appointments === null ? "—" : number.format(project.appointments)}</strong></td>
+              <td><ConversionSourceValue value={project.leads} source={project.leadSource} label="Brochure" /></td>
+              <td><ConversionSourceValue value={project.appointments} source={project.appointmentSource} label="Afspraak" /></td>
               <td><strong className="campaign-project-cvr-value" style={{ color: rateColor(project.cvr, PROJECT_CVR_BENCHMARK_PERCENT) }}>{percentage(project.cvr)}</strong>
                 {!project.hasConversionMapping ? <span className="cell-muted">Bedankpagina nog niet gekoppeld</span> : null}</td>
             </tr>
@@ -206,6 +206,14 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       </details>
     </div>
   );
+}
+
+function ConversionSourceValue({ value, source, label }: {
+  value: number | null; source: "website" | "crm" | null; label: string;
+}) {
+  const sourceLabel = source === "crm" ? "GoHighLevel CRM" : source === "website" ? "Website" : "Niet gekoppeld";
+  const display = value === null ? "—" : number.format(value);
+  return <strong tabIndex={0} title={`Bron: ${sourceLabel}`} aria-label={`${label}: ${display}. Bron: ${sourceLabel}`}>{display}</strong>;
 }
 
 function ProjectCampaignMetric({ project, summary, metric, channel }: {

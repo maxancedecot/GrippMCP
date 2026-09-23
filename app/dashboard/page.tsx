@@ -314,10 +314,11 @@ function CvrOverviewTable({ rows, groups, ghlAppointments = new Map() }: {
                   <span className="row-title">{formatNumber(row.sourceVisitors)}</span>
                 </td>
                 <td>
-                  <CvrOverviewMetricCell metric={row.brochure} sourceVisitors={row.sourceVisitors} />
+                  <CvrOverviewMetricCell metric={row.brochure} sourceVisitors={row.sourceVisitors} source="website" />
                 </td>
                 <td>
-                  <CvrOverviewMetricCell metric={row.appointment} sourceVisitors={row.sourceVisitors} />
+                  <CvrOverviewMetricCell metric={row.appointment} sourceVisitors={row.sourceVisitors}
+                    source={ghlAppointments.has(row.key) ? "crm" : "website"} />
                 </td>
                 <td>
                   <CvrOverviewTotalCell row={row} />
@@ -340,11 +341,15 @@ function CvrOverviewTotalCell({ row }: { row: CvrOverviewRow }) {
   );
 }
 
-function CvrOverviewMetricCell({ metric, sourceVisitors }: { metric: CvrOverviewMetric; sourceVisitors: number }) {
+function CvrOverviewMetricCell({ metric, sourceVisitors, source }: {
+  metric: CvrOverviewMetric; sourceVisitors: number; source: "website" | "crm";
+}) {
   const conversionRate = sourceVisitors > 0 ? (metric.visitors / sourceVisitors) * 100 : 0;
+  const sourceLabel = source === "crm" ? "GoHighLevel CRM" : "Website";
 
   return (
-    <span className="cvr-overview-metric">
+    <span className="cvr-overview-metric" tabIndex={0} title={`Bron: ${sourceLabel}`}
+      aria-label={`${formatNumber(metric.visitors)} conversies, ${formatConversionRate(conversionRate)}%. Bron: ${sourceLabel}`}>
       <strong>{formatNumber(metric.visitors)}</strong>
       <span>{formatConversionRate(conversionRate)}%</span>
     </span>

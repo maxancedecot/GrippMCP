@@ -78,6 +78,8 @@ export type CampaignProjectRow = {
   visitors: number | null;
   leads: number | null;
   appointments: number | null;
+  leadSource: "website" | null;
+  appointmentSource: "website" | "crm" | null;
   cvr: number | null;
   hasConversionMapping: boolean;
   facebookState: CampaignSource<unknown>["state"];
@@ -111,6 +113,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         url: new URL(metrics?.sourcePath ?? sourcePath, site.url).toString(),
         title: metrics?.sourceTitle || candidate?.title || title || (path === "/" ? site.name : path),
         visitors, leads: metrics?.brochure.visitors ?? null, appointments: metrics?.appointment.visitors ?? null,
+        leadSource: metrics ? "website" : null, appointmentSource: metrics ? "website" : null,
         cvr: metrics ? (metrics.sourceVisitors > 0 ? (metrics.brochure.visitors + metrics.appointment.visitors) / metrics.sourceVisitors * 100 : 0) : null,
         hasConversionMapping: !!metrics, facebookState: (site.facebookAccounts ?? [site]).some((account) => account.facebook.state === "connected") ? "connected" : site.facebook.state, campaigns: [],
         googleState: site.google.state === "connected" ? site.googleCampaignPages.state : site.google.state, googleCampaigns: []
@@ -121,6 +124,8 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
         Object.assign(row, {
           sourcePath: path, sourcePaths: group.sourcePaths, title: group.title, url: new URL(path, site.url).toString(),
           visitors: grouped?.visitors ?? null, leads: grouped?.leads ?? null, appointments: grouped?.appointments ?? null,
+          leadSource: grouped?.leads !== null && grouped?.leads !== undefined ? "website" : null,
+          appointmentSource: grouped?.appointments !== null && grouped?.appointments !== undefined ? "website" : null,
           cvr: grouped?.leads !== null && grouped?.leads !== undefined && grouped.appointments !== null
             ? grouped.visitors > 0 ? (grouped.leads + grouped.appointments) / grouped.visitors * 100 : 0 : null,
           hasConversionMapping: grouped?.leads !== null && grouped?.leads !== undefined
@@ -177,6 +182,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     const appointments = ghlAppointments.get(project.key);
     if (appointments === undefined) continue;
     project.appointments = appointments;
+    project.appointmentSource = "crm";
     project.cvr = project.visitors === null ? null : project.visitors > 0 ? ((project.leads ?? 0) + appointments) / project.visitors * 100 : 0;
     project.hasConversionMapping = true;
   }

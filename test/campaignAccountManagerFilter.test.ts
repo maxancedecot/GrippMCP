@@ -6,7 +6,8 @@ import type { ManagedProjectPage } from "../src/projectPageManagement.js";
 
 const project = (key: string, siteId: string, path: string, visitors: number, leads: number, appointments: number): CampaignProjectRow => ({
   key, siteId, siteName: siteId, sourcePath: path, url: `https://${siteId}.example${path}`, title: key,
-  visitors, leads, appointments, cvr: visitors ? (leads + appointments) / visitors * 100 : 0,
+  visitors, leads, appointments, leadSource: "website", appointmentSource: "website",
+  cvr: visitors ? (leads + appointments) / visitors * 100 : 0,
   hasConversionMapping: true, facebookState: "connected", campaigns: [], googleState: "connected", googleCampaigns: []
 });
 
