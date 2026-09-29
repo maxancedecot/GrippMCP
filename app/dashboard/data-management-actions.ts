@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { deleteProjectPageGroup, saveProjectPageGroup, type ResolvedProjectPageGroup } from "../../src/projectPageGroupStore.js";
 import { getProjectPageManagementData, invalidateProjectPageInventory, saveProjectPageManager, type ManagedProjectPage } from "../../src/projectPageManagement.js";
-import { deleteGoogleCampaignMatch, listGoogleCampaigns, saveGoogleCampaignMatch } from "../../src/googleCampaignManagement.js";
+import { deleteGoogleCampaignMatch, listGoogleCampaigns, saveGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
 
 export async function saveAccountManagerAction(siteId: string, path: string, managerId: number | null): Promise<
   { ok: true; page: ManagedProjectPage } | { ok: false; error: string }
@@ -57,13 +57,12 @@ export async function loadGoogleCampaignsAction(customerId: string) {
   catch { return { ok: false as const, error: "De Google Ads-campagnes konden niet worden geladen. Controleer het klantnummer en de accounttoegang." }; }
 }
 
-export async function saveGoogleCampaignMatchAction(input: { siteId: string; accountId: string; campaignId: string; sourcePath: string }) {
+export async function saveGoogleCampaignMatchesAction(input: { siteId: string; accountId: string; campaignIds: string[]; sourcePath: string }) {
   try {
-    const match = await saveGoogleCampaignMatch({ channel: "google", siteId: input.siteId, accountId: input.accountId,
-      campaignId: input.campaignId, sourcePaths: [input.sourcePath] });
+    const matches = await saveGoogleCampaignMatches(input);
     revalidatePath("/dashboard"); revalidatePath("/accountmanager");
-    return { ok: true as const, match };
-  } catch { return { ok: false as const, error: "De Google-campagne kon niet worden gekoppeld. Vernieuw de gegevens en probeer opnieuw." }; }
+    return { ok: true as const, matches };
+  } catch { return { ok: false as const, error: "De Google-campagnes konden niet worden gekoppeld. Vernieuw de gegevens en probeer opnieuw." }; }
 }
 
 export async function deleteGoogleCampaignMatchAction(accountId: string, campaignId: string) {

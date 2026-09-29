@@ -22,7 +22,7 @@ Websitebezoekers, Brochure, Afspraak, CVR, Google- en Meta-insights gebruiken ex
 
 ## Accounts koppelen
 
-Meta-accounts worden standaard automatisch ontdekt via de bestaande serverkoppeling. Google-campagnes kunnen zonder siteconfiguratie worden gekoppeld via **Data management → Google Ads**: vul het klantnummer in, laad de campagnes en kies de juiste projectpagina. Die opgeslagen koppeling levert zelf het account en de campagne-ID aan het dashboard. `CAMPAIGN_PERFORMANCE_SITES` blijft beschikbaar voor bestaande handmatige basiskoppelingen. `siteId` moet overeenkomen met een geregistreerde WordPress-site of een ID in `SITE_ANALYTICS_SITES`. Eén configuratie per site:
+Meta-accounts worden standaard automatisch ontdekt via de bestaande serverkoppeling. Google-campagnes kunnen zonder siteconfiguratie worden gekoppeld via **Data management → Google Ads**: vul het klantnummer in, laad de campagnes, selecteer alle campagnes voor hetzelfde project en kies de projectpagina. De selectie wordt in één keer opgeslagen. In Campagneperformance verschijnen deze campagnes als één projectresultaat: de Google CTR is gewogen op vertoningen, de spend wordt opgeteld en bij hover staan de cijfers per campagne. De opgeslagen koppelingen leveren het account en de campagne-ID's aan het dashboard. `CAMPAIGN_PERFORMANCE_SITES` blijft beschikbaar voor bestaande handmatige basiskoppelingen. `siteId` moet overeenkomen met een geregistreerde WordPress-site of een ID in `SITE_ANALYTICS_SITES`. Eén configuratie per site:
 
 ```json
 [

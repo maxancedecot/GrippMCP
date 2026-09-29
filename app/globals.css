@@ -2257,6 +2257,35 @@ td .inline-bar {
   font-style: normal;
 }
 
+.google-campaign-link-controls {
+  margin-top: 16px;
+}
+
+.google-campaign-link-controls label {
+  display: grid;
+  flex: 1;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.google-campaign-link-controls button {
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--good);
+  color: var(--background);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.google-campaign-link-controls button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
 .project-group-fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -2302,6 +2331,14 @@ td .inline-bar {
 .project-group-list article > div {
   display: grid;
   gap: 4px;
+}
+
+.project-group-list .google-campaign-match {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  overflow-wrap: anywhere;
 }
 
 .project-group-list button {

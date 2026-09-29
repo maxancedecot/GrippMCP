@@ -8,7 +8,7 @@ import type { SiteAnalyticsCvrPageCandidate, SiteAnalyticsProjectPageGroup } fro
 import type { ManagedProjectPage, ProjectPageManagementData } from "../../src/projectPageManagement.js";
 import type { CampaignProjectMatch } from "../../src/campaignProjects.js";
 import type { GoogleCampaignOption } from "../../src/googleCampaignManagement.js";
-import { deleteGoogleCampaignMatchAction, deleteProjectPageGroupAction, loadGoogleCampaignsAction, saveAccountManagerAction, saveGoogleCampaignMatchAction, saveProjectPageGroupAction } from "./data-management-actions.js";
+import { deleteGoogleCampaignMatchAction, deleteProjectPageGroupAction, loadGoogleCampaignsAction, saveAccountManagerAction, saveGoogleCampaignMatchesAction, saveProjectPageGroupAction } from "./data-management-actions.js";
 
 export function DataManagementBoard({ data, mergePages, projectGroups, googleCampaignMatches }: {
   data: ProjectPageManagementData;
@@ -56,20 +56,28 @@ function GoogleCampaignManager({ pages, initialMatches, canSave }: { pages: Site
   const [customerId, setCustomerId] = useState("");
   const [accountId, setAccountId] = useState("");
   const [campaigns, setCampaigns] = useState<GoogleCampaignOption[]>([]);
-  const [campaignId, setCampaignId] = useState("");
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [pageKey, setPageKey] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [matches, setMatches] = useState(initialMatches);
   const options = useMemo(() => pages.filter((page) => !isThankYouPath(page.path)).sort((a, b) => a.siteName.localeCompare(b.siteName, "nl-BE") || a.title.localeCompare(b.title, "nl-BE")), [pages]);
+  const groupedMatches = useMemo(() => {
+    const groups = new Map<string, CampaignProjectMatch[]>();
+    for (const match of matches) {
+      const key = `${match.siteId}:${normalizeProjectPath(match.sourcePaths[0])}`;
+      groups.set(key, [...(groups.get(key) ?? []), match]);
+    }
+    return [...groups.entries()];
+  }, [matches]);
 
   async function load() {
     setPending(true); setError(""); setNotice("");
     try {
       const result = await loadGoogleCampaignsAction(customerId);
       if (!result.ok) { setError(result.error); return; }
-      setAccountId(result.customerId); setCampaigns(result.campaigns); setCampaignId(result.campaigns[0]?.id ?? "");
+      setAccountId(result.customerId); setCampaigns(result.campaigns); setSelectedCampaignIds([]);
       setNotice(`${result.campaigns.length} campagnes geladen.`);
     } catch { setError("De Google Ads-campagnes konden niet worden geladen."); }
     finally { setPending(false); }
@@ -79,11 +87,13 @@ function GoogleCampaignManager({ pages, initialMatches, canSave }: { pages: Site
     const page = options.find((item) => `${item.siteId}:${normalizeProjectPath(item.path)}` === pageKey);
     if (!page) { setPending(false); setError("Kies een projectpagina."); return; }
     try {
-      const result = await saveGoogleCampaignMatchAction({ siteId: page.siteId, accountId, campaignId, sourcePath: page.path });
+      const result = await saveGoogleCampaignMatchesAction({ siteId: page.siteId, accountId, campaignIds: selectedCampaignIds, sourcePath: page.path });
       if (!result.ok) { setError(result.error); return; }
-      setMatches((current) => [...current.filter((item) => !(item.accountId === accountId && item.campaignId === campaignId)), result.match]);
-      setNotice("Google-campagne gekoppeld en opgeslagen."); router.refresh();
-    } catch { setError("De Google-campagne kon niet worden gekoppeld."); }
+      const selected = new Set(selectedCampaignIds);
+      setMatches((current) => [...current.filter((item) => !(item.accountId === accountId && selected.has(item.campaignId))), ...result.matches]);
+      setSelectedCampaignIds([]);
+      setNotice(`${result.matches.length} Google-campagne${result.matches.length === 1 ? "" : "s"} samengevoegd bij ${page.title}.`); router.refresh();
+    } catch { setError("De Google-campagnes konden niet worden gekoppeld."); }
     finally { setPending(false); }
   }
   async function remove(match: CampaignProjectMatch) {
@@ -94,17 +104,30 @@ function GoogleCampaignManager({ pages, initialMatches, canSave }: { pages: Site
     setPending(false);
   }
   return <section className="panel data-management-panel" aria-labelledby="google-campaign-management-title">
-    <div className="panel-heading"><div><p className="eyebrow">Google Ads</p><h2 id="google-campaign-management-title">Campagnes aan projecten koppelen</h2></div><span className="panel-total">{matches.length} koppelingen</span></div>
-    <p className="cell-muted data-management-help">Voer een Google Ads-klantnummer in, laad de campagnes en kies daarna de juiste projectpagina. Deze koppeling wordt in het dashboard opgeslagen; Vercel-configuratie is niet nodig.</p>
+    <div className="panel-heading"><div><p className="eyebrow">Google Ads</p><h2 id="google-campaign-management-title">Google-campagnes samenvoegen</h2></div><span className="panel-total">{matches.length} koppelingen</span></div>
+    <p className="cell-muted data-management-help">Laad de campagnes van een Google Ads-account, selecteer de campagnes voor hetzelfde project en koppel ze samen aan de projectpagina. In Campagneperformance zie je hun gewogen gemiddelde CTR en totale spend; bij hover staan de cijfers per campagne.</p>
     <div className="data-management-assignment-controls"><label>Klantnummer<input value={customerId} onChange={(event) => setCustomerId(event.target.value)} placeholder="123-456-7890" /></label>
       <button type="button" disabled={pending || !customerId.trim()} onClick={load}>{pending ? "Laden…" : "Campagnes laden"}</button></div>
-    {campaigns.length ? <form className="data-management-assignment" onSubmit={save}><div className="data-management-assignment-controls">
-      <label>Campagne<select value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>{campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name} · {campaign.status}</option>)}</select></label>
-      <label>Projectpagina<select value={pageKey} onChange={(event) => setPageKey(event.target.value)}><option value="">Kies een projectpagina</option>{options.map((page) => <option key={`${page.siteId}:${page.path}`} value={`${page.siteId}:${normalizeProjectPath(page.path)}`}>{page.siteName} · {page.title} · {page.path}</option>)}</select></label>
-      <button type="submit" disabled={!canSave || pending || !campaignId || !pageKey}>Koppelen</button>
+    {campaigns.length ? <form className="project-group-form" onSubmit={save}>
+      <fieldset disabled={!canSave || pending}><legend>Campagnes voor één project kiezen</legend><div className="project-group-candidates">{campaigns.map((campaign) => {
+        const linked = matches.find((match) => match.accountId === accountId && match.campaignId === campaign.id);
+        const linkedPage = linked && options.find((page) => page.siteId === linked.siteId && normalizeProjectPath(page.path) === normalizeProjectPath(linked.sourcePaths[0]));
+        return <label className="project-group-candidate" key={campaign.id}>
+          <input type="checkbox" checked={selectedCampaignIds.includes(campaign.id)} onChange={() => setSelectedCampaignIds((current) => current.includes(campaign.id) ? current.filter((id) => id !== campaign.id) : [...current, campaign.id])} />
+          <span><strong>{campaign.name}</strong><small>ID {campaign.id} · {campaign.status}{linked ? ` · Gekoppeld aan ${linkedPage?.title ?? linked.sourcePaths[0]}` : ""}</small></span>
+        </label>;
+      })}</div></fieldset>
+      <div className="data-management-assignment-controls google-campaign-link-controls">
+        <label>Projectpagina<select value={pageKey} onChange={(event) => setPageKey(event.target.value)}><option value="">Kies een projectpagina</option>{options.map((page) => <option key={`${page.siteId}:${page.path}`} value={`${page.siteId}:${normalizeProjectPath(page.path)}`}>{page.siteName} · {page.title} · {page.path}</option>)}</select></label>
+        <button type="submit" disabled={!canSave || pending || selectedCampaignIds.length === 0 || !pageKey}>{pending ? "Samenvoegen…" : selectedCampaignIds.length === 1 ? "Campagne koppelen" : `${selectedCampaignIds.length} campagnes samenvoegen`}</button>
     </div></form> : null}
     {notice ? <p className="data-management-success" role="status">{notice}</p> : null}{error ? <p className="data-management-error" role="alert">{error}</p> : null}
-    {matches.length ? <div className="project-group-list">{matches.map((match) => <article key={`${match.accountId}:${match.campaignId}`}><div><strong>Campagne {match.campaignId}</strong><span className="cell-muted">Account {match.accountId} · {match.sourcePaths.join(" · ")}</span></div><button type="button" disabled={pending} onClick={() => remove(match)}>Verwijderen</button></article>)}</div> : null}
+    {groupedMatches.length ? <div className="project-group-list">{groupedMatches.map(([key, group]) => {
+      const page = options.find((item) => item.siteId === group[0].siteId && normalizeProjectPath(item.path) === normalizeProjectPath(group[0].sourcePaths[0]));
+      return <article key={key}><div><strong>{page?.title ?? group[0].sourcePaths[0]} · {group.length} Google-campagne{group.length === 1 ? "" : "s"}</strong>
+        {group.map((match) => <span className="cell-muted google-campaign-match" key={`${match.accountId}:${match.campaignId}`}><span>{campaigns.find((campaign) => accountId === match.accountId && campaign.id === match.campaignId)?.name ?? `Campagne ${match.campaignId}`} · account {match.accountId}</span><button type="button" disabled={pending} onClick={() => remove(match)}>Verwijderen</button></span>)}
+      </div></article>;
+    })}</div> : null}
   </section>;
 }
 

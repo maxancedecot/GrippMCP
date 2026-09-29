@@ -7,8 +7,10 @@ const id = z.string().trim().min(1);
 const customerIdSchema = id.transform((value) => value.replace(/-/g, "")).pipe(id.regex(/^\d+$/));
 const campaignSchema = z.object({ campaign: z.object({ id: id.regex(/^\d+$/), name: id, status: id.optional() }) });
 export type GoogleCampaignOption = { id: string; name: string; status: string };
+type MatchStore = { read<T>(key: string): Promise<T | null>; write(key: string, value: unknown): Promise<void> };
+type ProjectPages = { cvrPageCandidates: { siteId: string; path: string }[]; cvrLinks: { siteId: string; sourcePath: string }[] };
 
-export async function listGoogleCampaigns(customerIdInput: string, options: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch } = {}) {
+export async function listGoogleCampaigns(customerIdInput: string, options: { env?: Partial<NodeJS.ProcessEnv>; fetchImpl?: typeof fetch } = {}) {
   const customerId = customerIdSchema.parse(customerIdInput);
   const env = options.env ?? process.env;
   if (!env.GOOGLE_ADS_CLIENT_ID || !env.GOOGLE_ADS_CLIENT_SECRET || !env.GOOGLE_ADS_REFRESH_TOKEN) throw new Error("Google Ads is not configured");
@@ -40,19 +42,33 @@ export async function readGoogleCampaignMatches() {
 }
 
 export async function saveGoogleCampaignMatch(input: unknown) {
-  if (getJsonCacheMode() === "memory") throw new Error("Persistent storage is required");
   const match = z.object({ channel: z.literal("google"), siteId: id, accountId: customerIdSchema,
     campaignId: id.regex(/^\d+$/), sourcePaths: z.array(id).length(1) }).parse(input);
-  const dashboard = await getSiteAnalyticsDashboardData({ days: 90 });
-  const path = normalizeProjectPath(match.sourcePaths[0]);
-  const known = dashboard.cvrPageCandidates.some((page) => page.siteId === match.siteId && normalizeProjectPath(page.path) === path)
-    || dashboard.cvrLinks.some((link) => link.siteId === match.siteId && normalizeProjectPath(link.sourcePath) === path);
+  return (await saveGoogleCampaignMatches({ siteId: match.siteId, accountId: match.accountId,
+    campaignIds: [match.campaignId], sourcePath: match.sourcePaths[0] }))[0];
+}
+
+export async function saveGoogleCampaignMatches(input: unknown, options: { store?: MatchStore; pages?: ProjectPages } = {}) {
+  if (!options.store && getJsonCacheMode() === "memory") throw new Error("Persistent storage is required");
+  const selection = z.object({ siteId: id, accountId: customerIdSchema,
+    campaignIds: z.array(id.regex(/^\d+$/)).min(1).max(100).transform((ids) => [...new Set(ids)]),
+    sourcePath: id }).strict().parse(input);
+  const dashboard = options.pages ?? await getSiteAnalyticsDashboardData({ days: 90 });
+  const path = normalizeProjectPath(selection.sourcePath);
+  const known = dashboard.cvrPageCandidates.some((page) => page.siteId === selection.siteId && normalizeProjectPath(page.path) === path)
+    || dashboard.cvrLinks.some((link) => link.siteId === selection.siteId && normalizeProjectPath(link.sourcePath) === path);
   if (!known) throw new Error("Unknown project page");
-  const current = parseCampaignProjectMatches(await readJsonCache(CAMPAIGN_PROJECT_MATCHES_KEY));
-  const next = current.filter((item) => !(item.channel === "google" && item.accountId === match.accountId && item.campaignId === match.campaignId));
-  next.push({ ...match, sourcePaths: [path] });
-  await writeJsonCache(CAMPAIGN_PROJECT_MATCHES_KEY, next);
-  return parseCampaignProjectMatches(next).find((item) => item.channel === "google" && item.accountId === match.accountId && item.campaignId === match.campaignId)!;
+  const store = options.store ?? { read: readJsonCache, write: writeJsonCache };
+  const current = parseCampaignProjectMatches(await store.read(CAMPAIGN_PROJECT_MATCHES_KEY));
+  const selectedIds = new Set(selection.campaignIds);
+  const next = current.filter((item) => !(item.channel === "google" && item.accountId === selection.accountId && selectedIds.has(item.campaignId)));
+  const matches: CampaignProjectMatch[] = selection.campaignIds.map((campaignId) => ({
+    channel: "google", siteId: selection.siteId, accountId: selection.accountId, campaignId, sourcePaths: [path]
+  }));
+  next.push(...matches);
+  parseCampaignProjectMatches(next);
+  await store.write(CAMPAIGN_PROJECT_MATCHES_KEY, next);
+  return matches;
 }
 
 export async function deleteGoogleCampaignMatch(accountIdInput: string, campaignId: string) {
