@@ -36,3 +36,11 @@ test("account manager filtering selects every page section from the same project
   assert.deepEqual(filterCampaignProjectsByManager(projects, assignments, "unassigned").projects.map((item) => item.key), ["two:/c"]);
   assert.equal(filterCampaignProjectsByManager(projects, assignments, "unknown").selectedManager, "");
 });
+
+test("CRM conversion rates count new leads once and exclude projects without conversion measurements", () => {
+  const crm = { ...project("one:/a", "one", "/a", 100, 5, 2), leadSource: "crm" as const, appointmentSource: "crm" as const, cvr: 5 };
+  const unavailable = { ...project("one:/b", "one", "/b", 50, 1, 1), leads: null, appointments: null, cvr: null };
+  const unmeasured = { ...crm, key: "two:/c", visitors: null, leads: 10, cvr: null };
+  const summary = summarizeFilteredCampaignProjects([crm, unavailable, unmeasured]);
+  assert.deepEqual([summary.visitors, summary.leads, summary.appointments, summary.conversionRate, summary.measuredProjects], [100, 15, 4, 5, 1]);
+});

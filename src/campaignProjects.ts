@@ -78,8 +78,10 @@ export type CampaignProjectRow = {
   visitors: number | null;
   leads: number | null;
   appointments: number | null;
-  leadSource: "website" | null;
+  leadSource: "website" | "crm" | null;
   appointmentSource: "website" | "crm" | null;
+  crmState?: CampaignSource<unknown>["state"];
+  crmMessage?: string;
   cvr: number | null;
   hasConversionMapping: boolean;
   facebookState: CampaignSource<unknown>["state"];
@@ -89,7 +91,14 @@ export type CampaignProjectRow = {
 };
 export type UnmatchedProjectCampaign = { channel: "facebook" | "google"; siteId: string; siteName: string; accountId?: string; campaignId: string; campaignName: string };
 
-export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, sites: CampaignPerformanceRow[], ghlAppointments = new Map<string, number>()) {
+export type ProjectCrmConversions = {
+  counts: Map<string, { leads: number | null; appointments: number | null }>;
+  errors: Set<string>;
+  configuredSites: Set<string>;
+  unmatchedSites: Set<string>;
+};
+
+export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, sites: CampaignPerformanceRow[], crm?: ProjectCrmConversions, requireCrm = false) {
   const projects = new Map<string, CampaignProjectRow>();
   const unmatchedCampaigns: UnmatchedProjectCampaign[] = [];
   const conversions = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
@@ -136,6 +145,9 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     };
     for (const group of dashboard.projectPageGroups?.filter((group) => group.siteId === site.siteId) ?? []) ensureProject(group.sourcePath);
     for (const project of conversions.filter((row) => row.siteId === site.siteId && !isExcludedAnalyticsLink(row.sourcePath))) ensureProject(project.sourcePath, project.sourceTitle);
+    for (const key of crm?.counts.keys() ?? []) {
+      if (key.startsWith(`${site.siteId}:`)) ensureProject(key.slice(site.siteId.length + 1));
+    }
     // Keep saved matches for stopped campaigns so their period spend and current
     // status remain visible. CTR follows the selected reporting period.
     for (const account of (site.facebookAccounts ?? [site])) {
@@ -179,12 +191,22 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     }
   }
   for (const project of projects.values()) {
-    const appointments = ghlAppointments.get(project.key);
-    if (appointments === undefined) continue;
-    project.appointments = appointments;
-    project.appointmentSource = "crm";
-    project.cvr = project.visitors === null ? null : project.visitors > 0 ? ((project.leads ?? 0) + appointments) / project.visitors * 100 : 0;
-    project.hasConversionMapping = true;
+    const counts = crm?.errors.has(project.siteId) ? undefined : crm?.counts.get(project.key);
+    if (!counts && !requireCrm && !crm?.configuredSites.has(project.siteId)) continue;
+    project.leads = counts?.leads ?? null;
+    project.appointments = counts?.appointments ?? null;
+    project.leadSource = counts ? "crm" : null;
+    project.appointmentSource = counts ? "crm" : null;
+    project.crmState = !crm?.configuredSites.has(project.siteId) ? "not_configured"
+      : counts && counts.leads !== null && counts.appointments !== null ? "connected" : "unavailable";
+    project.crmMessage = project.crmState === "connected" ? ""
+      : project.crmState === "not_configured" ? "CRM niet gekoppeld"
+      : crm?.errors.has(project.siteId) ? "CRM niet beschikbaar"
+      : counts ? "CRM-conversiemeting onvolledig" : "CRM-pipeline nog aan dit project te koppelen";
+    // New opportunities already include leads that booked an appointment.
+    project.cvr = project.visitors === null || project.leads === null ? null
+      : project.visitors > 0 ? project.leads / project.visitors * 100 : 0;
+    project.hasConversionMapping = !!counts && project.leads !== null;
   }
   return {
     projects: [...projects.values()].sort((a, b) => a.siteName.localeCompare(b.siteName) || a.title.localeCompare(b.title)),

@@ -13,16 +13,17 @@ const pipelineResponse = z.object({
     id: z.string().min(1),
     name: z.string().default(""),
     stages: z.array(z.object({ id: z.string().min(1), name: z.string().default("") })).default([])
-  })).default([])
+  }))
 });
 const opportunityResponse = z.object({
   opportunities: z.array(z.object({
     id: z.string().min(1),
     pipelineId: z.string().optional(),
     pipelineStageId: z.string().optional(),
+    createdAt: z.union([z.string(), z.number()]).optional(),
     lastStageChangeAt: z.union([z.string(), z.number()]).optional()
-  })).default([]),
-  meta: z.object({ nextPage: z.number().nullable().optional() }).passthrough().optional()
+  })),
+  meta: z.object({ nextPage: z.number().int().positive().nullable().optional() }).passthrough().optional()
 });
 
 export type GhlReadCall = (input: {
@@ -38,6 +39,7 @@ export type GhlAppointmentConfig = {
   pipelineIds?: string[];
 };
 export type GhlPipelineAppointmentCount = { pipelineId: string; pipelineName: string; count: number };
+export type GhlPipelineConversionCount = { pipelineId: string; pipelineName: string; leads: number | null; appointments: number | null };
 
 export function isAppointmentStage(name: string) {
   const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -51,38 +53,58 @@ export async function countGhlAppointments(config: GhlAppointmentConfig, period:
 }
 
 export async function ghlAppointmentsByPipeline(config: GhlAppointmentConfig, period: { start: string; end: string }, call?: GhlReadCall) {
+  return (await ghlConversionsByPipeline(config, period, call)).flatMap((pipeline) => pipeline.appointments === null ? [] : [{
+    pipelineId: pipeline.pipelineId, pipelineName: pipeline.pipelineName, count: pipeline.appointments
+  }]);
+}
+
+export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, period: { start: string; end: string }, call?: GhlReadCall) {
   const installId = config.installId ?? await installIdForLocation(config.locationId);
   const read: GhlReadCall = call ?? (async (input) => new GhlClient(input.installId).call({
     method: "GET", path: input.path, query: input.query, apiVersion: input.apiVersion, readOnly: true
   }));
-  const pipelines = pipelineResponse.parse(await read({
+  const available = pipelineResponse.parse(await read({
     installId, path: "/opportunities/pipelines", query: { locationId: config.locationId }, apiVersion: "v3"
-  })).pipelines.filter((pipeline) => !config.pipelineIds || config.pipelineIds.includes(pipeline.id));
-  const stages = new Map(pipelines.flatMap((pipeline) => pipeline.stages
-    .filter((stage) => isAppointmentStage(stage.name)).map((stage) => [stage.id, pipeline.id] as const)));
-  if (stages.size === 0) return [];
+  })).pipelines;
+  if (config.pipelineIds?.some((pipelineId) => !available.some((pipeline) => pipeline.id === pipelineId))) throw new Error("Unknown GoHighLevel pipeline");
+  const pipelines = available.filter((pipeline) => !config.pipelineIds || config.pipelineIds.includes(pipeline.id));
 
-  const counts: GhlPipelineAppointmentCount[] = [];
-  for (const pipeline of pipelines.filter((item) => item.stages.some((stage) => stages.has(stage.id)))) {
-    const appointments = new Set<string>();
-    for (let page = 1; page <= 100; page++) {
+  const counts: GhlPipelineConversionCount[] = [];
+  for (const pipeline of pipelines) {
+    const stages = new Set(pipeline.stages.filter((stage) => isAppointmentStage(stage.name)).map((stage) => stage.id));
+    const leads = new Set<string>(), appointments = new Set<string>();
+    let completeLeads = true, completeAppointments = stages.size > 0, page = 1;
+    for (let request = 0; request < 100; request++) {
       const result = opportunityResponse.parse(await read({
         installId, path: "/opportunities/search",
         query: { locationId: config.locationId, pipelineId: pipeline.id, status: "all", limit: 100, page }, apiVersion: "v3"
       }));
       for (const opportunity of result.opportunities) {
-        if (!opportunity.pipelineStageId || !stages.has(opportunity.pipelineStageId)) continue;
-        const changedAt = typeof opportunity.lastStageChangeAt === "number"
-          ? opportunity.lastStageChangeAt : Date.parse(opportunity.lastStageChangeAt ?? "");
-        const date = Number.isFinite(changedAt) ? brusselsDateKey(changedAt) : "";
-        if (date >= period.start && date <= period.end) appointments.add(opportunity.id);
+        if (opportunity.pipelineId && opportunity.pipelineId !== pipeline.id) throw new Error("Unexpected GoHighLevel pipeline");
+        const created = dateKey(opportunity.createdAt);
+        if (!created) completeLeads = false;
+        else if (created >= period.start && created <= period.end) leads.add(opportunity.id);
+        if (!opportunity.pipelineStageId) { completeAppointments = false; continue; }
+        if (!stages.has(opportunity.pipelineStageId)) continue;
+        const changed = dateKey(opportunity.lastStageChangeAt);
+        if (!changed) completeAppointments = false;
+        else if (changed >= period.start && changed <= period.end) appointments.add(opportunity.id);
       }
-      if (result.opportunities.length < 100 || result.meta?.nextPage == null) break;
-      if (page === 100) throw new Error("GoHighLevel opportunity pagination limit reached");
+      const nextPage = result.meta?.nextPage;
+      if (nextPage === null || (nextPage === undefined && result.opportunities.length < 100)) break;
+      if (request === 99) throw new Error("GoHighLevel opportunity pagination limit reached");
+      if (nextPage !== undefined && nextPage !== null && nextPage <= page) throw new Error("Invalid GoHighLevel opportunity pagination");
+      page = nextPage ?? page + 1;
     }
-    counts.push({ pipelineId: pipeline.id, pipelineName: pipeline.name, count: appointments.size });
+    counts.push({ pipelineId: pipeline.id, pipelineName: pipeline.name,
+      leads: completeLeads ? leads.size : null, appointments: completeAppointments ? appointments.size : null });
   }
   return counts;
+}
+
+function dateKey(value: string | number | undefined) {
+  const timestamp = typeof value === "number" ? value : Date.parse(value ?? "");
+  return Number.isFinite(timestamp) && Number.isFinite(new Date(timestamp).getTime()) ? brusselsDateKey(timestamp) : "";
 }
 
 function brusselsDateKey(timestamp: number) {

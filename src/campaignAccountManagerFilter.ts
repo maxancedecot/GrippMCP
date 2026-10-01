@@ -31,12 +31,13 @@ export function filterCampaignProjectsByManager(
 }
 
 export function summarizeFilteredCampaignProjects(projects: CampaignProjectRow[]) {
-  const measured = projects.filter((project) => project.visitors !== null);
+  const measured = projects.filter((project) => project.visitors !== null && project.cvr !== null);
   const visitors = measured.reduce((sum, project) => sum + (project.visitors ?? 0), 0);
   const leads = projects.filter((project) => project.leads !== null).reduce((sum, project) => sum + (project.leads ?? 0), 0);
   const appointments = projects.filter((project) => project.appointments !== null)
     .reduce((sum, project) => sum + (project.appointments ?? 0), 0);
-  const conversions = projects.reduce((sum, project) => sum + (project.leads ?? 0) + (project.appointments ?? 0), 0);
+  const conversions = measured.reduce((sum, project) => sum + (project.leads ?? 0)
+    + (project.leadSource === "crm" ? 0 : project.appointments ?? 0), 0);
   return {
     visitors,
     leads,

@@ -373,7 +373,7 @@ test("unavailable campaign status blocks link CTR instead of including unrelated
   assert.doesNotMatch(JSON.stringify(result), /private-provider-error/);
 });
 
-test("ad provider failures do not block brochure conversions and CRM failures stay visible", async () => {
+test("CRM failures clear project conversions instead of substituting website counts", async () => {
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 4), conversionLink("site-a", "/bedankt-afspraak", 2)];
   const result = await getCampaignPerformance(data, {
@@ -384,13 +384,15 @@ test("ad provider failures do not block brochure conversions and CRM failures st
     }
   });
   assert.equal(result.rows[0].google.state, "unavailable");
-  assert.equal(result.rows[0].leads.data?.count, 4);
+  assert.equal(result.rows[0].leads.state, "unavailable");
+  assert.equal(result.rows[0].leads.data, null);
   assert.equal(result.rows[0].appointments.state, "unavailable");
   assert.equal(result.rows[0].appointments.data, null);
+  assert.deepEqual(result.projects.map((project) => [project.leads, project.appointments, project.cvr, project.crmState]), [[null, null, null, "unavailable"]]);
   assert.doesNotMatch(JSON.stringify(result), /secret-token|legacy-location/);
 });
 
-test("configured GoHighLevel pipelines replace link-based appointment totals", async () => {
+test("configured GoHighLevel pipelines replace both website conversion counts", async () => {
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 4), conversionLink("site-a", "/bedankt-afspraak", 99)];
   const result = await getCampaignPerformance(data, {
@@ -399,17 +401,77 @@ test("configured GoHighLevel pipelines replace link-based appointment totals", a
     ghlCall: async ({ path }) => path.endsWith("/pipelines")
       ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "appointment", name: "Appointment booked" }] }] }
       : { opportunities: [
-        { id: "a", pipelineId: "project", pipelineStageId: "appointment", lastStageChangeAt: "2026-09-10T10:00:00Z" },
-        { id: "b", pipelineId: "project", pipelineStageId: "appointment", lastStageChangeAt: "2026-08-10T10:00:00Z" }
+        { id: "a", pipelineId: "project", pipelineStageId: "appointment", createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" },
+        { id: "b", pipelineId: "project", pipelineStageId: "appointment", createdAt: "2026-08-08T10:00:00Z", lastStageChangeAt: "2026-08-10T10:00:00Z" }
       ], meta: {} }
   });
-  assert.equal(result.rows[0].leads.data?.count, 4);
+  assert.equal(result.rows[0].leads.data?.count, 1);
   assert.equal(result.rows[0].appointments.data?.count, 1);
   assert.equal(result.rows[0].appointments.data?.siteId, "site-a");
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.appointments, 1);
-  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.leadSource, "website");
+  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.leadSource, "crm");
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.appointmentSource, "crm");
-  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 10);
+  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 2);
+});
+
+test("the CRM project table has no website fallback when a CRM mapping is absent", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 40), conversionLink("site-a", "/bedankt-afspraak", 20)];
+  const result = await getCampaignPerformance(data, { env: environment([]), requireCrmConversions: true });
+  const project = result.projects[0];
+  assert.deepEqual([project.leads, project.appointments, project.cvr, project.crmState], [null, null, null, "not_configured"]);
+  assert.equal(project.crmMessage, "CRM niet gekoppeld");
+  assert.equal(result.rows[0].leads.state, "not_configured");
+  assert.equal(result.rows[0].appointments.state, "not_configured");
+});
+
+test("CRM pipelines match managed landing pages without a thank-you mapping and aggregate per project", async () => {
+  const data = dashboard();
+  data.cvrPageCandidates = [{ siteId: "site-a", siteName: "site-a", path: "/project/alpha", title: "Residentie Alpha", uniqueVisitors: 50, pageViews: 60 }];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineProjects: [{ pipelineId: "search", sourcePath: "/project/alpha/" }] } }]),
+    requireCrmConversions: true,
+    ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
+      ? { pipelines: [
+        { id: "social", name: "Pipeline Alpha", stages: [{ id: "social-meeting", name: "Afspraak ingepland" }] },
+        { id: "search", name: "Search", stages: [{ id: "search-meeting", name: "Afspraak ingepland" }] }
+      ] }
+      : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: `${query?.pipelineId}-meeting`,
+        createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
+  });
+  assert.equal(result.projects.length, 1);
+  assert.deepEqual([result.projects[0].sourcePath, result.projects[0].leads, result.projects[0].appointments, result.projects[0].cvr, result.projects[0].crmState],
+    ["/project/alpha", 2, 2, 4, "connected"]);
+  assert.equal(result.rows[0].leads.data?.count, 2);
+});
+
+test("CRM mappings normalize grouped language pages to their primary project", async () => {
+  const data = dashboard();
+  data.projectPageGroups = [{ groupId: "group", siteId: "site-a", title: "Alpha", sourcePath: "/home", sourcePaths: ["/home", "/home-fr"],
+    managed: true, visitors: 20, pageViews: 30, leads: 15, appointments: 10 }];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineProjects: [{ pipelineId: "alpha", sourcePath: "/home-fr/" }] } }]),
+    requireCrmConversions: true,
+    ghlCall: async ({ path }) => path.endsWith("/pipelines")
+      ? { pipelines: [{ id: "alpha", name: "Unrelated name", stages: [{ id: "meeting", name: "Afspraak" }] }] }
+      : { opportunities: [], meta: { nextPage: null } }
+  });
+  assert.equal(result.projects.length, 1);
+  assert.deepEqual([result.projects[0].sourcePath, result.projects[0].leads, result.projects[0].appointments, result.projects[0].crmState], ["/home", 0, 0, "connected"]);
+});
+
+test("unmatched CRM pipelines leave project conversions unavailable and explain the missing link", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 40)];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install" } }]), requireCrmConversions: true,
+    ghlCall: async ({ path }) => path.endsWith("/pipelines")
+      ? { pipelines: [{ id: "unmatched", name: "Other", stages: [{ id: "meeting", name: "Afspraak" }] }] }
+      : { opportunities: [] }
+  });
+  assert.deepEqual([result.projects[0].leads, result.projects[0].appointments, result.projects[0].crmState], [null, null, "unavailable"]);
+  assert.equal(result.projects[0].crmMessage, "CRM-pipeline nog aan dit project te koppelen");
+  assert.equal(result.rows[0].leads.state, "unavailable");
 });
 
 test("campaign conversions match Brochure and Afspraak across projects and sites without CRM", async () => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { countGhlAppointments, isAppointmentStage, type GhlReadCall } from "../src/ghl/appointmentConversions.js";
+import { countGhlAppointments, ghlConversionsByPipeline, isAppointmentStage, type GhlReadCall } from "../src/ghl/appointmentConversions.js";
 
 test("appointment stages recognize Dutch and English labels but exclude cancelled stages", () => {
   for (const name of ["Afspraak ingepland", "Appointment booked", "Consultation", "Bezichtiging", "Demo scheduled", "Intakegesprek"]) {
@@ -9,6 +9,44 @@ test("appointment stages recognize Dutch and English labels but exclude cancelle
   for (const name of ["Nieuwe lead", "Appointment cancelled", "Afspraak geannuleerd", "No-show meeting"]) {
     assert.equal(isAppointmentStage(name), false, name);
   }
+});
+
+test("CRM leads use creation date while appointments use stage date, deduplicating across pages", async () => {
+  const pages: number[] = [];
+  const lead = { id: "lead", pipelineId: "project", pipelineStageId: "new", createdAt: "2026-09-07T22:30:00Z" };
+  const call: GhlReadCall = async ({ path, query, apiVersion }) => {
+    assert.equal(apiVersion, "v3");
+    if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [
+      { id: "new", name: "New lead" }, { id: "meeting", name: "Appointment booked" }, { id: "cancelled", name: "Afspraak geannuleerd" }
+    ] }] };
+    assert.equal(query?.locationId, "location");
+    assert.equal(query?.pipelineId, "project");
+    assert.equal(query?.status, "all");
+    pages.push(Number(query?.page));
+    return query?.page === 1 ? { opportunities: [lead], meta: { nextPage: 2 } } : { opportunities: [
+      lead,
+      { id: "old-lead-new-meeting", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-08-01T10:00:00Z", lastStageChangeAt: "2026-09-14T21:59:59Z" },
+      { id: "new-lead-old-meeting", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-07T21:59:59Z" },
+      { id: "cancelled", pipelineId: "project", pipelineStageId: "cancelled", createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-08T10:00:00Z" },
+      { id: "future", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-09-14T22:00:00Z", lastStageChangeAt: "2026-09-14T22:00:00Z" }
+    ], meta: { nextPage: null } };
+  };
+  const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" }, { start: "2026-09-08", end: "2026-09-14" }, call);
+  assert.deepEqual(result, [{ pipelineId: "project", pipelineName: "Project", leads: 3, appointments: 1 }]);
+  assert.deepEqual(pages, [1, 2]);
+});
+
+test("CRM counts preserve zero but never fabricate counts from malformed responses or missing dates", async () => {
+  const config = { locationId: "location", installId: "install" }, period = { start: "2026-09-08", end: "2026-09-14" };
+  const pipeline = { pipelines: [{ id: "project", name: "Project", stages: [{ id: "meeting", name: "Appointment booked" }] }] };
+  const read = (opportunities: unknown): GhlReadCall => async ({ path }) => path.endsWith("/pipelines") ? pipeline : opportunities;
+  assert.deepEqual(await ghlConversionsByPipeline(config, period, read({ opportunities: [] })), [{ pipelineId: "project", pipelineName: "Project", leads: 0, appointments: 0 }]);
+  assert.deepEqual(await ghlConversionsByPipeline(config, period, read({ opportunities: [{ id: "one", pipelineStageId: "meeting" }] })),
+    [{ pipelineId: "project", pipelineName: "Project", leads: null, appointments: null }]);
+  await assert.rejects(ghlConversionsByPipeline(config, period, read({ error: "unauthorized" })));
+  await assert.rejects(ghlConversionsByPipeline({ ...config, pipelineIds: ["missing"] }, period, read({ opportunities: [] })));
+  await assert.rejects(ghlConversionsByPipeline(config, period, read({ opportunities: [{ id: "one", pipelineId: "other", pipelineStageId: "meeting" }] })));
+  await assert.rejects(ghlConversionsByPipeline(config, period, read({ opportunities: [], meta: { nextPage: 1 } })));
 });
 
 test("GoHighLevel appointments count unique opportunities entering matching stages in the selected Brussels period", async () => {

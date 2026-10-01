@@ -4,8 +4,10 @@ import { discoverMetaAccounts, type MetaAccountSync } from "./metaAccountDiscove
 import type { SiteAnalyticsDashboardData } from "./siteAnalytics.js";
 import { cvrOverviewRowsFromLinks } from "./siteAnalyticsConversions.js";
 import { readJsonCache, writeJsonCache } from "./jsonCache.js";
-import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, campaignProjectOverview, normalizeProjectPath, parseCampaignProjectMatches, type CampaignProjectMatch } from "./campaignProjects.js";
-import { ghlAppointmentsByPipeline, type GhlReadCall } from "./ghl/appointmentConversions.js";
+import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, campaignProjectOverview, normalizeProjectPath, parseCampaignProjectMatches, type CampaignProjectMatch, type ProjectCrmConversions } from "./campaignProjects.js";
+import { ghlConversionsByPipeline, type GhlReadCall } from "./ghl/appointmentConversions.js";
+import { projectPagesFromDashboard } from "./projectPageManagement.js";
+import { projectPageGroup } from "./projectPageGroups.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -53,12 +55,15 @@ export type CampaignPerformanceRow = {
 const id = z.string().trim().min(1);
 const numericId = id.regex(/^\d+$/);
 const googleId = id.transform((value) => value.replace(/-/g, "")).pipe(numericId);
+const localProjectPath = id.refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"), "Use a local project path");
 const mappingSchema = z.object({
   siteId: id,
   google: z.object({ customerId: googleId, loginCustomerId: googleId.optional(), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
   facebook: z.object({ adAccountId: id.transform((value) => value.replace(/^act_/, "")).pipe(numericId), campaignIds: z.array(numericId).min(1).optional() }).strict().optional(),
   ghl: z.object({ locationId: id, installId: id.optional(), pipelineIds: z.array(id).min(1).optional(),
-    pipelineProjects: z.array(z.object({ pipelineId: id, sourcePath: id })).optional(), calendarIds: z.array(id).min(1).optional() }).strict().optional()
+    pipelineProjects: z.array(z.object({ pipelineId: id, sourcePath: localProjectPath }))
+      .refine((projects) => new Set(projects.map((project) => project.pipelineId)).size === projects.length, "A pipeline can only map to one project").optional(),
+    calendarIds: z.array(id).min(1).optional() }).strict().optional()
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
 type FacebookAccountScope = NonNullable<CampaignSiteMapping["facebook"]> & { requiredCampaignIds?: string[] };
@@ -75,6 +80,7 @@ type Options = {
   forceMetaSync?: boolean;
   discoverySites?: { id: string; name: string; url: string }[];
   ghlCall?: GhlReadCall;
+  requireCrmConversions?: boolean;
 };
 
 const numeric = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/)]).transform(Number).pipe(z.number().finite().nonnegative());
@@ -159,7 +165,8 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     return token.access_token;
   })();
   const conversionRows = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
-  const ghlProjects = await getGhlProjectAppointments(dashboard, { env, ghlCall: options.ghlCall, mappings });
+  const ghlProjects = await getGhlProjectConversions(dashboard, { env, ghlCall: options.ghlCall, mappings,
+    savedPages: projectMatches.flatMap((match) => match.sourcePaths.map((path) => ({ siteId: match.siteId, path }))) });
   const rows: CampaignPerformanceRow[] = [];
   const linkCtrRequests = new Map<string, Promise<CampaignSource<LinkCtrPerformance>>>();
   const destinationRequests = new Map<string, Promise<CampaignSource<CampaignDestinations>>>();
@@ -177,10 +184,9 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       }
       const googleMatches = projectMatches.filter((match) => match.channel === "google" && match.siteId === site.id && match.accountId === mapping?.google?.customerId);
       const googleRequest = loadGoogle(mapping?.google);
-      const [google, facebookAccounts, appointments] = await Promise.all([
+      const [google, facebookAccounts] = await Promise.all([
         googleRequest,
-        Promise.all((scopes.size ? [...scopes.values()] : [undefined]).map((scope) => facebookForSite(site, scope))),
-        loadGhlAppointments(site.id, mapping?.ghl, ghlProjects)
+        Promise.all((scopes.size ? [...scopes.values()] : [undefined]).map((scope) => facebookForSite(site, scope)))
       ]);
       const siteProjects = conversionRows.filter((project) => project.siteId === site.id);
       const googleExplicitPages = googleMatches.filter((match) => google.data?.campaigns.some((campaign) => campaign.id === match.campaignId))
@@ -196,7 +202,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       } : googleDestinations;
       return {
         siteId: site.id, name: site.name, url: site.url, google, googleCampaignPages, ...facebookAccounts[0], facebookAccounts,
-        leads: websiteConversions(site.id, "brochure"), appointments,
+        leads: loadGhlConversions(site.id, "leads"), appointments: loadGhlConversions(site.id, "appointments"),
         websiteCvr: site.cvrLinkCount > 0 && site.cvrSourceVisitors > 0 ? site.conversionRatePercent : null,
         websiteVisitors: site.cvrSourceVisitors, websiteConversions: site.cvrConversionVisitors
       };
@@ -211,7 +217,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     account.siteNames = [...new Set([...account.siteNames, ...configuredSites.map((site) => site.name)])];
   }
   return {
-    rows, facebookLinkCtr, metaSync: discovery.sync, ...campaignProjectOverview(dashboard, rows, ghlProjects.counts),
+    rows, facebookLinkCtr, metaSync: discovery.sync, ...campaignProjectOverview(dashboard, rows, ghlProjects, options.requireCrmConversions),
     message: dashboard.source.mode === "demo"
       ? "Verbind eerst een website via de trackingcode of WordPress-plugin en koppel daarna de advertentieaccounts."
       : projectMessage
@@ -527,11 +533,17 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     };
   }
 
-  async function loadGhlAppointments(siteId: string, config: CampaignSiteMapping["ghl"], result: GhlProjectAppointments): Promise<CampaignSource<WebsiteConversionPerformance>> {
-    if (!config) return websiteConversions(siteId, "appointment");
-    if (result.errors.has(siteId)) return { state: "unavailable", data: null, message: "Afspraken konden niet uit GoHighLevel worden geladen." };
-    return { state: "connected", message: "", data: { siteId,
-      count: [...result.counts].filter(([key]) => key.startsWith(`${siteId}:`)).reduce((sum, [, count]) => sum + count, 0) } };
+  function loadGhlConversions(siteId: string, metric: "leads" | "appointments"): CampaignSource<WebsiteConversionPerformance> {
+    if (!ghlProjects.configuredSites.has(siteId)) return options.requireCrmConversions
+      ? missing("Koppel een GoHighLevel-projectpipeline om CRM-leads en afspraken te tonen.")
+      : websiteConversions(siteId, metric === "leads" ? "brochure" : "appointment");
+    const values = [...ghlProjects.counts].filter(([key]) => key.startsWith(`${siteId}:`)).map(([, counts]) => counts[metric]);
+    if (ghlProjects.errors.has(siteId) || ghlProjects.unmatchedSites.has(siteId) || values.length === 0 || values.some((value) => value === null)) {
+      return { state: "unavailable", data: null, message: ghlProjects.errors.has(siteId)
+        ? "CRM-leads en afspraken konden niet uit GoHighLevel worden geladen."
+        : "Niet alle GoHighLevel-pipelines en conversiemetingen zijn aan een projectpagina gekoppeld." };
+    }
+    return { state: "connected", message: "", data: { siteId, count: values.reduce<number>((sum, count) => sum + count!, 0) } };
   }
 }
 
@@ -558,25 +570,43 @@ export type GhlProjectAppointments = { counts: Map<string, number>; errors: Set<
 export async function getGhlProjectAppointments(dashboard: SiteAnalyticsDashboardData, options: {
   env?: Env; ghlCall?: GhlReadCall; mappings?: CampaignSiteMapping[];
 } = {}): Promise<GhlProjectAppointments> {
+  const result = await getGhlProjectConversions(dashboard, options);
+  return { counts: new Map([...result.counts].flatMap(([key, value]) => value.appointments === null || result.errors.has(key.slice(0, key.indexOf(":"))) ? [] : [[key, value.appointments]])), errors: result.errors };
+}
+
+export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboardData, options: {
+  env?: Env; ghlCall?: GhlReadCall; mappings?: CampaignSiteMapping[]; savedPages?: { siteId: string; path: string }[];
+} = {}): Promise<ProjectCrmConversions> {
   const mappings = options.mappings ?? parseCampaignSiteMappings((options.env ?? process.env).CAMPAIGN_PERFORMANCE_SITES);
-  const projects = cvrOverviewRowsFromLinks(dashboard.cvrLinks, dashboard.projectPageGroups ?? []);
-  const counts = new Map<string, number>(), errors = new Set<string>();
+  const projects = projectPagesFromDashboard(dashboard, options.savedPages);
+  const counts: ProjectCrmConversions["counts"] = new Map(), errors = new Set<string>(), configuredSites = new Set<string>();
+  const unmatchedSites = new Set<string>();
   await Promise.all(dashboard.sites.map(async (site) => {
     const config = mappings.find((mapping) => mapping.siteId === site.id)?.ghl;
-    if (!config) return;
+    if (!config || dashboard.source.mode !== "live") return;
+    configuredSites.add(site.id);
     try {
-      const pipelines = await ghlAppointmentsByPipeline(config, dashboard.period, options.ghlCall);
+      const pipelines = await ghlConversionsByPipeline(config, dashboard.period, options.ghlCall);
       for (const pipeline of pipelines) {
         const explicit = config.pipelineProjects?.find((item) => item.pipelineId === pipeline.pipelineId)?.sourcePath;
         const pipelineKey = projectNameKey(pipeline.pipelineName);
+        const explicitPath = explicit ? dashboard.projectPageGroups?.find((group) => group.siteId === site.id && group.sourcePaths.includes(normalizeProjectPath(explicit)))?.sourcePath
+          ?? projectPageGroup(site.url, explicit)?.sourcePath ?? normalizeProjectPath(explicit) : undefined;
         const candidates = projects.filter((project) => project.siteId === site.id && (explicit
-          ? normalizeProjectPath(project.sourcePath) === normalizeProjectPath(explicit)
-          : pipelineKey.length > 0 && projectNameKey(project.sourceTitle) === pipelineKey));
-        if (candidates.length === 1) counts.set(`${site.id}:${normalizeProjectPath(candidates[0]!.sourcePath)}`, pipeline.count);
+          ? project.path === explicitPath
+          : pipelineKey.length > 0 && [project.title, new URL(project.url).searchParams.get("p_slug") ?? project.path.split("/").filter(Boolean).at(-1) ?? ""]
+            .some((name) => projectNameKey(name) === pipelineKey)));
+        if (candidates.length !== 1) { unmatchedSites.add(site.id); continue; }
+        const key = `${site.id}:${normalizeProjectPath(candidates[0]!.path)}`;
+        const current = counts.get(key);
+        counts.set(key, {
+          leads: pipeline.leads === null || current?.leads === null ? null : (current?.leads ?? 0) + pipeline.leads,
+          appointments: pipeline.appointments === null || current?.appointments === null ? null : (current?.appointments ?? 0) + pipeline.appointments
+        });
       }
     } catch { errors.add(site.id); }
   }));
-  return { counts, errors };
+  return { counts, errors, configuredSites, unmatchedSites };
 }
 
 function projectNameKey(value: string) {

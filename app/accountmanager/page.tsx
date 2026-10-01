@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Accountmanager dashboard",
-  description: "Accountmanager dashboard met Google Ads, Facebook Ads en websiteconversies."
+  description: "Accountmanager dashboard met Google Ads, Facebook Ads en CRM-leads en afspraken per project."
 };
 
 export default async function AccountManagerPage({ searchParams }: { searchParams?: Promise<DashboardSearchParams> }) {
@@ -34,8 +34,8 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const forceMetaSync = first(params.syncMeta) === "1";
   const projectGroupRevision = await getProjectPageGroupRevision();
   const snapshotKey = selection.custom
-    ? `accountmanager-dashboard:v2:custom:${selection.period.start}:${selection.period.end}:${projectGroupRevision}`
-    : `accountmanager-dashboard:v2:rolling:${days}:${projectGroupRevision}`;
+    ? `accountmanager-dashboard:v3:custom:${selection.period.start}:${selection.period.end}:${projectGroupRevision}`
+    : `accountmanager-dashboard:v3:rolling:${days}:${projectGroupRevision}`;
   const snapshot = await loadScheduledSnapshot({ key: snapshotKey, now, force: forceMetaSync, load: async () => {
     const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
     const performance = await loadCampaignPerformanceBaseData({ dashboard, discoverySites: dashboard.sites, forceMetaSync });

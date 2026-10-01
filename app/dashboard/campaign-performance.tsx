@@ -36,7 +36,7 @@ type CampaignPerformanceProps = {
 };
 
 export async function loadCampaignPerformanceBaseData({ dashboard, discoverySites, forceMetaSync }: Omit<CampaignPerformanceProps, "syncHref" | "selectedAccountManager">) {
-  const { rows, message, facebookLinkCtr, projects, unmatchedCampaigns, metaSync } = await getCampaignPerformance(dashboard, { discoverySites, forceMetaSync });
+  const { rows, message, facebookLinkCtr, projects, unmatchedCampaigns, metaSync } = await getCampaignPerformance(dashboard, { discoverySites, forceMetaSync, requireCrmConversions: true });
   const managers = await getProjectPageManagementData({ pages: projects.map((project) => ({ siteId: project.siteId, siteName: project.siteName, path: project.sourcePath, title: project.title, url: project.url })) });
   const accountManagers = Object.fromEntries(managers.pages.map((page) => [page.key, page]));
   return { rows, message: [message, managers.error, metaSync?.message].filter(Boolean).join(" "), facebookLinkCtr,
@@ -85,8 +85,10 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   const facebookComparison = campaignBenchmarkComparison(projectCtrValues(projects, "facebook"), CAMPAIGN_CTR_BENCHMARK_PERCENT);
   const websiteComparison = campaignBenchmarkComparison(projects.map((project) => project.cvr)
     .filter((value): value is number => value !== null), PROJECT_CVR_BENCHMARK_PERCENT);
-  const leadSummary = summarizeWebsiteConversions(rows.map((row) => row.leads));
-  const appointmentSummary = summarizeWebsiteConversions(rows.map((row) => row.appointments));
+  const leadSummary = { connected: projectSummary.leadProjects, total: projects.length,
+    count: projectSummary.leadProjects ? projectSummary.leads : null };
+  const appointmentSummary = { connected: projectSummary.appointmentProjects, total: projects.length,
+    count: projectSummary.appointmentProjects ? projectSummary.appointments : null };
   const issues = rows.flatMap((row) => {
     const basic = (["google", "leads", "appointments"] as const)
       .filter((key) => row[key].state !== "connected")
@@ -107,10 +109,10 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       <section className="campaign-channel-grid" aria-label="Advertentie- en website-KPI's">
         <ChannelPanel name="Google" sources={googleSources} comparison={googleComparison} />
         <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} comparison={facebookComparison} />
-        <ConversionPanel name="Brochure" summary={leadSummary} detail="Websitebezoekers van gekoppelde brochure-bedankpagina’s." />
+        <ConversionPanel name="Leads" summary={leadSummary} detail="Nieuwe opportunities in de gekoppelde GoHighLevel-projectpipelines binnen de gekozen periode." />
         <ConversionPanel name="Afspraken" summary={appointmentSummary}
-          detail="Uit afspraakachtige GoHighLevel-pipelinefasen; zonder CRM-koppeling uit de gekoppelde afspraak-bedankpagina’s." />
-        <WebsiteCvrPanel value={percentage(cvr)} detail="Conversieratio van gekoppelde projectpagina’s"
+          detail="Unieke opportunities in afspraakfasen van de gekoppelde GoHighLevel-projectpipelines, met een fasewijziging binnen de gekozen periode." />
+        <WebsiteCvrPanel value={percentage(cvr)} detail="CRM-leads gedeeld door websitebezoekers van de gekoppelde projectpagina’s"
           comparison={formatBelowAverage(websiteComparison, "project", "projecten", "CVR")}
           availability={projectSummary.measuredProjects > 0 ? `${projectSummary.measuredProjects} van ${projects.length} projectpagina’s met metingen` : "Nog geen conversiemetingen"} />
       </section>
@@ -118,7 +120,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
         <CampaignProjectTable info={<details className="campaign-project-info">
           <summary aria-label="Meer informatie over de projectcijfers" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
-          <div className="campaign-info-content"><p>Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Brochure komt uit Websiteprestaties; Afspraak komt per project uit de gekoppelde GoHighLevel-pipeline en valt zonder CRM-koppeling terug op Websiteprestaties.</p></div>
+          <div className="campaign-info-content"><p>Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Leads en afspraken komen uit de gekoppelde GoHighLevel-projectpipeline. Ontbrekende CRM-data wordt met een streepje en een melding getoond. Project-CVR is CRM-leads gedeeld door websitebezoekers; afspraken worden niet nogmaals bij leads opgeteld.</p></div>
         </details>} columns={[
           { key: "title", label: "Projectpagina", text: true },
           { key: "live", label: "Facebook live" },
@@ -128,7 +130,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
           { key: "googleCtr", label: "Google CTR", description: "Gemiddelde CTR, gewogen op vertoningen" },
           { key: "googleSpend", label: "Google spend", description: "Totale spend van de campagnes binnen het project" },
           { key: "visitors", label: "Bezoekers" },
-          { key: "leads", label: "Brochure" }, { key: "appointments", label: "Afspraak" }, { key: "cvr", label: "Project CVR" }
+          { key: "leads", label: "Leads (CRM)" }, { key: "appointments", label: "Afspraken (CRM)" }, { key: "cvr", label: "Project CVR" }
         ]} rows={projects.map((project) => {
           const google = summarizeGoogleProjectCampaigns(project.googleCampaigns);
           const facebook = summarizeFacebookProjectCampaigns(project.campaigns);
@@ -150,7 +152,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
                 {manager?.accountManagerName ? <span className="cell-muted campaign-project-manager" title={[manager.reason, manager.clientName, manager.grippProjectName].filter(Boolean).join(" · ")}>Accountmanager: {manager.accountManagerName}</span>
                   : <a className="cell-muted campaign-project-manager" href="/dashboard?tab=data-management">Accountmanager: nog toe te wijzen</a>}
-                <span className="cell-muted">{project.siteName}</span><span className="cell-muted" title={project.sourcePaths?.join("\n")}>{project.sourcePaths ? "Samengevoegde projectpagina’s" : project.sourcePath}</span></th>
+                <span className="cell-muted">{project.siteName}</span><span className="cell-muted" title={project.sourcePaths?.join("\n")}>{project.sourcePaths ? "Samengevoegde projectpagina’s" : project.sourcePath}</span>
+                {project.crmMessage ? <span className="cell-muted">{project.crmMessage}</span> : null}</th>
               <td data-metric="status"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="status" /></td>
               <td data-metric="google-status"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="status" /></td>
               <td data-metric="ctr"><ProjectCampaignMetric project={project} summary={facebook} channel="facebook" metric="ctr" /></td>
@@ -158,10 +161,10 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               <td data-metric="google-ctr"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="ctr" /></td>
               <td data-metric="google-spend"><ProjectCampaignMetric project={project} summary={google} channel="google" metric="spend" /></td>
               <td><strong>{project.visitors === null ? "—" : number.format(project.visitors)}</strong></td>
-              <td><ConversionSourceValue value={project.leads} source={project.leadSource} label="Brochure" /></td>
+              <td><ConversionSourceValue value={project.leads} source={project.leadSource} label="Leads" /></td>
               <td><ConversionSourceValue value={project.appointments} source={project.appointmentSource} label="Afspraak" /></td>
               <td><strong className="campaign-project-cvr-value" style={{ color: rateColor(project.cvr, PROJECT_CVR_BENCHMARK_PERCENT) }}>{percentage(project.cvr)}</strong>
-                {!project.hasConversionMapping ? <span className="cell-muted">Bedankpagina nog niet gekoppeld</span> : null}</td>
+                {!project.hasConversionMapping ? <span className="cell-muted">CRM-meting nog niet beschikbaar</span> : null}</td>
             </tr>
           };
         })} />
@@ -198,8 +201,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
         Facebook link-CTR is het gemiddelde van de campagnepercentages, gewogen op vertoningen in de gekozen periode, ook bij gestopte campagnes.
         Facebook-cijfers tellen alleen campagnes met “Ledoux” in de naam, inclusief hun Instagram-plaatsingen.
         Projectpagina’s worden gekoppeld via vastgelegde campagnekoppelingen of de bestemmingslink van de advertenties.
-        Leads = Brochure uit Websiteprestaties. Afspraken komen bij gekoppelde sites uit afspraakachtige GoHighLevel-pipelinefasen,
-        en anders uit de gekoppelde afspraak-bedankpagina’s. Ze zijn niet uitsluitend aan advertenties toegeschreven.
+        Leads zijn nieuwe opportunities in de GoHighLevel-projectpipeline. Afspraken komen uit afspraakachtige pipelinefasen.
+        Beide tellingen gebruiken de gekozen periode. Ze zijn niet uitsluitend aan advertenties toegeschreven.
         Websitemetingen gebruiken de tijdzone Brussel; advertentiecijfers volgen de accounttijdzone.
         Bij onvolledige koppelingen tonen de kaarten alleen de beschikbare gegevens.
         </p></div>
@@ -295,7 +298,7 @@ function ConversionPanel({ name, summary, detail }: {
     </dl>
     <details className="campaign-channel-info">
       <summary aria-label={`Meer informatie over ${name}`} title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
-      <div className="campaign-info-content"><p>{detail}</p><small className="campaign-coverage">{coverage(summary)}</small></div>
+      <div className="campaign-info-content"><p>{detail}</p><small className="campaign-coverage">{summary.connected} van {summary.total} projectpagina’s met CRM-metingen</small></div>
     </details>
   </article>;
 }
@@ -305,14 +308,14 @@ function WebsiteCvrPanel({ value, detail, availability, comparison }: {
 }) {
   return <article className="panel campaign-channel-panel">
     <div className="panel-heading">
-      <h2>Website CVR</h2>
+      <h2>Project CVR</h2>
     </div>
     <dl className="campaign-channel-metrics campaign-channel-metrics--single">
       <div><dt>Conversieratio</dt><dd>{value}</dd></div>
     </dl>
     <p className="campaign-benchmark">{comparison}</p>
     <details className="campaign-channel-info">
-      <summary aria-label="Meer informatie over Website CVR" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
+      <summary aria-label="Meer informatie over Project CVR" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
       <div className="campaign-info-content"><p>{detail}</p><small className="campaign-coverage">{availability}</small></div>
     </details>
   </article>;

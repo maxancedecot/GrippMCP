@@ -91,6 +91,7 @@ export function projectPagesFromDashboard(dashboard: SiteAnalyticsDashboardData,
     pages.set(projectPageKey(page), page);
   };
   for (const site of dashboard.sites) add(site.id, "/", site.name);
+  for (const group of dashboard.projectPageGroups ?? []) add(group.siteId, group.sourcePath, group.title, true);
   for (const candidate of dashboard.cvrPageCandidates) {
     if (isProjectLandingPath(candidate.path) && !/(?:page not found|pagina niet gevonden|page introuvable)/i.test(candidate.title)) add(candidate.siteId, candidate.path, candidate.title);
   }
