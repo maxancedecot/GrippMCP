@@ -57,12 +57,15 @@ function GoogleCampaignManager({ pages, initialMatches, canSave }: { pages: Site
   const [accountId, setAccountId] = useState("");
   const [campaigns, setCampaigns] = useState<GoogleCampaignOption[]>([]);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
+  const [campaignSearch, setCampaignSearch] = useState("");
   const [pageKey, setPageKey] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [matches, setMatches] = useState(initialMatches);
   const options = useMemo(() => pages.filter((page) => !isThankYouPath(page.path)).sort((a, b) => a.siteName.localeCompare(b.siteName, "nl-BE") || a.title.localeCompare(b.title, "nl-BE")), [pages]);
+  const campaignQuery = campaignSearch.trim().toLocaleLowerCase("nl-BE");
+  const filteredCampaigns = campaigns.filter((campaign) => !campaignQuery || `${campaign.name} ${campaign.id}`.toLocaleLowerCase("nl-BE").includes(campaignQuery));
   const groupedMatches = useMemo(() => {
     const groups = new Map<string, CampaignProjectMatch[]>();
     for (const match of matches) {
@@ -77,7 +80,7 @@ function GoogleCampaignManager({ pages, initialMatches, canSave }: { pages: Site
     try {
       const result = await loadGoogleCampaignsAction(customerId);
       if (!result.ok) { setError(result.error); return; }
-      setAccountId(result.customerId); setCampaigns(result.campaigns); setSelectedCampaignIds([]);
+      setAccountId(result.customerId); setCampaigns(result.campaigns); setSelectedCampaignIds([]); setCampaignSearch("");
       setNotice(`${result.campaigns.length} campagnes geladen.`);
     } catch { setError("De Google Ads-campagnes konden niet worden geladen."); }
     finally { setPending(false); }
@@ -92,34 +95,40 @@ function GoogleCampaignManager({ pages, initialMatches, canSave }: { pages: Site
       const selected = new Set(selectedCampaignIds);
       setMatches((current) => [...current.filter((item) => !(item.accountId === accountId && selected.has(item.campaignId))), ...result.matches]);
       setSelectedCampaignIds([]);
-      setNotice(`${result.matches.length} Google-campagne${result.matches.length === 1 ? "" : "s"} samengevoegd bij ${page.title}.`); router.refresh();
+      setNotice(`${result.matches.length} Google-campagne${result.matches.length === 1 ? "" : "s"} gekoppeld aan ${page.title}.`); router.refresh();
     } catch { setError("De Google-campagnes konden niet worden gekoppeld."); }
     finally { setPending(false); }
   }
   async function remove(match: CampaignProjectMatch) {
-    setPending(true); setError("");
-    const result = await deleteGoogleCampaignMatchAction(match.accountId, match.campaignId);
-    if (result.ok) { setMatches((current) => current.filter((item) => item !== match)); setNotice("Google-campagnekoppeling verwijderd."); router.refresh(); }
-    else setError(result.error);
-    setPending(false);
+    setPending(true); setError(""); setNotice("");
+    try {
+      const result = await deleteGoogleCampaignMatchAction(match.accountId, match.campaignId);
+      if (result.ok) { setMatches((current) => current.filter((item) => item !== match)); setNotice("Google-campagnekoppeling verwijderd."); router.refresh(); }
+      else setError(result.error);
+    } catch { setError("De Google-campagnekoppeling kon niet worden verwijderd."); }
+    finally { setPending(false); }
   }
   return <section className="panel data-management-panel" aria-labelledby="google-campaign-management-title">
-    <div className="panel-heading"><div><p className="eyebrow">Google Ads</p><h2 id="google-campaign-management-title">Google-campagnes samenvoegen</h2></div><span className="panel-total">{matches.length} koppelingen</span></div>
-    <p className="cell-muted data-management-help">Laad de campagnes van een Google Ads-account, selecteer de campagnes voor hetzelfde project en koppel ze samen aan de projectpagina. In Campagneperformance zie je hun gewogen gemiddelde CTR en totale spend; bij hover staan de cijfers per campagne.</p>
-    <div className="data-management-assignment-controls"><label>Klantnummer<input value={customerId} onChange={(event) => setCustomerId(event.target.value)} placeholder="123-456-7890" /></label>
+    <div className="panel-heading"><div><p className="eyebrow">Google Ads</p><h2 id="google-campaign-management-title">Campagnes aan projecten koppelen</h2></div><span className="panel-total">{matches.length} koppelingen</span></div>
+    <p className="cell-muted data-management-help">Koppel meerdere Google Ads-campagnes aan één projectpagina. Laad je campagnes, kies een projectpagina en vink alle bijbehorende campagnes aan. Je kunt later extra campagnes toevoegen. In Campagneperformance zie je hun gewogen gemiddelde CTR en totale spend; bij hover staan de cijfers per campagne.</p>
+    <div className="data-management-assignment-controls"><label>Klantnummer<input value={customerId} disabled={pending} onChange={(event) => setCustomerId(event.target.value)} placeholder="123-456-7890" /></label>
       <button type="button" disabled={pending || !customerId.trim()} onClick={load}>{pending ? "Laden…" : "Campagnes laden"}</button></div>
     {campaigns.length ? <form className="project-group-form" onSubmit={save}>
-      <fieldset disabled={!canSave || pending}><legend>Campagnes voor één project kiezen</legend><div className="project-group-candidates">{campaigns.map((campaign) => {
+      <div className="data-management-assignment-controls google-campaign-link-controls">
+        <label>Projectpagina<select value={pageKey} disabled={!canSave || pending} onChange={(event) => setPageKey(event.target.value)}><option value="">Kies een projectpagina</option>{options.map((page) => <option key={`${page.siteId}:${page.path}`} value={`${page.siteId}:${normalizeProjectPath(page.path)}`}>{page.siteName} · {page.title} · {page.path}</option>)}</select></label>
+      </div>
+      <div className="data-management-filters"><label>Campagnes zoeken<input type="search" value={campaignSearch} disabled={pending} onChange={(event) => setCampaignSearch(event.target.value)} placeholder="Campagnenaam of ID…" /></label></div>
+      <fieldset disabled={!canSave || pending}><legend>Campagnes kiezen · {selectedCampaignIds.length} geselecteerd (max. 100)</legend><div className="project-group-candidates">{filteredCampaigns.map((campaign) => {
         const linked = matches.find((match) => match.accountId === accountId && match.campaignId === campaign.id);
         const linkedPage = linked && options.find((page) => page.siteId === linked.siteId && normalizeProjectPath(page.path) === normalizeProjectPath(linked.sourcePaths[0]));
         return <label className="project-group-candidate" key={campaign.id}>
-          <input type="checkbox" checked={selectedCampaignIds.includes(campaign.id)} onChange={() => setSelectedCampaignIds((current) => current.includes(campaign.id) ? current.filter((id) => id !== campaign.id) : [...current, campaign.id])} />
+          <input type="checkbox" checked={selectedCampaignIds.includes(campaign.id)} disabled={selectedCampaignIds.length >= 100 && !selectedCampaignIds.includes(campaign.id)} onChange={() => setSelectedCampaignIds((current) => current.includes(campaign.id) ? current.filter((id) => id !== campaign.id) : [...current, campaign.id])} />
           <span><strong>{campaign.name}</strong><small>ID {campaign.id} · {campaign.status}{linked ? ` · Gekoppeld aan ${linkedPage?.title ?? linked.sourcePaths[0]}` : ""}</small></span>
         </label>;
       })}</div></fieldset>
+      {filteredCampaigns.length === 0 ? <p className="empty-state">Geen campagnes gevonden met deze zoekopdracht.</p> : null}
       <div className="data-management-assignment-controls google-campaign-link-controls">
-        <label>Projectpagina<select value={pageKey} onChange={(event) => setPageKey(event.target.value)}><option value="">Kies een projectpagina</option>{options.map((page) => <option key={`${page.siteId}:${page.path}`} value={`${page.siteId}:${normalizeProjectPath(page.path)}`}>{page.siteName} · {page.title} · {page.path}</option>)}</select></label>
-        <button type="submit" disabled={!canSave || pending || selectedCampaignIds.length === 0 || !pageKey}>{pending ? "Samenvoegen…" : selectedCampaignIds.length === 1 ? "Campagne koppelen" : `${selectedCampaignIds.length} campagnes samenvoegen`}</button>
+        <button type="submit" disabled={!canSave || pending || selectedCampaignIds.length === 0 || !pageKey}>{pending ? "Koppelen…" : selectedCampaignIds.length > 1 ? `${selectedCampaignIds.length} campagnes koppelen` : "Campagne koppelen"}</button>
     </div></form> : null}
     {notice ? <p className="data-management-success" role="status">{notice}</p> : null}{error ? <p className="data-management-error" role="alert">{error}</p> : null}
     {groupedMatches.length ? <div className="project-group-list">{groupedMatches.map(([key, group]) => {

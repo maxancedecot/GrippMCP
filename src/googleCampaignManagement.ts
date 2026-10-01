@@ -1,14 +1,16 @@
 import { z } from "zod";
 import { CAMPAIGN_PROJECT_MATCHES_KEY, normalizeProjectPath, parseCampaignProjectMatches, type CampaignProjectMatch } from "./campaignProjects.js";
 import { getJsonCacheMode, readJsonCache, writeJsonCache } from "./jsonCache.js";
-import { getSiteAnalyticsDashboardData } from "./siteAnalytics.js";
+import { getProjectPageManagementData } from "./projectPageManagement.js";
 
 const id = z.string().trim().min(1);
 const customerIdSchema = id.transform((value) => value.replace(/-/g, "")).pipe(id.regex(/^\d+$/));
 const campaignSchema = z.object({ campaign: z.object({ id: id.regex(/^\d+$/), name: id, status: id.optional() }) });
 export type GoogleCampaignOption = { id: string; name: string; status: string };
 type MatchStore = { read<T>(key: string): Promise<T | null>; write(key: string, value: unknown): Promise<void> };
-type ProjectPages = { cvrPageCandidates: { siteId: string; path: string }[]; cvrLinks: { siteId: string; sourcePath: string }[] };
+type ProjectPages = { siteId: string; path: string }[];
+const projectPath = id.refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"), "Use a local project path")
+  .transform(normalizeProjectPath);
 
 export async function listGoogleCampaigns(customerIdInput: string, options: { env?: Partial<NodeJS.ProcessEnv>; fetchImpl?: typeof fetch } = {}) {
   const customerId = customerIdSchema.parse(customerIdInput);
@@ -52,11 +54,10 @@ export async function saveGoogleCampaignMatches(input: unknown, options: { store
   if (!options.store && getJsonCacheMode() === "memory") throw new Error("Persistent storage is required");
   const selection = z.object({ siteId: id, accountId: customerIdSchema,
     campaignIds: z.array(id.regex(/^\d+$/)).min(1).max(100).transform((ids) => [...new Set(ids)]),
-    sourcePath: id }).strict().parse(input);
-  const dashboard = options.pages ?? await getSiteAnalyticsDashboardData({ days: 90 });
-  const path = normalizeProjectPath(selection.sourcePath);
-  const known = dashboard.cvrPageCandidates.some((page) => page.siteId === selection.siteId && normalizeProjectPath(page.path) === path)
-    || dashboard.cvrLinks.some((link) => link.siteId === selection.siteId && normalizeProjectPath(link.sourcePath) === path);
+    sourcePath: projectPath }).strict().parse(input);
+  const pages = options.pages ?? (await getProjectPageManagementData()).pages;
+  const path = selection.sourcePath;
+  const known = pages.some((page) => page.siteId === selection.siteId && normalizeProjectPath(page.path) === path);
   if (!known) throw new Error("Unknown project page");
   const store = options.store ?? { read: readJsonCache, write: writeJsonCache };
   const current = parseCampaignProjectMatches(await store.read(CAMPAIGN_PROJECT_MATCHES_KEY));

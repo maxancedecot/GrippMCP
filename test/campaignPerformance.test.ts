@@ -961,23 +961,33 @@ test("Google campaign names automatically map a unique shared-account campaign t
   assert.equal(project.googleState, "connected");
 });
 
-test("a saved Google campaign match supplies its account without a Vercel site mapping", async () => {
+test("multiple saved Google campaigns share one project result without a Vercel site mapping", async () => {
   const data = dashboard();
-  data.cvrLinks = [conversionLink("site-a", "/bedankt", 3, "/project")];
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 3, "/project")];
   const result = await getCampaignPerformance(data, {
     env: environment([], googleCredentials),
-    projectMatches: [{ channel: "google", siteId: "site-a", accountId: "5365783098", campaignId: "10", sourcePaths: ["/project"] }],
+    projectMatches: ["10", "11"].map((campaignId) => ({ channel: "google", siteId: "site-a", accountId: "5365783098", campaignId, sourcePaths: ["/project"] })),
     fetchImpl: async (input, init) => {
       if (String(input).includes("oauth2")) return response({ access_token: "access" });
       const query = JSON.parse(String(init?.body)).query as string;
       if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
-      if (query.includes("primary_status")) return response([{ results: [{ campaign: { id: "10", name: "Ledoux project", status: "ENABLED", primaryStatus: "ELIGIBLE" } }] }]);
-      if (query.includes("metrics.clicks")) return response([{ results: [{ campaign: { id: "10", name: "Ledoux project" }, metrics: { clicks: 8, impressions: 100, costMicros: 9000000 } }] }]);
+      assert.match(query, /campaign\.id IN \(10,11\)/);
+      if (query.includes("primary_status")) return response([{ results: [
+        { campaign: { id: "10", name: "Ledoux project", status: "ENABLED", primaryStatus: "ELIGIBLE" } },
+        { campaign: { id: "11", name: "Ledoux project search", status: "PAUSED", primaryStatus: "PAUSED" } }
+      ] }]);
+      if (query.includes("metrics.clicks")) return response([{ results: [
+        { campaign: { id: "10", name: "Ledoux project" }, metrics: { clicks: 8, impressions: 100, costMicros: 9000000 } },
+        { campaign: { id: "11", name: "Ledoux project search" }, metrics: { clicks: 2, impressions: 300, costMicros: 6000000 } }
+      ] }]);
       assert.fail(`Saved campaign match must avoid destination lookup: ${query}`);
     }
   });
   const project = result.projects.find((row) => row.sourcePath === "/project")!;
-  assert.deepEqual(project.googleCampaigns.map(({ id, spend }) => ({ id, spend })), [{ id: "10", spend: 9 }]);
+  assert.deepEqual(project.googleCampaigns.map(({ id, spend }) => ({ id, spend })), [{ id: "10", spend: 9 }, { id: "11", spend: 6 }]);
+  assert.deepEqual(summarizeGoogleProjectCampaigns(project.googleCampaigns), { ctr: 2.5, spend: [{ currency: "EUR", amount: 15 }], live: true });
+  assert.equal(result.projects.length, 1);
+  assert.equal(project.leads, 3, "Website conversions are counted once for the shared project");
 });
 
 test("Google project summaries weight CTR by impressions, total spend and combine live status", () => {
