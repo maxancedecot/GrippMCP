@@ -5,7 +5,7 @@ import { normalizeProjectPath } from "./projectPageGroups.js";
 import { getJsonCacheMode, readJsonCache, writeJsonCache } from "./jsonCache.js";
 import { listGhlInstallations } from "./ghl/tokenStore.js";
 import { listGhlPipelines, type GhlReadCall } from "./ghl/appointmentConversions.js";
-import { GhlClient } from "./ghl/client.js";
+import { connectAgencyCrmSubaccount, listAgencyCrmSubaccounts, readGhl } from "./ghl/crmSubaccounts.js";
 import type { GhlInstallationSummary } from "./ghl/types.js";
 import type { CampaignSiteMapping } from "./campaignPerformance.js";
 
@@ -20,7 +20,10 @@ const matchSchema = z.object({
   pipelineName: z.string().max(1000)
 }).strict();
 export type CrmPipelineMatch = z.infer<typeof matchSchema>;
-export type CrmConnection = { locationId: string; installId?: string; label: string };
+export type CrmConnection = {
+  locationId: string; installId?: string; label: string;
+  companyInstallId?: string; companyId?: string; needsConnection?: boolean;
+};
 export type CrmPipelineOption = { id: string; name: string };
 type Store = { read<T>(key: string): Promise<T | null>; write(key: string, value: unknown): Promise<void> };
 const defaultStore: Store = { read: readJsonCache, write: writeJsonCache };
@@ -49,9 +52,15 @@ async function readRegistry(store: Store) {
   return { matches: parseCrmPipelineMatches(registry.matches), revision: registry.revision };
 }
 
-export async function listCrmConnections(options: {
+type ConnectionOptions = {
   mappings?: CampaignSiteMapping[]; installations?: GhlInstallationSummary[]; resolveNames?: boolean; call?: GhlReadCall;
-} = {}) {
+};
+
+export async function listCrmConnections(options: ConnectionOptions = {}) {
+  return (await getCrmConnectionInventory(options)).connections;
+}
+
+export async function getCrmConnectionInventory(options: ConnectionOptions = {}) {
   const installations = options.installations ?? await listGhlInstallations();
   const connections = new Map<string, CrmConnection>();
   for (const installation of installations) {
@@ -68,16 +77,42 @@ export async function listCrmConnections(options: {
     const connection = { locationId: config.locationId, installId, label: `CRM-subaccount ${config.locationId} · ${mapping.siteId}` };
     connections.set(JSON.stringify([connection.locationId, connection.installId]), connection);
   }
+  const agencies = installations.filter((installation) => installation.userType === "Company" && installation.companyId);
+  const namedLocations = new Set<string>();
+  let incomplete = false;
+  for (const agency of agencies) {
+    try {
+      const accounts = await listAgencyCrmSubaccounts(agency, options.call);
+      for (const account of accounts) {
+        const existing = [...connections.values()].filter((connection) => connection.locationId === account.id);
+        if (existing.length) {
+          for (const connection of existing) {
+            if (account.name) connection.label = account.name;
+            if (!connection.installId) Object.assign(connection, {
+              installId: account.id, companyInstallId: account.companyInstallId,
+              companyId: account.companyId, needsConnection: true
+            });
+          }
+        } else {
+          const connection: CrmConnection = { locationId: account.id, installId: account.id,
+            label: account.name || `CRM-subaccount ${account.id}`, companyInstallId: account.companyInstallId,
+            companyId: account.companyId, needsConnection: true };
+          connections.set(JSON.stringify([connection.locationId, connection.installId]), connection);
+        }
+        if (account.name) namedLocations.add(account.id);
+      }
+    } catch { incomplete = true; }
+  }
   const result = [...connections.values()];
-  if (options.resolveNames === false) return result;
+  const message = incomplete ? "De agency-brede subaccountlijst kon niet volledig worden geladen. Vernieuw de gegevens en controleer de agency-toegang in GoHighLevel."
+    : !agencies.length ? "Alleen afzonderlijk verbonden subaccounts zijn zichtbaar. Verbind ook je GoHighLevel-agency-account om de volledige subaccountlijst te laden." : "";
+  if (options.resolveNames === false) return { connections: result, message };
   // Limit parallel lookups; one failed name must not hide the other accounts.
   for (let offset = 0; offset < result.length; offset += 4) {
     await Promise.all(result.slice(offset, offset + 4).map(async (connection) => {
-      if (!connection.installId) return;
+      if (!connection.installId || namedLocations.has(connection.locationId) || connection.needsConnection) return;
       try {
-        const read: GhlReadCall = options.call ?? ((input) => new GhlClient(input.installId).call({
-          method: "GET", path: input.path, apiVersion: input.apiVersion, readOnly: true
-        }));
+        const read = options.call ?? readGhl;
         const response = z.object({ location: z.object({ id, name: z.string().trim().min(1) }) }).parse(await read({
           installId: connection.installId, path: `/locations/${encodeURIComponent(connection.locationId)}`, apiVersion: "v3"
         }));
@@ -86,13 +121,15 @@ export async function listCrmConnections(options: {
       } catch { /* Keep the account selectable when its name is unavailable. */ }
     }));
   }
-  return result.sort((left, right) => left.label.localeCompare(right.label, "nl-BE"));
+  return { connections: result.sort((left, right) => left.label.localeCompare(right.label, "nl-BE")), message };
 }
 
 export async function loadCrmPipelines(input: { locationId: string; installId?: string }, options: {
-  connections: CrmConnection[]; call?: GhlReadCall;
+  connections: CrmConnection[]; call?: GhlReadCall; appId?: string;
+  connectLocation?: (companyInstallId: string, locationId: string) => Promise<{ installId: string; locationId?: string }>;
 }) {
-  const connection = requireConnection(input, options.connections);
+  const selected = requireConnection(input, options.connections);
+  const connection = selected.needsConnection ? await connectAgencyCrmSubaccount(selected, options) : selected;
   const pipelines = await listGhlPipelines(connection, options.call);
   return pipelines.map(({ id, name }) => ({ id, name })) satisfies CrmPipelineOption[];
 }

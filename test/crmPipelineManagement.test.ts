@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CRM_PIPELINE_MATCHES_KEY, deleteCrmPipelineMatch, getCrmPipelineRevision, listCrmConnections,
-  loadCrmPipelines, parseCrmPipelineMatches, readCrmPipelineMatches, saveCrmPipelineMatches } from "../src/crmPipelineManagement.js";
+  getCrmConnectionInventory, loadCrmPipelines, parseCrmPipelineMatches, readCrmPipelineMatches, saveCrmPipelineMatches } from "../src/crmPipelineManagement.js";
 import type { CrmPipelineMatch } from "../src/crmPipelineManagement.js";
 import type { GhlReadCall } from "../src/ghl/appointmentConversions.js";
+import { listAgencyCrmSubaccounts } from "../src/ghl/crmSubaccounts.js";
 
 function match(overrides: Partial<CrmPipelineMatch> = {}): CrmPipelineMatch {
   return { siteId: "site-a", sourcePath: "/alpha", locationId: "location", installId: "install", pipelineId: "one", pipelineName: "Social", ...overrides };
@@ -104,4 +105,99 @@ test("invalid CRM project, pipeline, and connection selections never write mappi
 test("stored CRM mappings reject duplicate pipelines in the same location while accepting IDs reused across locations", () => {
   assert.throws(() => parseCrmPipelineMatches([match(), match({ siteId: "site-b", sourcePath: "/beta" })]));
   assert.equal(parseCrmPipelineMatches([match(), match({ locationId: "other" })]).length, 2);
+});
+
+const agency = { installId: "agency", userType: "Company", companyId: "company", expiresAt: 1, createdAt: 1, updatedAt: 1 };
+
+test("CRM inventory fetches every agency directory page and includes subaccounts without a stored location token", async () => {
+  const skips: number[] = [];
+  const inventory = await getCrmConnectionInventory({ installations: [agency,
+    { installId: "direct", locationId: "location-0", expiresAt: 1, createdAt: 1, updatedAt: 1 }
+  ], call: async ({ installId, path, apiVersion, query }) => {
+    assert.equal(installId, "agency"); assert.equal(path, "/locations/search"); assert.equal(apiVersion, "v3");
+    assert.equal(query?.companyId, "company"); assert.equal(query?.limit, 100);
+    const skip = Number(query?.skip); skips.push(skip);
+    return { locations: Array.from({ length: skip === 0 ? 100 : 2 }, (_, index) => ({
+      id: `location-${skip + index}`, name: `Project ${skip + index}`, companyId: "company", email: "private@example.test"
+    })) };
+  } });
+  assert.deepEqual(skips, [0, 100]);
+  assert.equal(inventory.connections.length, 102);
+  assert.equal(inventory.message, "");
+  assert.deepEqual(inventory.connections.find((item) => item.locationId === "location-0"), {
+    locationId: "location-0", installId: "direct", label: "Project 0"
+  });
+  assert.deepEqual(inventory.connections.find((item) => item.locationId === "location-101"), {
+    locationId: "location-101", installId: "location-101", label: "Project 101",
+    companyInstallId: "agency", companyId: "company", needsConnection: true
+  });
+  assert.doesNotMatch(JSON.stringify(inventory), /private@example/);
+});
+
+test("CRM directory deduplicates agency accounts and fills the connection for configured pages without a location token", async () => {
+  const inventory = await getCrmConnectionInventory({ installations: [agency, { ...agency, installId: "second-agency" }],
+    mappings: [{ siteId: "site-a", ghl: { locationId: "location" } }],
+    call: async () => ({ locations: [{ id: "location", name: "Alpha", companyId: "company" }] }) });
+  assert.equal(inventory.connections.length, 1);
+  assert.deepEqual(inventory.connections[0], {
+    locationId: "location", installId: "location", label: "Alpha", companyInstallId: "agency", companyId: "company", needsConnection: true
+  });
+});
+
+test("agency directory errors report an incomplete list while preserving working direct connections", async () => {
+  const installations = [agency, { installId: "install", locationId: "location", expiresAt: 1, createdAt: 1, updatedAt: 1 }];
+  const inventory = await getCrmConnectionInventory({ installations, resolveNames: false,
+    call: async () => { throw new Error("Forbidden secret-provider-details"); } });
+  assert.deepEqual(inventory.connections, connections.map((item) => ({ ...item, label: "CRM-subaccount location" })));
+  assert.match(inventory.message, /niet volledig/);
+  assert.doesNotMatch(inventory.message, /secret-provider-details/);
+  const standalone = await getCrmConnectionInventory({ installations: installations.slice(1), resolveNames: false });
+  assert.match(standalone.message, /Alleen afzonderlijk verbonden/);
+});
+
+test("agency enumeration rejects repeated pages and subaccounts from an unrelated agency", async () => {
+  let requests = 0;
+  await assert.rejects(listAgencyCrmSubaccounts(agency, async () => {
+    requests++;
+    return { locations: Array.from({ length: 100 }, (_, index) => ({ id: `location-${index}`, name: "Alpha" })) };
+  }), /Repeated/);
+  assert.equal(requests, 2);
+  await assert.rejects(listAgencyCrmSubaccounts(agency, async () => ({ locations: [{ id: "wrong", name: "Other", companyId: "other-company" }] })), /Unexpected agency/);
+});
+
+test("loading a discovered CRM account only creates a location token for the selected installed account", async () => {
+  const selected = { locationId: "new", installId: "new", label: "New", companyInstallId: "agency", companyId: "company", needsConnection: true };
+  const requests: string[] = [];
+  const tokens: string[] = [];
+  const pipelines = await loadCrmPipelines(selected, { connections: [selected], appId: "app",
+    connectLocation: async (companyInstallId, locationId) => {
+      assert.equal(companyInstallId, "agency"); tokens.push(locationId);
+      return { installId: "new", locationId: "new" };
+    }, call: async ({ installId, path, query, apiVersion }) => {
+      requests.push(path); assert.equal(apiVersion, "v3");
+      if (path === "/oauth/installed-locations") {
+        assert.equal(installId, "agency");
+        assert.deepEqual(query, { companyId: "company", appId: "app", locationId: "new", isInstalled: true, restrictToUserLocations: true, pageSize: 100 });
+        return { items: [{ _id: "new", isInstalled: true }], pagination: {} };
+      }
+      assert.equal(installId, "new"); assert.equal(query?.locationId, "new");
+      return { pipelines: [{ id: "one", name: "Social" }] };
+    }
+  });
+  assert.deepEqual(tokens, ["new"]);
+  assert.deepEqual(requests, ["/oauth/installed-locations", "/opportunities/pipelines"]);
+  assert.deepEqual(pipelines, [{ id: "one", name: "Social" }]);
+});
+
+test("uninstalled, wrong, or inaccessible accounts cannot create location credentials or load pipelines", async () => {
+  const selected = { locationId: "new", installId: "new", label: "New", companyInstallId: "agency", companyId: "company", needsConnection: true };
+  for (const items of [[], [{ _id: "new", isInstalled: false }], [{ _id: "other", isInstalled: true }]]) {
+    await assert.rejects(loadCrmPipelines(selected, { connections: [selected], appId: "app",
+      connectLocation: async () => { assert.fail("No token may be created without an existing app authorization"); },
+      call: async ({ path }) => { assert.equal(path, "/oauth/installed-locations"); return { items }; }
+    }));
+  }
+  await assert.rejects(loadCrmPipelines({ ...selected, locationId: "unknown" }, { connections: [selected], appId: "app",
+    call: async () => { assert.fail("Unknown accounts must be rejected before contacting the CRM"); }
+  }));
 });

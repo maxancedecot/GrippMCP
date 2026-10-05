@@ -83,7 +83,7 @@ export async function loadCrmPipelinesAction(input: { locationId: string; instal
   try {
     const pipelines = await loadCrmPipelines(input, { connections: await crmConnections() });
     return { ok: true as const, pipelines };
-  } catch { return { ok: false as const, error: "De CRM-pipelines konden niet worden geladen. Controleer de verbinding met het CRM-subaccount." }; }
+  } catch { return { ok: false as const, error: "De CRM-pipelines konden niet worden geladen. Controleer of de app in dit subaccount geïnstalleerd is en de CRM-verbinding toegang heeft." }; }
 }
 
 export async function saveCrmPipelineMatchesAction(input: {

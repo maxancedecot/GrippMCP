@@ -5,7 +5,7 @@ import { DashboardFrame } from "../dashboard-frame.js";
 import { DataManagementBoard } from "./data-management-board.js";
 import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
 import { readGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
-import { listCrmConnections, readCrmPipelineMatches } from "../../src/crmPipelineManagement.js";
+import { getCrmConnectionInventory, readCrmPipelineMatches } from "../../src/crmPipelineManagement.js";
 import { parseCampaignSiteMappings } from "../../src/campaignPerformance.js";
 import { CrmPipelineManager } from "./crm-pipeline-manager.js";
 import { getJsonCacheMode } from "../../src/jsonCache.js";
@@ -16,9 +16,9 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
     getProjectPageManagementData({ force: first(params.refresh) === "1" }),
     getSiteAnalyticsDashboardData({ days: 90 }),
     readGoogleCampaignMatches(),
-    Promise.resolve().then(() => Promise.all([listCrmConnections({ mappings: parseCampaignSiteMappings(process.env.CAMPAIGN_PERFORMANCE_SITES) }), readCrmPipelineMatches()]))
-      .then(([connections, matches]) => ({ connections, matches, error: "" }))
-      .catch(() => ({ connections: [], matches: [], error: "De CRM-koppelingen konden niet worden geladen. Vernieuw de gegevens en probeer opnieuw." }))
+    Promise.resolve().then(() => Promise.all([getCrmConnectionInventory({ mappings: parseCampaignSiteMappings(process.env.CAMPAIGN_PERFORMANCE_SITES) }), readCrmPipelineMatches()]))
+      .then(([inventory, matches]) => ({ ...inventory, matches, error: "" }))
+      .catch(() => ({ connections: [], matches: [], message: "", error: "De CRM-koppelingen konden niet worden geladen. Vernieuw de gegevens en probeer opnieuw." }))
   ]);
   const selection = dashboardPeriodSelection(params);
   const measuredPages = new Map(dashboard.cvrPageCandidates.map((page) => [`${page.siteId}:${page.path}`, page]));
@@ -49,7 +49,7 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
       <p className="data-management-intro">Projectpagina’s volgen waar mogelijk de accountmanager uit Gripp. Hier wijs je pagina’s zonder duidelijke koppeling toe. Handmatige toewijzingen worden alleen in dit dashboard bewaard.</p>
       {data.error ? <p className="data-notice" role="alert">{data.error}</p> : null}
       <CrmPipelineManager key={JSON.stringify([crm.connections, mergePages])} pages={mergePages}
-        connections={crm.connections} initialMatches={crm.matches} error={crm.error}
+        connections={crm.connections} initialMatches={crm.matches} error={crm.error} discoveryMessage={crm.message}
         canSave={getJsonCacheMode() !== "memory" && !crm.error && !!mergePages.length} />
       {data.fetchedAt ? <DataManagementBoard key={`${data.fetchedAt}:${(dashboard.projectPageGroups ?? []).map((group) => group.groupId).join(",")}`}
         data={data} mergePages={mergePages} projectGroups={dashboard.projectPageGroups ?? []} googleCampaignMatches={googleCampaignMatches} /> : null}

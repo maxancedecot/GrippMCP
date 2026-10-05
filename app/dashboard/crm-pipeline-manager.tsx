@@ -7,9 +7,9 @@ import type { SiteAnalyticsCvrPageCandidate } from "../../src/siteAnalytics.js";
 import { normalizeProjectPath } from "../../src/projectPageGroups.js";
 import { deleteCrmPipelineMatchAction, loadCrmPipelinesAction, saveCrmPipelineMatchesAction } from "./data-management-actions.js";
 
-export function CrmPipelineManager({ pages, connections, initialMatches, canSave, error: initialError = "" }: {
+export function CrmPipelineManager({ pages, connections, initialMatches, canSave, error: initialError = "", discoveryMessage = "" }: {
   pages: SiteAnalyticsCvrPageCandidate[]; connections: CrmConnection[]; initialMatches: CrmPipelineMatch[];
-  canSave: boolean; error?: string;
+  canSave: boolean; error?: string; discoveryMessage?: string;
 }) {
   const router = useRouter();
   const [connectionIndex, setConnectionIndex] = useState(connections.length ? "0" : "");
@@ -76,7 +76,8 @@ export function CrmPipelineManager({ pages, connections, initialMatches, canSave
 
   return <section className="panel data-management-panel" aria-labelledby="crm-pipeline-management-title">
     <div className="panel-heading"><div><p className="eyebrow">CRM · GoHighLevel</p><h2 id="crm-pipeline-management-title">Pipelines aan projecten koppelen</h2></div>
-      <span className="panel-total">{matches.length} handmatige koppelingen</span></div>
+      <span className="panel-total">{connections.length} subaccounts · {matches.length} handmatige koppelingen</span></div>
+    {discoveryMessage ? <p className="data-notice" role="status">{discoveryMessage} <a href="/api/ghl/oauth/start">GoHighLevel verbinden</a></p> : null}
     <p className="cell-muted data-management-help">Kies je CRM-subaccount, laad de pipelines en koppel ze aan een projectpagina. Meerdere pipelines mogen bij hetzelfde project horen: hun leads en afspraken worden opgeteld. Een handmatige koppeling krijgt voorrang op automatische naamherkenning. Kies een ander project om een pipeline te verplaatsen.</p>
     {connections.length ? <div className="data-management-assignment-controls">
       <label>CRM-subaccount<select value={connectionIndex} disabled={pending} onChange={(event) => {
