@@ -9,6 +9,7 @@ import { DashboardSidebarFooter, DashboardViewTabs } from "../dashboard/view-tab
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { loadScheduledSnapshot } from "../../src/scheduledSnapshot.js";
 import { getProjectPageGroupRevision } from "../../src/projectPageGroupStore.js";
+import { getCrmPipelineRevision } from "../../src/crmPipelineManagement.js";
 import {
   accountManagerHref,
   dashboardPeriodSelection,
@@ -32,10 +33,10 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const customPeriod = selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined;
   const selectedAccountManager = first(params.manager);
   const forceMetaSync = first(params.syncMeta) === "1";
-  const projectGroupRevision = await getProjectPageGroupRevision();
+  const [projectGroupRevision, crmRevision] = await Promise.all([getProjectPageGroupRevision(), getCrmPipelineRevision()]);
   const snapshotKey = selection.custom
-    ? `accountmanager-dashboard:v3:custom:${selection.period.start}:${selection.period.end}:${projectGroupRevision}`
-    : `accountmanager-dashboard:v3:rolling:${days}:${projectGroupRevision}`;
+    ? `accountmanager-dashboard:v3:custom:${selection.period.start}:${selection.period.end}:${projectGroupRevision}:${crmRevision}`
+    : `accountmanager-dashboard:v3:rolling:${days}:${projectGroupRevision}:${crmRevision}`;
   const snapshot = await loadScheduledSnapshot({ key: snapshotKey, now, force: forceMetaSync, load: async () => {
     const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
     const performance = await loadCampaignPerformanceBaseData({ dashboard, discoverySites: dashboard.sites, forceMetaSync });

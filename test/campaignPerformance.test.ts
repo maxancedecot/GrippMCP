@@ -7,6 +7,7 @@ import {
 import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
 import { campaignProjectOverview, parseCampaignProjectMatches, summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type ProjectCampaign, type GoogleProjectCampaign } from "../src/campaignProjects.js";
 import type { SiteAnalyticsCvrLinkRow, SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
+import type { CrmPipelineMatch } from "../src/crmPipelineManagement.js";
 
 const period = { days: 7, start: "2026-09-08", end: "2026-09-14", label: "Laatste 7 dagen" };
 function dashboard(siteIds = ["site-a"]): SiteAnalyticsDashboardData {
@@ -1283,4 +1284,66 @@ test("Facebook project weighting uses impressions from the same link-CTR measure
   assert.equal(result.projects.length, 1);
   assert.deepEqual(result.projects[0].campaigns.map((campaign) => campaign.impressions), [100, 900]);
   assert.equal(summarizeFacebookProjectCampaigns(result.projects[0].campaigns).ctr, 1.9);
+});
+
+test("saved CRM mappings override configured names, stay scoped to one website, and aggregate pipelines without an environment mapping", async () => {
+  const data = dashboard(["site-a", "site-b"]);
+  data.cvrPageCandidates = data.sites.map((site) => ({ siteId: site.id, siteName: site.name,
+    path: "/alpha", title: "Alpha", uniqueVisitors: 50, pageViews: 60 }));
+  const crmMatches: CrmPipelineMatch[] = ["social", "search"].map((pipelineId) => ({
+    siteId: "site-b", sourcePath: "/alpha", locationId: "location", installId: "install", pipelineId, pipelineName: pipelineId
+  }));
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install",
+      pipelineProjects: [{ pipelineId: "social", sourcePath: "/alpha" }] } }]),
+    crmMatches, requireCrmConversions: true,
+    ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
+      ? { pipelines: [
+        { id: "social", name: "Alpha", stages: [{ id: "meeting", name: "Afspraak" }] },
+        { id: "search", name: "Unrelated", stages: [{ id: "meeting", name: "Afspraak" }] }
+      ] }
+      : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: "meeting",
+        createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
+  });
+  assert.equal(result.projects.filter((project) => project.siteId === "site-a").length, 0);
+  const project = result.projects.find((project) => project.siteId === "site-b")!;
+  assert.deepEqual([project.sourcePath, project.leads, project.appointments, project.cvr], ["/alpha", 2, 2, 4]);
+  assert.equal(result.rows.find((row) => row.siteId === "site-b")?.leads.data?.count, 2);
+});
+
+test("saved CRM mappings include pipelines excluded by legacy configuration and normalize grouped project pages", async () => {
+  const data = dashboard();
+  data.projectPageGroups = [{ groupId: "group", siteId: "site-a", title: "Alpha", sourcePath: "/home", sourcePaths: ["/home", "/home-fr"],
+    managed: true, visitors: 20, pageViews: 30, leads: 15, appointments: 10 }];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineIds: ["legacy"],
+      pipelineProjects: [{ pipelineId: "legacy", sourcePath: "/home" }] } }]),
+    crmMatches: [{ siteId: "site-a", sourcePath: "/home-fr", locationId: "location", installId: "install", pipelineId: "new", pipelineName: "New" }],
+    requireCrmConversions: true,
+    ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
+      ? { pipelines: ["legacy", "new"].map((id) => ({ id, name: id, stages: [{ id: "meeting", name: "Afspraak" }] })) }
+      : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: "meeting",
+        createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
+  });
+  assert.equal(result.projects.length, 1);
+  assert.deepEqual([result.projects[0].sourcePath, result.projects[0].leads, result.projects[0].appointments], ["/home", 2, 2]);
+});
+
+test("one project can aggregate saved pipelines from multiple CRM subaccounts", async () => {
+  const data = dashboard();
+  data.cvrPageCandidates = [{ siteId: "site-a", siteName: "site-a", path: "/alpha", title: "Alpha", uniqueVisitors: 50, pageViews: 60 }];
+  const result = await getCampaignPerformance(data, {
+    env: environment([]), requireCrmConversions: true,
+    crmMatches: ["first", "second"].map((locationId) => ({
+      siteId: "site-a", sourcePath: "/alpha", locationId, installId: `install-${locationId}`, pipelineId: "shared-id", pipelineName: "Campaign"
+    })),
+    ghlCall: async ({ path, query, installId }) => {
+      assert.equal(installId, `install-${query?.locationId}`);
+      return path.endsWith("/pipelines")
+        ? { pipelines: [{ id: "shared-id", name: "Campaign", stages: [{ id: "meeting", name: "Afspraak" }] }] }
+        : { opportunities: [{ id: "lead", pipelineId: "shared-id", pipelineStageId: "meeting",
+          createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] };
+    }
+  });
+  assert.deepEqual([result.projects[0].leads, result.projects[0].appointments], [2, 2]);
 });

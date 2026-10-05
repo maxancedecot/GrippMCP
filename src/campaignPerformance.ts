@@ -8,6 +8,7 @@ import { CAMPAIGN_PROJECT_MATCHES_KEY, META_DISCOVERED_PROJECT_MATCHES_KEY, camp
 import { ghlConversionsByPipeline, type GhlReadCall } from "./ghl/appointmentConversions.js";
 import { projectPagesFromDashboard } from "./projectPageManagement.js";
 import { projectPageGroup } from "./projectPageGroups.js";
+import { readCrmPipelineMatches, type CrmPipelineMatch } from "./crmPipelineManagement.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -81,6 +82,7 @@ type Options = {
   discoverySites?: { id: string; name: string; url: string }[];
   ghlCall?: GhlReadCall;
   requireCrmConversions?: boolean;
+  crmMatches?: CrmPipelineMatch[];
 };
 
 const numeric = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/)]).transform(Number).pipe(z.number().finite().nonnegative());
@@ -166,6 +168,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   })();
   const conversionRows = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
   const ghlProjects = await getGhlProjectConversions(dashboard, { env, ghlCall: options.ghlCall, mappings,
+    crmMatches: options.crmMatches,
     savedPages: projectMatches.flatMap((match) => match.sourcePaths.map((path) => ({ siteId: match.siteId, path }))) });
   const rows: CampaignPerformanceRow[] = [];
   const linkCtrRequests = new Map<string, Promise<CampaignSource<LinkCtrPerformance>>>();
@@ -576,35 +579,53 @@ export async function getGhlProjectAppointments(dashboard: SiteAnalyticsDashboar
 
 export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboardData, options: {
   env?: Env; ghlCall?: GhlReadCall; mappings?: CampaignSiteMapping[]; savedPages?: { siteId: string; path: string }[];
+  crmMatches?: CrmPipelineMatch[];
 } = {}): Promise<ProjectCrmConversions> {
   const mappings = options.mappings ?? parseCampaignSiteMappings((options.env ?? process.env).CAMPAIGN_PERFORMANCE_SITES);
-  const projects = projectPagesFromDashboard(dashboard, options.savedPages);
+  const savedMatches = options.crmMatches ?? await readCrmPipelineMatches();
+  const projects = projectPagesFromDashboard(dashboard, [...(options.savedPages ?? []),
+    ...savedMatches.map((match) => ({ siteId: match.siteId, path: match.sourcePath }))]);
   const counts: ProjectCrmConversions["counts"] = new Map(), errors = new Set<string>(), configuredSites = new Set<string>();
   const unmatchedSites = new Set<string>();
   await Promise.all(dashboard.sites.map(async (site) => {
-    const config = mappings.find((mapping) => mapping.siteId === site.id)?.ghl;
-    if (!config || dashboard.source.mode !== "live") return;
-    configuredSites.add(site.id);
-    try {
-      const pipelines = await ghlConversionsByPipeline(config, dashboard.period, options.ghlCall);
-      for (const pipeline of pipelines) {
-        const explicit = config.pipelineProjects?.find((item) => item.pipelineId === pipeline.pipelineId)?.sourcePath;
-        const pipelineKey = projectNameKey(pipeline.pipelineName);
-        const explicitPath = explicit ? dashboard.projectPageGroups?.find((group) => group.siteId === site.id && group.sourcePaths.includes(normalizeProjectPath(explicit)))?.sourcePath
-          ?? projectPageGroup(site.url, explicit)?.sourcePath ?? normalizeProjectPath(explicit) : undefined;
-        const candidates = projects.filter((project) => project.siteId === site.id && (explicit
-          ? project.path === explicitPath
-          : pipelineKey.length > 0 && [project.title, new URL(project.url).searchParams.get("p_slug") ?? project.path.split("/").filter(Boolean).at(-1) ?? ""]
-            .some((name) => projectNameKey(name) === pipelineKey)));
-        if (candidates.length !== 1) { unmatchedSites.add(site.id); continue; }
-        const key = `${site.id}:${normalizeProjectPath(candidates[0]!.path)}`;
-        const current = counts.get(key);
-        counts.set(key, {
-          leads: pipeline.leads === null || current?.leads === null ? null : (current?.leads ?? 0) + pipeline.leads,
-          appointments: pipeline.appointments === null || current?.appointments === null ? null : (current?.appointments ?? 0) + pipeline.appointments
-        });
+    if (dashboard.source.mode !== "live") return;
+    const scopes = new Map<string, NonNullable<CampaignSiteMapping["ghl"]>>();
+    const base = mappings.find((mapping) => mapping.siteId === site.id)?.ghl;
+    if (base) scopes.set(base.locationId, { ...base });
+    for (const match of savedMatches.filter((match) => match.siteId === site.id)) {
+      const scope = scopes.get(match.locationId);
+      if (!scope) scopes.set(match.locationId, { locationId: match.locationId, installId: match.installId, pipelineIds: [match.pipelineId] });
+      else {
+        if (match.installId) scope.installId = match.installId;
+        if (scope.pipelineIds) scope.pipelineIds = [...new Set([...scope.pipelineIds, match.pipelineId])];
       }
-    } catch { errors.add(site.id); }
+    }
+    if (!scopes.size) return;
+    configuredSites.add(site.id);
+    for (const config of scopes.values()) {
+      try {
+        const pipelines = await ghlConversionsByPipeline(config, dashboard.period, options.ghlCall);
+        for (const pipeline of pipelines) {
+          const manual = savedMatches.find((match) => match.locationId === config.locationId && match.pipelineId === pipeline.pipelineId);
+          if (manual && manual.siteId !== site.id) continue;
+          const explicit = manual?.sourcePath ?? config.pipelineProjects?.find((item) => item.pipelineId === pipeline.pipelineId)?.sourcePath;
+          const pipelineKey = projectNameKey(pipeline.pipelineName);
+          const explicitPath = explicit ? dashboard.projectPageGroups?.find((group) => group.siteId === site.id && group.sourcePaths.includes(normalizeProjectPath(explicit)))?.sourcePath
+            ?? projectPageGroup(site.url, explicit)?.sourcePath ?? normalizeProjectPath(explicit) : undefined;
+          const candidates = projects.filter((project) => project.siteId === site.id && (explicit
+            ? project.path === explicitPath
+            : pipelineKey.length > 0 && [project.title, new URL(project.url).searchParams.get("p_slug") ?? project.path.split("/").filter(Boolean).at(-1) ?? ""]
+              .some((name) => projectNameKey(name) === pipelineKey)));
+          if (candidates.length !== 1) { unmatchedSites.add(site.id); continue; }
+          const key = `${site.id}:${normalizeProjectPath(candidates[0]!.path)}`;
+          const current = counts.get(key);
+          counts.set(key, {
+            leads: pipeline.leads === null || current?.leads === null ? null : (current?.leads ?? 0) + pipeline.leads,
+            appointments: pipeline.appointments === null || current?.appointments === null ? null : (current?.appointments ?? 0) + pipeline.appointments
+          });
+        }
+      } catch { errors.add(site.id); }
+    }
   }));
   return { counts, errors, configuredSites, unmatchedSites };
 }

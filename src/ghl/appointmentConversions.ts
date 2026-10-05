@@ -41,6 +41,16 @@ export type GhlAppointmentConfig = {
 export type GhlPipelineAppointmentCount = { pipelineId: string; pipelineName: string; count: number };
 export type GhlPipelineConversionCount = { pipelineId: string; pipelineName: string; leads: number | null; appointments: number | null };
 
+export async function listGhlPipelines(config: GhlAppointmentConfig, call?: GhlReadCall) {
+  const installId = config.installId ?? await installIdForLocation(config.locationId);
+  const read: GhlReadCall = call ?? (async (input) => new GhlClient(input.installId).call({
+    method: "GET", path: input.path, query: input.query, apiVersion: input.apiVersion, readOnly: true
+  }));
+  return pipelineResponse.parse(await read({
+    installId, path: "/opportunities/pipelines", query: { locationId: config.locationId }, apiVersion: "v3"
+  })).pipelines;
+}
+
 export function isAppointmentStage(name: string) {
   const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   return !cancelledWords.some((word) => normalized.includes(word))
@@ -63,9 +73,7 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
   const read: GhlReadCall = call ?? (async (input) => new GhlClient(input.installId).call({
     method: "GET", path: input.path, query: input.query, apiVersion: input.apiVersion, readOnly: true
   }));
-  const available = pipelineResponse.parse(await read({
-    installId, path: "/opportunities/pipelines", query: { locationId: config.locationId }, apiVersion: "v3"
-  })).pipelines;
+  const available = await listGhlPipelines({ ...config, installId }, read);
   if (config.pipelineIds?.some((pipelineId) => !available.some((pipeline) => pipeline.id === pipelineId))) throw new Error("Unknown GoHighLevel pipeline");
   const pipelines = available.filter((pipeline) => !config.pipelineIds || config.pipelineIds.includes(pipeline.id));
 

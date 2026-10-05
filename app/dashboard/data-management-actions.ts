@@ -5,6 +5,8 @@ import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { deleteProjectPageGroup, saveProjectPageGroup, type ResolvedProjectPageGroup } from "../../src/projectPageGroupStore.js";
 import { getProjectPageManagementData, invalidateProjectPageInventory, saveProjectPageManager, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 import { deleteGoogleCampaignMatch, listGoogleCampaigns, saveGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
+import { deleteCrmPipelineMatch, listCrmConnections, loadCrmPipelines, saveCrmPipelineMatches } from "../../src/crmPipelineManagement.js";
+import { parseCampaignSiteMappings } from "../../src/campaignPerformance.js";
 
 export async function saveAccountManagerAction(siteId: string, path: string, managerId: number | null): Promise<
   { ok: true; page: ManagedProjectPage } | { ok: false; error: string }
@@ -71,4 +73,33 @@ export async function deleteGoogleCampaignMatchAction(accountId: string, campaig
     revalidatePath("/dashboard"); revalidatePath("/accountmanager");
     return { ok: true as const };
   } catch { return { ok: false as const, error: "De Google-campagnekoppeling kon niet worden verwijderd." }; }
+}
+
+async function crmConnections() {
+  return listCrmConnections({ mappings: parseCampaignSiteMappings(process.env.CAMPAIGN_PERFORMANCE_SITES) });
+}
+
+export async function loadCrmPipelinesAction(input: { locationId: string; installId?: string }) {
+  try {
+    const pipelines = await loadCrmPipelines(input, { connections: await crmConnections() });
+    return { ok: true as const, pipelines };
+  } catch { return { ok: false as const, error: "De CRM-pipelines konden niet worden geladen. Controleer de verbinding met het CRM-subaccount." }; }
+}
+
+export async function saveCrmPipelineMatchesAction(input: {
+  siteId: string; sourcePath: string; locationId: string; installId?: string; pipelineIds: string[];
+}) {
+  try {
+    const matches = await saveCrmPipelineMatches(input, { connections: await crmConnections() });
+    revalidatePath("/dashboard"); revalidatePath("/accountmanager");
+    return { ok: true as const, matches };
+  } catch { return { ok: false as const, error: "De CRM-pipelines konden niet worden gekoppeld. Vernieuw de gegevens en controleer de selectie." }; }
+}
+
+export async function deleteCrmPipelineMatchAction(locationId: string, pipelineId: string) {
+  try {
+    await deleteCrmPipelineMatch(locationId, pipelineId);
+    revalidatePath("/dashboard"); revalidatePath("/accountmanager");
+    return { ok: true as const };
+  } catch { return { ok: false as const, error: "De CRM-pipelinekoppeling kon niet worden verwijderd. Probeer opnieuw." }; }
 }
