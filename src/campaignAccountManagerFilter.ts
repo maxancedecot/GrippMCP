@@ -37,7 +37,7 @@ export function summarizeFilteredCampaignProjects(projects: CampaignProjectRow[]
   const appointments = projects.filter((project) => project.appointments !== null)
     .reduce((sum, project) => sum + (project.appointments ?? 0), 0);
   const conversions = measured.reduce((sum, project) => sum + (project.leads ?? 0)
-    + (project.leadSource === "crm" ? 0 : project.appointments ?? 0), 0);
+    + (project.appointments ?? 0), 0);
   return {
     visitors,
     leads,

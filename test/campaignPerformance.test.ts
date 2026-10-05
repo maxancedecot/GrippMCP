@@ -400,9 +400,10 @@ test("configured GoHighLevel pipelines replace both website conversion counts", 
     env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineIds: ["project"],
       pipelineProjects: [{ pipelineId: "project", sourcePath: "/project" }] } }]),
     ghlCall: async ({ path }) => path.endsWith("/pipelines")
-      ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "appointment", name: "Appointment booked" }] }] }
+      ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Appointment booked" }] }] }
       : { opportunities: [
         { id: "a", pipelineId: "project", pipelineStageId: "appointment", createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" },
+        { id: "c", pipelineId: "project", pipelineStageId: "new", createdAt: "2026-09-08T10:00:00Z" },
         { id: "b", pipelineId: "project", pipelineStageId: "appointment", createdAt: "2026-08-08T10:00:00Z", lastStageChangeAt: "2026-08-10T10:00:00Z" }
       ], meta: {} }
   });
@@ -412,7 +413,28 @@ test("configured GoHighLevel pipelines replace both website conversion counts", 
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.appointments, 1);
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.leadSource, "crm");
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.appointmentSource, "crm");
-  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 2);
+  assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 4);
+});
+
+test("CRM project CVR stays unavailable when appointment dates are missing", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 40), conversionLink("site-a", "/bedankt-afspraak", 20)];
+  const result = await getCampaignPerformance(data, {
+    requireCrmConversions: true,
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install",
+      pipelineProjects: [{ pipelineId: "project", sourcePath: "/project" }] } }]),
+    ghlCall: async ({ path }) => path.endsWith("/pipelines")
+      ? { pipelines: [{ id: "project", name: "Project", stages: [
+        { id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" }
+      ] }] }
+      : { opportunities: [
+        { id: "lead", pipelineStageId: "new", createdAt: "2026-09-08T10:00:00Z" },
+        { id: "appointment", pipelineStageId: "appointment", createdAt: "2026-09-08T10:00:00Z" }
+      ] }
+  });
+  const project = result.projects.find((project) => project.sourcePath === "/project")!;
+  assert.deepEqual([project.leads, project.appointments, project.cvr, project.hasConversionMapping, project.crmState],
+    [1, null, null, false, "unavailable"]);
 });
 
 test("the CRM project table has no website fallback when a CRM mapping is absent", async () => {
@@ -434,16 +456,16 @@ test("CRM pipelines match managed landing pages without a thank-you mapping and 
     requireCrmConversions: true,
     ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
       ? { pipelines: [
-        { id: "social", name: "Pipeline Alpha", stages: [{ id: "social-meeting", name: "Afspraak ingepland" }] },
-        { id: "search", name: "Search", stages: [{ id: "search-meeting", name: "Afspraak ingepland" }] }
+        { id: "social", name: "Pipeline Alpha", stages: [{ id: "social-new", name: "Nieuwe lead" }, { id: "social-meeting", name: "Afspraak ingepland" }] },
+        { id: "search", name: "Search", stages: [{ id: "search-new", name: "Nieuwe lead" }, { id: "search-meeting", name: "Afspraak ingepland" }] }
       ] }
       : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: `${query?.pipelineId}-meeting`,
         createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
   });
   assert.equal(result.projects.length, 1);
   assert.deepEqual([result.projects[0].sourcePath, result.projects[0].leads, result.projects[0].appointments, result.projects[0].cvr, result.projects[0].crmState],
-    ["/project/alpha", 2, 2, 4, "connected"]);
-  assert.equal(result.rows[0].leads.data?.count, 2);
+    ["/project/alpha", 0, 2, 4, "connected"]);
+  assert.equal(result.rows[0].leads.data?.count, 0);
 });
 
 test("CRM mappings normalize grouped language pages to their primary project", async () => {
@@ -454,7 +476,7 @@ test("CRM mappings normalize grouped language pages to their primary project", a
     env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineProjects: [{ pipelineId: "alpha", sourcePath: "/home-fr/" }] } }]),
     requireCrmConversions: true,
     ghlCall: async ({ path }) => path.endsWith("/pipelines")
-      ? { pipelines: [{ id: "alpha", name: "Unrelated name", stages: [{ id: "meeting", name: "Afspraak" }] }] }
+      ? { pipelines: [{ id: "alpha", name: "Unrelated name", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }] }
       : { opportunities: [], meta: { nextPage: null } }
   });
   assert.equal(result.projects.length, 1);
@@ -467,7 +489,7 @@ test("unmatched CRM pipelines leave project conversions unavailable and explain 
   const result = await getCampaignPerformance(data, {
     env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install" } }]), requireCrmConversions: true,
     ghlCall: async ({ path }) => path.endsWith("/pipelines")
-      ? { pipelines: [{ id: "unmatched", name: "Other", stages: [{ id: "meeting", name: "Afspraak" }] }] }
+      ? { pipelines: [{ id: "unmatched", name: "Other", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }] }
       : { opportunities: [] }
   });
   assert.deepEqual([result.projects[0].leads, result.projects[0].appointments, result.projects[0].crmState], [null, null, "unavailable"]);
@@ -1352,16 +1374,16 @@ test("saved CRM mappings override configured names, stay scoped to one website, 
     crmMatches, requireCrmConversions: true,
     ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
       ? { pipelines: [
-        { id: "social", name: "Alpha", stages: [{ id: "meeting", name: "Afspraak" }] },
-        { id: "search", name: "Unrelated", stages: [{ id: "meeting", name: "Afspraak" }] }
+        { id: "social", name: "Alpha", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] },
+        { id: "search", name: "Unrelated", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }
       ] }
       : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: "meeting",
         createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
   });
   assert.equal(result.projects.filter((project) => project.siteId === "site-a").length, 0);
   const project = result.projects.find((project) => project.siteId === "site-b")!;
-  assert.deepEqual([project.sourcePath, project.leads, project.appointments, project.cvr], ["/alpha", 2, 2, 4]);
-  assert.equal(result.rows.find((row) => row.siteId === "site-b")?.leads.data?.count, 2);
+  assert.deepEqual([project.sourcePath, project.leads, project.appointments, project.cvr], ["/alpha", 0, 2, 4]);
+  assert.equal(result.rows.find((row) => row.siteId === "site-b")?.leads.data?.count, 0);
 });
 
 test("saved CRM mappings include pipelines excluded by legacy configuration and normalize grouped project pages", async () => {
@@ -1374,12 +1396,12 @@ test("saved CRM mappings include pipelines excluded by legacy configuration and 
     crmMatches: [{ siteId: "site-a", sourcePath: "/home-fr", locationId: "location", installId: "install", pipelineId: "new", pipelineName: "New" }],
     requireCrmConversions: true,
     ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
-      ? { pipelines: ["legacy", "new"].map((id) => ({ id, name: id, stages: [{ id: "meeting", name: "Afspraak" }] })) }
+      ? { pipelines: ["legacy", "new"].map((id) => ({ id, name: id, stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] })) }
       : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: "meeting",
         createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
   });
   assert.equal(result.projects.length, 1);
-  assert.deepEqual([result.projects[0].sourcePath, result.projects[0].leads, result.projects[0].appointments], ["/home", 2, 2]);
+  assert.deepEqual([result.projects[0].sourcePath, result.projects[0].leads, result.projects[0].appointments], ["/home", 0, 2]);
 });
 
 test("one project can aggregate saved pipelines from multiple CRM subaccounts", async () => {
@@ -1393,10 +1415,10 @@ test("one project can aggregate saved pipelines from multiple CRM subaccounts", 
     ghlCall: async ({ path, query, installId }) => {
       assert.equal(installId, `install-${query?.locationId}`);
       return path.endsWith("/pipelines")
-        ? { pipelines: [{ id: "shared-id", name: "Campaign", stages: [{ id: "meeting", name: "Afspraak" }] }] }
+        ? { pipelines: [{ id: "shared-id", name: "Campaign", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }] }
         : { opportunities: [{ id: "lead", pipelineId: "shared-id", pipelineStageId: "meeting",
           createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] };
     }
   });
-  assert.deepEqual([result.projects[0].leads, result.projects[0].appointments], [2, 2]);
+  assert.deepEqual([result.projects[0].leads, result.projects[0].appointments], [0, 2]);
 });

@@ -204,10 +204,10 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
       : project.crmState === "not_configured" ? "CRM niet gekoppeld"
       : crm?.errors.has(project.siteId) ? crm.errorMessages?.get(project.siteId) ?? "CRM niet beschikbaar"
       : counts ? "CRM-conversiemeting onvolledig" : "CRM-pipeline nog aan dit project te koppelen";
-    // New opportunities already include leads that booked an appointment.
-    project.cvr = project.visitors === null || project.leads === null ? null
-      : project.visitors > 0 ? project.leads / project.visitors * 100 : 0;
-    project.hasConversionMapping = !!counts && project.leads !== null;
+    // Current CRM stages separate new leads from appointments.
+    project.cvr = project.visitors === null || project.leads === null || project.appointments === null ? null
+      : project.visitors > 0 ? (project.leads + project.appointments) / project.visitors * 100 : 0;
+    project.hasConversionMapping = !!counts && project.leads !== null && project.appointments !== null;
   }
   return {
     projects: [...projects.values()].sort((a, b) => a.siteName.localeCompare(b.siteName) || a.title.localeCompare(b.title)),

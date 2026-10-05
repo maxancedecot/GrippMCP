@@ -1,12 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { countGhlAppointments, ghlConversionsByPipeline, isAppointmentStage, type GhlReadCall } from "../src/ghl/appointmentConversions.js";
+import { countGhlAppointments, ghlConversionsByPipeline, isAppointmentStage, isNewLeadStage, type GhlReadCall } from "../src/ghl/appointmentConversions.js";
+
+test("new leads recognize only the explicit new-lead stage", () => {
+  for (const name of ["Nieuwe lead", " NIEUWE  LEAD ", "New lead", "New leads"]) assert.equal(isNewLeadStage(name), true, name);
+  for (const name of ["Lead", "Lead opvolgen", "Gekwalificeerde lead", "Afspraak", "Nieuwe lead geannuleerd"]) {
+    assert.equal(isNewLeadStage(name), false, name);
+  }
+});
 
 test("appointment stages recognize Dutch and English labels but exclude cancelled stages", () => {
-  for (const name of ["Afspraak ingepland", "Appointment booked", "Consultation", "Bezichtiging", "Demo scheduled", "Intakegesprek"]) {
+  for (const name of ["Afspraak", " AFSPRAAK  ", "Afspraak ingepland", "Appointment booked", "Appointment"]) {
     assert.equal(isAppointmentStage(name), true, name);
   }
-  for (const name of ["Nieuwe lead", "Appointment cancelled", "Afspraak geannuleerd", "No-show meeting"]) {
+  for (const name of ["Nieuwe lead", "Appointment cancelled", "Afspraak geannuleerd", "No-show meeting", "Consultation", "Bezichtiging", "Demo scheduled", "Intakegesprek", "Afspraak aanvragen", "Geen afspraak"]) {
     assert.equal(isAppointmentStage(name), false, name);
   }
 });
@@ -32,16 +39,16 @@ test("CRM leads use creation date while appointments use stage date, deduplicati
     ], meta: { nextPage: null } };
   };
   const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" }, { start: "2026-09-08", end: "2026-09-14" }, call);
-  assert.deepEqual(result, [{ pipelineId: "project", pipelineName: "Project", leads: 3, appointments: 1 }]);
+  assert.deepEqual(result, [{ pipelineId: "project", pipelineName: "Project", leads: 1, appointments: 1 }]);
   assert.deepEqual(pages, [1, 2]);
 });
 
 test("CRM counts preserve zero but never fabricate counts from malformed responses or missing dates", async () => {
   const config = { locationId: "location", installId: "install" }, period = { start: "2026-09-08", end: "2026-09-14" };
-  const pipeline = { pipelines: [{ id: "project", name: "Project", stages: [{ id: "meeting", name: "Appointment booked" }] }] };
+  const pipeline = { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Appointment booked" }] }] };
   const read = (opportunities: unknown): GhlReadCall => async ({ path }) => path.endsWith("/pipelines") ? pipeline : opportunities;
   assert.deepEqual(await ghlConversionsByPipeline(config, period, read({ opportunities: [] })), [{ pipelineId: "project", pipelineName: "Project", leads: 0, appointments: 0 }]);
-  assert.deepEqual(await ghlConversionsByPipeline(config, period, read({ opportunities: [{ id: "one", pipelineStageId: "meeting" }] })),
+  assert.deepEqual(await ghlConversionsByPipeline(config, period, read({ opportunities: [{ id: "one", pipelineStageId: "meeting" }, { id: "two", pipelineStageId: "new" }] })),
     [{ pipelineId: "project", pipelineName: "Project", leads: null, appointments: null }]);
   await assert.rejects(ghlConversionsByPipeline(config, period, read({ error: "unauthorized" })));
   await assert.rejects(ghlConversionsByPipeline({ ...config, pipelineIds: ["missing"] }, period, read({ opportunities: [] })));
@@ -76,27 +83,97 @@ test("GoHighLevel appointments count unique opportunities entering matching stag
 
 test("nullable appointment fields do not discard valid CRM lead dates", async () => {
   const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-    ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "meeting", name: "Afspraak" }] }] }
+    ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }] }
     : { opportunities: [
       { id: "new", pipelineId: "project", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z", lastStageChangeAt: null },
       { id: "meeting", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-09-10T12:00:00Z", lastStageChangeAt: null }
     ], meta: { nextPage: null } };
   assert.deepEqual(await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
     { start: "2026-09-08", end: "2026-09-14" }, call),
-    [{ pipelineId: "project", pipelineName: "Project", leads: 2, appointments: null }]);
+    [{ pipelineId: "project", pipelineName: "Project", leads: 1, appointments: null }]);
+});
+
+test("moving a new lead into Afspraak changes its bucket without double counting", async () => {
+  let stage = "new";
+  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
+    ? { pipelines: [{ id: "project", name: "Project", stages: [
+      { id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" },
+      { id: "follow-up", name: "Lead opvolgen" }, { id: "cancelled", name: "Afspraak geannuleerd" }
+    ] }] }
+    : { opportunities: [
+      { id: "one", pipelineStageId: stage, createdAt: "2026-09-10T12:00:00Z", lastStageChangeAt: "2026-09-11T12:00:00Z" },
+      { id: "follow-up", pipelineStageId: "follow-up" }, { id: "cancelled", pipelineStageId: "cancelled" }
+    ] };
+  const count = () => ghlConversionsByPipeline({ locationId: "location", installId: "install" },
+    { start: "2026-09-08", end: "2026-09-14" }, call);
+  assert.deepEqual((await count()).map(({ leads, appointments }) => [leads, appointments]), [[1, 0]]);
+  stage = "appointment";
+  assert.deepEqual((await count()).map(({ leads, appointments }) => [leads, appointments]), [[0, 1]]);
+});
+
+test("a stage change between paginated duplicates cannot count an opportunity in both buckets", async () => {
+  const call: GhlReadCall = async ({ path, query }) => path.endsWith("/pipelines")
+    ? { pipelines: [{ id: "project", name: "Project", stages: [
+      { id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" }
+    ] }] }
+    : query?.page === 1
+      ? { opportunities: [{ id: "one", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: 2 } }
+      : { opportunities: [
+        { id: "one", pipelineStageId: "appointment", lastStageChangeAt: "2026-09-11T12:00:00Z" },
+        { id: "two", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }
+      ], meta: { nextPage: null } };
+  const counts = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
+    { start: "2026-09-08", end: "2026-09-14" }, call);
+  assert.deepEqual(counts.map(({ leads, appointments }) => [leads, appointments]), [[1, 1]]);
+});
+
+test("missing configured stages or opportunity stages leave counts unavailable", async () => {
+  const config = { locationId: "location", installId: "install" }, period = { start: "2026-09-08", end: "2026-09-14" };
+  const stages = [{ id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" }];
+  for (const missingStage of [null, undefined, "unknown"]) {
+    const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
+      ? { pipelines: [{ id: "project", name: "Project", stages }] }
+      : { opportunities: [{ id: "one", pipelineStageId: missingStage, createdAt: "2026-09-10T12:00:00Z" }] };
+    assert.deepEqual((await ghlConversionsByPipeline(config, period, call)).map(({ leads, appointments }) => [leads, appointments]), [[null, null]]);
+  }
+  for (const [configuredStages, expected] of [
+    [[], [null, null]], [[stages[0]], [0, null]], [[stages[1]], [null, 0]]
+  ] as const) {
+    const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
+      ? { pipelines: [{ id: "project", name: "Project", stages: configuredStages }] }
+      : { opportunities: [] };
+    assert.deepEqual((await ghlConversionsByPipeline(config, period, call)).map(({ leads, appointments }) => [leads, appointments]), [expected]);
+  }
+});
+
+test("appointments do not require lead creation dates and missing lead dates only invalidate leads", async () => {
+  let includeLead = false;
+  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
+    ? { pipelines: [{ id: "project", name: "Project", stages: [
+      { id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" }
+    ] }] }
+    : { opportunities: [
+      { id: "one", pipelineStageId: "appointment", createdAt: null, lastStageChangeAt: "2026-09-10T12:00:00Z" },
+      ...(includeLead ? [{ id: "two", pipelineStageId: "new" }] : [])
+    ] };
+  const count = () => ghlConversionsByPipeline({ locationId: "location", installId: "install" },
+    { start: "2026-09-08", end: "2026-09-14" }, call);
+  assert.deepEqual((await count()).map(({ leads, appointments }) => [leads, appointments]), [[0, 1]]);
+  includeLead = true;
+  assert.deepEqual((await count()).map(({ leads, appointments }) => [leads, appointments]), [[null, 1]]);
 });
 
 test("CRM pagination accepts flags, zero and numeric strings without mixing page and cursor pagination", async () => {
   for (const continuation of [true, "true", "2", 2]) for (const terminal of [false, "false", 0, "0", -1, "-1", "", null]) {
     const pages: unknown[] = [];
     const call: GhlReadCall = async ({ path, query }) => {
-      if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [] }] };
+      if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }] }] };
       pages.push(query?.page);
-      if (query?.page === 1) return { opportunities: [{ id: "first", createdAt: "2026-09-10T12:00:00Z" }],
+      if (query?.page === 1) return { opportunities: [{ id: "first", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }],
         meta: { nextPage: continuation, startAfter: 123, startAfterId: "first" } };
       assert.equal(query?.startAfter, undefined);
       assert.equal(query?.startAfterId, undefined);
-      return { opportunities: [{ id: "second", createdAt: "2026-09-11T12:00:00Z" }], meta: { nextPage: terminal } };
+      return { opportunities: [{ id: "second", pipelineStageId: "new", createdAt: "2026-09-11T12:00:00Z" }], meta: { nextPage: terminal } };
     };
     const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
       { start: "2026-09-08", end: "2026-09-14" }, call);
@@ -108,8 +185,8 @@ test("CRM pagination accepts flags, zero and numeric strings without mixing page
 test("CRM pagination rejects repeated pages rather than returning incomplete totals", async () => {
   let requests = 0;
   const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-    ? { pipelines: [{ id: "project", name: "Project", stages: [] }] }
-    : (requests++, { opportunities: [{ id: "repeated", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: true } });
+    ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }] }] }
+    : (requests++, { opportunities: [{ id: "repeated", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: true } });
   await assert.rejects(ghlConversionsByPipeline({ locationId: "location", installId: "install" },
     { start: "2026-09-08", end: "2026-09-14" }, call), /Repeated GoHighLevel/);
   assert.equal(requests, 2);
@@ -118,11 +195,11 @@ test("CRM pagination rejects repeated pages rather than returning incomplete tot
 test("CRM pipelines with more than 100 leads count the entire last page", async () => {
   const pages: unknown[] = [];
   const call: GhlReadCall = async ({ path, query }) => {
-    if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [] }] };
+    if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }] }] };
     pages.push(query?.page);
     return query?.page === 1
-      ? { opportunities: Array.from({ length: 100 }, (_, id) => ({ id: String(id), createdAt: "2026-09-10T12:00:00Z" })), meta: { nextPage: "2" } }
-      : { opportunities: [{ id: "last", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: 0 } };
+      ? { opportunities: Array.from({ length: 100 }, (_, id) => ({ id: String(id), pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" })), meta: { nextPage: "2" } }
+      : { opportunities: [{ id: "last", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: 0 } };
   };
   const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
     { start: "2026-09-08", end: "2026-09-14" }, call);

@@ -109,10 +109,10 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       <section className="campaign-channel-grid" aria-label="Advertentie- en website-KPI's">
         <ChannelPanel name="Google" sources={googleSources} comparison={googleComparison} />
         <ChannelPanel name="Facebook" sources={facebookSources} linkCtr={facebookLinkCtr} comparison={facebookComparison} />
-        <ConversionPanel name="Leads" summary={leadSummary} detail="Nieuwe opportunities in de gekoppelde GoHighLevel-projectpipelines binnen de gekozen periode." />
+        <ConversionPanel name="Leads" summary={leadSummary} detail="Opportunities in de fase Nieuwe lead van de gekoppelde GoHighLevel-projectpipelines, aangemaakt binnen de gekozen periode." />
         <ConversionPanel name="Afspraken" summary={appointmentSummary}
-          detail="Unieke opportunities in afspraakfasen van de gekoppelde GoHighLevel-projectpipelines, met een fasewijziging binnen de gekozen periode." />
-        <WebsiteCvrPanel value={percentage(cvr)} detail="CRM-leads gedeeld door websitebezoekers van de gekoppelde projectpagina’s"
+          detail="Opportunities in de fase Afspraak van de gekoppelde GoHighLevel-projectpipelines, met een fasewijziging binnen de gekozen periode." />
+        <WebsiteCvrPanel value={percentage(cvr)} detail="CRM-leads en afspraken gedeeld door websitebezoekers van de gekoppelde projectpagina’s"
           comparison={formatBelowAverage(websiteComparison, "project", "projecten", "CVR")}
           availability={projectSummary.measuredProjects > 0 ? `${projectSummary.measuredProjects} van ${projects.length} projectpagina’s met metingen` : "Nog geen conversiemetingen"} />
       </section>
@@ -120,7 +120,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
         <CampaignProjectTable info={<details className="campaign-project-info">
           <summary aria-label="Meer informatie over de projectcijfers" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
-          <div className="campaign-info-content"><p>Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Leads en afspraken komen uit de gekoppelde GoHighLevel-projectpipeline. Ontbrekende CRM-data wordt met een streepje en een melding getoond. Project-CVR is CRM-leads gedeeld door websitebezoekers; afspraken worden niet nogmaals bij leads opgeteld.</p></div>
+          <div className="campaign-info-content"><p>Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Leads en afspraken komen uit de gekoppelde GoHighLevel-projectpipeline. Ontbrekende CRM-data wordt met een streepje en een melding getoond. Leads tellen alleen mee in de fase Nieuwe lead; afspraken alleen in de fase Afspraak. Project-CVR is (leads + afspraken) gedeeld door websitebezoekers.</p></div>
         </details>} columns={[
           { key: "title", label: "Projectpagina", text: true },
           { key: "live", label: "Facebook live" },
