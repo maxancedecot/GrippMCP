@@ -5,6 +5,7 @@ import { CRM_PIPELINE_MATCHES_KEY, deleteCrmPipelineMatch, getCrmPipelineRevisio
 import type { CrmPipelineMatch } from "../src/crmPipelineManagement.js";
 import type { GhlReadCall } from "../src/ghl/appointmentConversions.js";
 import { listAgencyCrmSubaccounts } from "../src/ghl/crmSubaccounts.js";
+import { CrmPipelineLoadError } from "../src/crmPipelineErrors.js";
 
 function match(overrides: Partial<CrmPipelineMatch> = {}): CrmPipelineMatch {
   return { siteId: "site-a", sourcePath: "/alpha", locationId: "location", installId: "install", pipelineId: "one", pipelineName: "Social", ...overrides };
@@ -200,4 +201,32 @@ test("uninstalled, wrong, or inaccessible accounts cannot create location creden
   await assert.rejects(loadCrmPipelines({ ...selected, locationId: "unknown" }, { connections: [selected], appId: "app",
     call: async () => { assert.fail("Unknown accounts must be rejected before contacting the CRM"); }
   }));
+});
+
+test("installation verification finds the selected authorized subaccount on subsequent v3 pages", async () => {
+  const selected = { locationId: "hbp", installId: "hbp", label: "HBP", companyInstallId: "agency", companyId: "company", needsConnection: true };
+  let checks = 0, exchanges = 0;
+  const pipelines = await loadCrmPipelines(selected, { connections: [selected], appId: "app",
+    connectLocation: async (_, locationId) => { exchanges++; assert.equal(locationId, "hbp"); return { installId: "hbp", locationId: "hbp" }; },
+    call: async ({ path, query }) => {
+      if (path === "/opportunities/pipelines") return { pipelines: [{ id: "leads", name: "Leads" }] };
+      checks++;
+      assert.equal(query?.locationId, "hbp"); assert.equal(query?.restrictToUserLocations, true);
+      return !query?.pageToken ? { items: [{ _id: "other", isInstalled: true }], pagination: { hasNextPage: true, nextPageToken: "second" } }
+        : { items: [{ _id: "hbp", isInstalled: true }], pagination: { hasNextPage: false } };
+    }
+  });
+  assert.deepEqual(pipelines, [{ id: "leads", name: "Leads" }]);
+  assert.equal(checks, 2); assert.equal(exchanges, 1);
+});
+
+test("incomplete installation pagination cannot be mistaken for a missing app or create credentials", async () => {
+  const selected = { locationId: "hbp", installId: "hbp", label: "HBP", companyInstallId: "agency", companyId: "company", needsConnection: true };
+  for (const pagination of [{ hasNextPage: true }, { hasNextPage: true, nextPageToken: "repeated" }]) {
+    await assert.rejects(loadCrmPipelines(selected, { connections: [selected], appId: "app",
+      connectLocation: async () => { assert.fail("No credentials before authorization verification"); },
+      call: async () => ({ items: [{ _id: "other", isInstalled: true }], pagination })
+    }), (error: unknown) => error instanceof CrmPipelineLoadError && error.stage === "installation_check"
+      && error.cause instanceof Error && /Incomplete/.test(error.cause.message));
+  }
 });

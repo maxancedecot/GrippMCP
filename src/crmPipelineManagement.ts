@@ -8,6 +8,8 @@ import { listGhlPipelines, type GhlReadCall } from "./ghl/appointmentConversions
 import { connectAgencyCrmSubaccount, listAgencyCrmSubaccounts, readGhl } from "./ghl/crmSubaccounts.js";
 import type { GhlInstallationSummary } from "./ghl/types.js";
 import type { CampaignSiteMapping } from "./campaignPerformance.js";
+import { CrmPipelineLoadError } from "./crmPipelineErrors.js";
+import { GrippMcpError } from "./errors.js";
 
 export const CRM_PIPELINE_MATCHES_KEY = "data-management:crm-pipeline-projects:v1";
 const id = z.string().trim().min(1).max(200);
@@ -130,7 +132,9 @@ export async function loadCrmPipelines(input: { locationId: string; installId?: 
 }) {
   const selected = requireConnection(input, options.connections);
   const connection = selected.needsConnection ? await connectAgencyCrmSubaccount(selected, options) : selected;
-  const pipelines = await listGhlPipelines(connection, options.call);
+  const pipelines = await listGhlPipelines(connection, options.call).catch((error: unknown) => {
+    throw new CrmPipelineLoadError("pipelines", error);
+  });
   return pipelines.map(({ id, name }) => ({ id, name })) satisfies CrmPipelineOption[];
 }
 
@@ -174,6 +178,6 @@ export async function deleteCrmPipelineMatch(locationIdInput: string, pipelineId
 function requireConnection(input: { locationId: string; installId?: string }, connections: CrmConnection[]) {
   const locationId = id.parse(input.locationId), installId = id.optional().parse(input.installId);
   const connection = connections.find((item) => item.locationId === locationId && item.installId === installId);
-  if (!connection) throw new Error("Unknown CRM connection");
+  if (!connection) throw new GrippMcpError("crm_connection_changed", "Unknown CRM connection");
   return connection;
 }

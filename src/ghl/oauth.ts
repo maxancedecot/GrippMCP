@@ -1,5 +1,6 @@
 import { getGhlTokenRecord, saveGhlTokenRecord } from "./tokenStore.js";
 import { GhlTokenRecord, GhlTokenResponse } from "./types.js";
+import { GrippMcpError } from "../errors.js";
 
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
 const LOCATION_TOKEN_URLS = [
@@ -141,7 +142,7 @@ async function postLocationToken(accessToken: string, body: URLSearchParams): Pr
       return payload;
     }
 
-    lastError = new Error(`GoHighLevel location token exchange failed: ${formatGhlError(response, payload)}`);
+    lastError = new GrippMcpError("ghl_upstream_error", "GoHighLevel location token exchange failed.", { status: response.status });
     if (response.status !== 404) {
       break;
     }

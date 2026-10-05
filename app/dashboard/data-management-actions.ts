@@ -7,6 +7,7 @@ import { getProjectPageManagementData, invalidateProjectPageInventory, saveProje
 import { deleteGoogleCampaignMatch, listGoogleCampaigns, saveGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
 import { deleteCrmPipelineMatch, listCrmConnections, loadCrmPipelines, saveCrmPipelineMatches } from "../../src/crmPipelineManagement.js";
 import { parseCampaignSiteMappings } from "../../src/campaignPerformance.js";
+import { CrmPipelineLoadError, crmPipelineLoadErrorMessage } from "../../src/crmPipelineErrors.js";
 
 export async function saveAccountManagerAction(siteId: string, path: string, managerId: number | null): Promise<
   { ok: true; page: ManagedProjectPage } | { ok: false; error: string }
@@ -83,7 +84,7 @@ export async function loadCrmPipelinesAction(input: { locationId: string; instal
   try {
     const pipelines = await loadCrmPipelines(input, { connections: await crmConnections() });
     return { ok: true as const, pipelines };
-  } catch { return { ok: false as const, error: "De CRM-pipelines konden niet worden geladen. Controleer of de app in dit subaccount geïnstalleerd is en de CRM-verbinding toegang heeft." }; }
+  } catch (error) { return { ok: false as const, error: crmPipelineLoadErrorMessage(error) }; }
 }
 
 export async function saveCrmPipelineMatchesAction(input: {
@@ -93,7 +94,7 @@ export async function saveCrmPipelineMatchesAction(input: {
     const matches = await saveCrmPipelineMatches(input, { connections: await crmConnections() });
     revalidatePath("/dashboard"); revalidatePath("/accountmanager");
     return { ok: true as const, matches };
-  } catch { return { ok: false as const, error: "De CRM-pipelines konden niet worden gekoppeld. Vernieuw de gegevens en controleer de selectie." }; }
+  } catch (error) { return { ok: false as const, error: error instanceof CrmPipelineLoadError ? crmPipelineLoadErrorMessage(error) : "De CRM-pipelines konden niet worden gekoppeld. Vernieuw de gegevens en controleer de selectie." }; }
 }
 
 export async function deleteCrmPipelineMatchAction(locationId: string, pipelineId: string) {

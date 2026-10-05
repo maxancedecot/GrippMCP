@@ -3,6 +3,8 @@ import { GhlClient } from "./client.js";
 import { createGhlLocationToken, getGhlAppId } from "./oauth.js";
 import type { GhlReadCall } from "./appointmentConversions.js";
 import type { GhlInstallationSummary } from "./types.js";
+import { GrippMcpError } from "../errors.js";
+import { CrmPipelineLoadError } from "../crmPipelineErrors.js";
 
 const id = z.string().trim().min(1).max(200);
 const directoryResponse = z.object({ locations: z.array(z.object({
@@ -39,15 +41,31 @@ export async function connectAgencyCrmSubaccount(connection: {
   connectLocation?: (companyInstallId: string, locationId: string) => Promise<{ installId: string; locationId?: string }>;
 } = {}) {
   if (!connection.companyInstallId || !connection.companyId) throw new Error("Agency connection required");
-  const response = z.object({ items: z.array(z.object({ _id: id, isInstalled: z.boolean() })) }).parse(await (options.call ?? readGhl)({
-    installId: connection.companyInstallId, path: "/oauth/installed-locations", apiVersion: "v3",
-    query: { companyId: connection.companyId, appId: options.appId ?? getGhlAppId(), locationId: connection.locationId,
-      isInstalled: true, restrictToUserLocations: true, pageSize: 100 }
-  }));
-  if (!response.items.some((item) => item._id === connection.locationId && item.isInstalled)) {
-    throw new Error("App is not authorized for this CRM subaccount");
-  }
-  const record = await (options.connectLocation ?? createGhlLocationToken)(connection.companyInstallId, connection.locationId);
-  if (record.locationId !== connection.locationId || record.installId !== connection.installId) throw new Error("Unexpected CRM installation");
-  return { ...connection, installId: record.installId };
+  try {
+    const pageTokens = new Set<string>();
+    let pageToken: string | undefined;
+    let installed = false;
+    for (let page = 0; page < 100; page++) {
+      const response = z.object({ items: z.array(z.object({ _id: id, isInstalled: z.boolean() })),
+        pagination: z.object({ hasNextPage: z.boolean().optional(), nextPageToken: z.string().nullish() }).optional()
+      }).parse(await (options.call ?? readGhl)({
+        installId: connection.companyInstallId, path: "/oauth/installed-locations", apiVersion: "v3",
+        query: { companyId: connection.companyId, appId: options.appId ?? getGhlAppId(), locationId: connection.locationId,
+          isInstalled: true, restrictToUserLocations: true, pageSize: 100, ...(pageToken ? { pageToken } : {}) }
+      }));
+      if (response.items.some((item) => item._id === connection.locationId && item.isInstalled)) { installed = true; break; }
+      const next = response.pagination?.nextPageToken;
+      if (response.pagination?.hasNextPage === false || (!response.pagination?.hasNextPage && !next)) break;
+      if (!next || pageTokens.has(next) || page === 99) throw new Error("Incomplete CRM installation pagination");
+      pageTokens.add(next); pageToken = next;
+    }
+    if (!installed) {
+      throw new GrippMcpError("crm_app_not_installed", "App is not authorized for this CRM subaccount");
+    }
+  } catch (error) { throw new CrmPipelineLoadError("installation_check", error); }
+  try {
+    const record = await (options.connectLocation ?? createGhlLocationToken)(connection.companyInstallId, connection.locationId);
+    if (record.locationId !== connection.locationId || record.installId !== connection.installId) throw new Error("Unexpected CRM installation");
+    return { ...connection, installId: record.installId };
+  } catch (error) { throw new CrmPipelineLoadError("location_connection", error); }
 }
