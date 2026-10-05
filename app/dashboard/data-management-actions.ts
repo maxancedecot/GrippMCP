@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { deleteProjectPageGroup, saveProjectPageGroup, type ResolvedProjectPageGroup } from "../../src/projectPageGroupStore.js";
 import { getProjectPageManagementData, invalidateProjectPageInventory, saveProjectPageManager, type ManagedProjectPage } from "../../src/projectPageManagement.js";
+import { deleteFacebookCampaignMatch, listFacebookCampaigns, saveFacebookCampaignMatches } from "../../src/facebookCampaignManagement.js";
 import { deleteGoogleCampaignMatch, listGoogleCampaigns, saveGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
 import { deleteCrmPipelineMatch, listCrmConnections, loadCrmPipelines, saveCrmPipelineMatches } from "../../src/crmPipelineManagement.js";
 import { parseCampaignSiteMappings } from "../../src/campaignPerformance.js";
@@ -74,6 +75,29 @@ export async function deleteGoogleCampaignMatchAction(accountId: string, campaig
     revalidatePath("/dashboard"); revalidatePath("/accountmanager");
     return { ok: true as const };
   } catch { return { ok: false as const, error: "De Google-campagnekoppeling kon niet worden verwijderd." }; }
+}
+
+export async function loadFacebookCampaignsAction(accountId: string) {
+  try { return { ok: true as const, ...await listFacebookCampaigns(accountId) }; }
+  catch { return { ok: false as const, error: "De Facebook Ads-campagnes konden niet worden geladen. Controleer het advertentieaccount-ID en de accounttoegang." }; }
+}
+
+export async function saveFacebookCampaignMatchesAction(input: { siteId: string; accountId: string; campaignIds: string[]; sourcePath: string }) {
+  try {
+    const matches = await saveFacebookCampaignMatches(input);
+    await invalidateProjectPageInventory();
+    revalidatePath("/dashboard"); revalidatePath("/accountmanager");
+    return { ok: true as const, matches };
+  } catch { return { ok: false as const, error: "De Facebook-campagnes konden niet worden gekoppeld. Vernieuw de gegevens en probeer opnieuw." }; }
+}
+
+export async function deleteFacebookCampaignMatchAction(accountId: string, campaignId: string) {
+  try {
+    await deleteFacebookCampaignMatch(accountId, campaignId);
+    await invalidateProjectPageInventory();
+    revalidatePath("/dashboard"); revalidatePath("/accountmanager");
+    return { ok: true as const };
+  } catch { return { ok: false as const, error: "De Facebook-campagnekoppeling kon niet worden verwijderd." }; }
 }
 
 async function crmConnections() {

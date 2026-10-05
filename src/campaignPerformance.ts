@@ -68,7 +68,7 @@ const mappingSchema = z.object({
     calendarIds: z.array(id).min(1).optional() }).strict().optional()
 }).strict();
 export type CampaignSiteMapping = z.infer<typeof mappingSchema>;
-type FacebookAccountScope = NonNullable<CampaignSiteMapping["facebook"]> & { requiredCampaignIds?: string[] };
+type FacebookAccountScope = NonNullable<CampaignSiteMapping["facebook"]> & { requiredCampaignIds?: string[]; manualCampaignIds?: string[] };
 type FacebookLinkScope = { adAccountId: string; campaigns: AdCampaign[] };
 type CampaignDestinations = { campaignId: string; urls: string[] }[];
 type CachedCampaignDestinations = { checkedAt: number; data: CampaignDestinations };
@@ -133,17 +133,20 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       existing.google.campaignIds = [...new Set([...(existing.google.campaignIds ?? []), match.campaignId])];
     }
   }
+  const manualFacebookMatches = projectMatches.filter((match) => (match.channel ?? "facebook") === "facebook");
+  const manualFacebookIds = new Set(manualFacebookMatches.map((match) => `${match.accountId}:${match.campaignId}`));
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? new Date();
   // Do not discover real ad accounts when the dashboard is in demo mode.
   const sites = dashboard.source.mode === "live" ? dashboard.sites : [];
   const discovery = await discoverMetaAccounts({ sites: sites.length ? options.discoverySites ?? sites : [], env, now,
     period: dashboard.period, fetchImpl: options.fetchImpl, force: options.forceMetaSync });
+  const discoveredMatches = discovery.matches.filter((match) => !manualFacebookIds.has(`${match.accountId}:${match.campaignId}`));
   const savedMatches = new Set(projectMatches.map((match) => `${match.channel ?? "facebook"}:${match.siteId}:${match.accountId}:${match.campaignId}`));
-  projectMatches.push(...discovery.matches.filter((match) => !savedMatches.has(`facebook:${match.siteId}:${match.accountId}:${match.campaignId}`)));
+  projectMatches.push(...discoveredMatches.filter((match) => !savedMatches.has(`facebook:${match.siteId}:${match.accountId}:${match.campaignId}`)));
   // Also expose verified pages to Data management without querying Meta from that tab.
   if (!options.fetchImpl && discovery.sync.state === "connected" && !discovery.sync.message) {
-    await writeJsonCache(META_DISCOVERED_PROJECT_MATCHES_KEY, discovery.matches).catch(() => undefined);
+    await writeJsonCache(META_DISCOVERED_PROJECT_MATCHES_KEY, discoveredMatches).catch(() => undefined);
   }
   const signal = AbortSignal.timeout(45_000);
   const request = async (url: string, init: RequestInit = {}): Promise<unknown> => {
@@ -181,7 +184,14 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       const mapping = mappings.find((item) => item.siteId === site.id);
       const scopes = new Map<string, FacebookAccountScope>();
       if (mapping?.facebook) scopes.set(mapping.facebook.adAccountId, { ...mapping.facebook, requiredCampaignIds: mapping.facebook.campaignIds });
-      for (const match of discovery.matches.filter((match) => match.siteId === site.id)) {
+      for (const match of manualFacebookMatches.filter((match) => match.siteId === site.id)) {
+        const scope = scopes.get(match.accountId) ?? { adAccountId: match.accountId, campaignIds: [] as string[], requiredCampaignIds: [] as string[] };
+        if (scope.campaignIds) scope.campaignIds = [...new Set([...scope.campaignIds, match.campaignId])];
+        scope.requiredCampaignIds = [...new Set([...(scope.requiredCampaignIds ?? []), match.campaignId])];
+        scope.manualCampaignIds = [...new Set([...(scope.manualCampaignIds ?? []), match.campaignId])];
+        scopes.set(match.accountId, scope);
+      }
+      for (const match of discoveredMatches.filter((match) => match.siteId === site.id)) {
         const scope = scopes.get(match.accountId);
         if (!scope) scopes.set(match.accountId, { adAccountId: match.accountId, campaignIds: [match.campaignId], requiredCampaignIds: [] });
         else if (scope.campaignIds) scope.campaignIds = [...new Set([...scope.campaignIds, match.campaignId])];
@@ -217,7 +227,8 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   const facebookLinkCtr = summarizeLinkCtr(rows.flatMap((row) => facebookAccountSources(row).map((account) => account.facebookLinkCtr))
     .filter((source) => source.state !== "not_configured"));
   for (const account of discovery.sync.accounts) {
-    const configuredSites = (options.discoverySites ?? sites).filter((site) => mappings.some((mapping) => mapping.siteId === site.id && mapping.facebook?.adAccountId === account.id));
+    const configuredSites = (options.discoverySites ?? sites).filter((site) => mappings.some((mapping) => mapping.siteId === site.id && mapping.facebook?.adAccountId === account.id)
+      || manualFacebookMatches.some((match) => match.siteId === site.id && match.accountId === account.id));
     account.siteNames = [...new Set([...account.siteNames, ...configuredSites.map((site) => site.name)])];
   }
   return {
@@ -230,7 +241,12 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   async function facebookForSite(site: SiteAnalyticsDashboardData["sites"][number], config: FacebookAccountScope | undefined): Promise<FacebookAccountPerformance> {
     const key = JSON.stringify(config);
     if (!facebookRequests.has(key)) facebookRequests.set(key, loadFacebook(config));
-    const facebook = await facebookRequests.get(key)!;
+    const loaded = await facebookRequests.get(key)!;
+    // A manual assignment wins over creatives still pointing to another website.
+    const facebook: CampaignSource<AdPerformance> = loaded.data ? { ...loaded, data: { ...loaded.data,
+      campaigns: loaded.data.campaigns.filter((campaign) => !manualFacebookIds.has(`${loaded.data.accountId}:${campaign.id}`)
+        || manualFacebookMatches.some((match) => match.accountId === loaded.data.accountId && match.campaignId === campaign.id && match.siteId === site.id))
+    } } : loaded;
     const explicitMatches = projectMatches.filter((match) => (match.channel ?? "facebook") === "facebook" && match.siteId === site.id && match.accountId === config?.adAccountId);
     const [facebookLinkCtr, destinations] = await Promise.all([
       loadPeriodFacebookLinkCtr(facebook),
@@ -504,7 +520,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       const knownIds = new Set([...currentNames.keys(), ...metrics.map((row) => row.campaign_id)]);
       for (const campaign of statuses) {
         if (config.campaignIds && !config.campaignIds.includes(campaign.id)) continue;
-        if (!isLedouxCampaign(campaign.name)) continue;
+        if (!isLedouxCampaign(campaign.name) && !config.manualCampaignIds?.includes(campaign.id)) continue;
         const start = campaign.start_time ? Date.parse(campaign.start_time) : -Infinity;
         const end = campaign.stop_time ? Date.parse(campaign.stop_time) : Infinity;
         if (Number.isNaN(start) || Number.isNaN(end)) throw new Error("Invalid campaign schedule");
@@ -515,8 +531,8 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       }
       for (const row of metrics) {
         if (config.campaignIds && !config.campaignIds.includes(row.campaign_id)) continue;
-        // Current names take precedence; historical-only rows must also identify a Ledoux campaign.
-        if (!isLedouxCampaign(currentNames.get(row.campaign_id) ?? row.campaign_name)) continue;
+        // Current names identify automatic Ledoux matches; explicit assignments also allow other campaign names.
+        if (!isLedouxCampaign(currentNames.get(row.campaign_id) ?? row.campaign_name) && !config.manualCampaignIds?.includes(row.campaign_id)) continue;
         const campaign = campaigns.get(row.campaign_id) ?? { id: row.campaign_id, name: row.campaign_name, live: false, clicks: 0, impressions: 0, spend: 0 };
         campaign.clicks += row.clicks ?? 0;
         campaign.impressions += row.impressions;

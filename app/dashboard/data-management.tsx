@@ -4,6 +4,7 @@ import { dashboardPeriodSelection, type DashboardSearchParams } from "../../src/
 import { DashboardFrame } from "../dashboard-frame.js";
 import { DataManagementBoard } from "./data-management-board.js";
 import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
+import { readFacebookCampaignMatches } from "../../src/facebookCampaignManagement.js";
 import { readGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
 import { getCrmConnectionInventory, readCrmPipelineMatches } from "../../src/crmPipelineManagement.js";
 import { parseCampaignSiteMappings } from "../../src/campaignPerformance.js";
@@ -12,10 +13,11 @@ import { getJsonCacheMode } from "../../src/jsonCache.js";
 
 export async function DataManagementPage({ params }: { params: DashboardSearchParams }) {
   const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
-  const [data, dashboard, googleCampaignMatches, crm] = await Promise.all([
+  const [data, dashboard, googleCampaignMatches, facebookCampaignMatches, crm] = await Promise.all([
     getProjectPageManagementData({ force: first(params.refresh) === "1" }),
     getSiteAnalyticsDashboardData({ days: 90 }),
     readGoogleCampaignMatches(),
+    readFacebookCampaignMatches(),
     Promise.resolve().then(() => Promise.all([getCrmConnectionInventory({ mappings: parseCampaignSiteMappings(process.env.CAMPAIGN_PERFORMANCE_SITES) }), readCrmPipelineMatches()]))
       .then(([inventory, matches]) => ({ ...inventory, matches, error: "" }))
       .catch(() => ({ connections: [], matches: [], message: "", error: "De CRM-koppelingen konden niet worden geladen. Vernieuw de gegevens en probeer opnieuw." }))
@@ -49,7 +51,7 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
       <p className="data-management-intro">Beheer je accountmanagers, CRM-pipelines en campagnes per project. Kies hieronder wat je wilt aanpassen.</p>
       {data.error ? <p className="data-notice" role="alert">{data.error}</p> : null}
       <DataManagementBoard key={data.fetchedAt ?? "unavailable"}
-        data={data} mergePages={mergePages} projectGroups={dashboard.projectPageGroups ?? []} googleCampaignMatches={googleCampaignMatches}
+        data={data} mergePages={mergePages} projectGroups={dashboard.projectPageGroups ?? []} googleCampaignMatches={googleCampaignMatches} facebookCampaignMatches={facebookCampaignMatches}
         crmCount={crm.matches.length} crm={<CrmPipelineManager key={JSON.stringify([crm.connections, mergePages])} pages={mergePages}
         connections={crm.connections} initialMatches={crm.matches} error={crm.error} discoveryMessage={crm.message}
         canSave={getJsonCacheMode() !== "memory" && !crm.error && !!mergePages.length} />} />

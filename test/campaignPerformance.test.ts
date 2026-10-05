@@ -843,14 +843,15 @@ test("homepage aliases retain paused matches and show no CTR without period acti
     fetchImpl: async (input) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith("/campaigns")) return response({ data: ["1", "2", "3"].map((id) => ({ id, name: "Ledoux same project name", effective_status: id === "2" ? "PAUSED" : "ACTIVE" })) });
-      if (isLinkCtrRequest(url)) return response({ data: ["1", "3"].map((id) => ({ campaign_id: id, campaign_name: "Ledoux", inline_link_click_ctr: "5.5", impressions: "100" })) });
+      if (isLinkCtrRequest(url)) return response({ data: (url.pathname.includes("act_999") ? ["3"] : ["1", "3"]).map((id) => ({ campaign_id: id, campaign_name: "Ledoux", inline_link_click_ctr: "5.5", impressions: "100" })) });
       if (url.pathname.endsWith("/ads")) { assert.match(url.pathname, /\/3\/ads$/); return response({ data: [] }); }
       if (url.pathname.endsWith("/insights")) return response({ data: [] });
       return response({ currency: "EUR", account_status: 1 });
     }
   });
   assert.equal(result.projects.find((project) => project.key === "site-a:/home")?.campaigns[0].id, "1");
-  assert.deepEqual(result.projects.find((project) => project.key === "site-a:/other-project")?.campaigns.map(({ id, live, ctr }) => ({ id, live, ctr })), [{ id: "2", live: false, ctr: null }]);
+  assert.deepEqual(result.projects.find((project) => project.key === "site-a:/other-project")?.campaigns.map(({ id, live, ctr }) => ({ id, live, ctr })), [{ id: "2", live: false, ctr: null }, { id: "3", live: true, ctr: 5.5 }]);
+  assert.equal(result.rows[0].facebookAccounts?.length, 2, "Saved matches include an additional Facebook account");
   assert.deepEqual(result.rows[0].facebookLinkCtr.data?.campaigns.map((campaign) => campaign.id), ["1", "3"]);
   assert.deepEqual(result.unmatchedCampaigns.map((campaign) => campaign.campaignId), ["3"]);
 });
@@ -1421,4 +1422,65 @@ test("one project can aggregate saved pipelines from multiple CRM subaccounts", 
     }
   });
   assert.deepEqual([result.projects[0].leads, result.projects[0].appointments], [0, 2]);
+});
+
+
+test("manual Facebook links configure multiple accounts without discovery or environment mappings, including non-Ledoux campaign names", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 3)];
+  const requested = new Set<string>();
+  const result = await getCampaignPerformance(data, {
+    env: environment([], { META_ADS_ACCESS_TOKEN: "secret" }),
+    projectMatches: ["123", "456"].map((accountId) => ({ channel: "facebook", siteId: "site-a", accountId, campaignId: "1", sourcePaths: ["/project"] })),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      assert.doesNotMatch(url.pathname, /me\/adaccounts|\/ads$/);
+      const account = /act_(\d+)/.exec(url.pathname)?.[1];
+      assert.ok(account === "123" || account === "456"); requested.add(account);
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [
+        { id: "1", name: "Residentie Alpha", effective_status: account === "123" ? "ACTIVE" : "PAUSED" },
+        { id: "2", name: "Unrelated", effective_status: "ACTIVE" }
+      ] });
+      if (url.pathname.endsWith("/insights")) {
+        assert.deepEqual(JSON.parse(url.searchParams.get("filtering")!)[0].value, ["1"]);
+        return response({ data: [{ campaign_id: "1", campaign_name: "Residentie Alpha", impressions: "100", clicks: "10",
+          spend: account === "123" ? "5" : "10", inline_link_click_ctr: account === "123" ? "2" : "4" }] });
+      }
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.deepEqual([...requested].sort(), ["123", "456"]);
+  assert.equal(result.rows[0].facebookAccounts?.length, 2);
+  const project = result.projects.find((project) => project.sourcePath === "/project")!;
+  assert.deepEqual(project.campaigns.map(({ accountId, id, spend, live, ctr }) => [accountId, id, spend, live, ctr]),
+    [["123", "1", 5, true, 2], ["456", "1", 10, false, 4]]);
+  assert.deepEqual(summarizeFacebookProjectCampaigns(project.campaigns), { ctr: 3, spend: [{ currency: "EUR", amount: 15 }], live: true });
+  assert.deepEqual(result.unmatchedCampaigns, []);
+});
+
+test("a manual Facebook assignment overrides a creative's other website without duplicating its metrics", async () => {
+  const data = dashboard(["site-a", "site-b"]);
+  data.cvrLinks = [conversionLink("site-a", "/bedankt", 1), conversionLink("site-b", "/bedankt", 2)];
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", facebook: { adAccountId: "123" } }],
+      { META_ADS_ACCESS_TOKEN: "secret", META_ADS_AUTO_DISCOVERY: "true" }),
+    now: new Date("2026-09-16T12:00:00Z"),
+    projectMatches: [{ channel: "facebook", siteId: "site-b", accountId: "123", campaignId: "1", sourcePaths: ["/project"] }],
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/me/adaccounts")) return response({ data: [{ id: "act_123", name: "Account", account_status: 1 }] });
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", name: "Ledoux Alpha", effective_status: "ACTIVE" }] });
+      if (url.pathname.endsWith("/ads")) return response({ data: [{ id: "10", campaign_id: "1", creative: { link_url: "https://site-a.example/project" } }] });
+      if (url.pathname.endsWith("/insights")) return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux Alpha",
+        impressions: "100", clicks: "10", spend: "5", inline_link_click_ctr: "2" }] });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.deepEqual(result.projects.map((project) => [project.siteId, project.campaigns.map((campaign) => campaign.id)]),
+    [["site-a", []], ["site-b", ["1"]]]);
+  assert.equal(result.rows.find((row) => row.siteId === "site-a")?.facebook.data?.campaigns.length, 0);
+  assert.equal(result.facebookLinkCtr.campaigns, 1);
+  assert.equal(result.facebookLinkCtr.ctr, 2);
+  assert.deepEqual(summarizeAds(result.rows.flatMap((row) => row.facebookAccounts!.map((account) => account.facebook))).spend,
+    [{ currency: "EUR", amount: 5 }]);
 });
