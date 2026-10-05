@@ -40,19 +40,19 @@ export async function DataManagementPage({ params }: { params: DashboardSearchPa
       siteId={first(params.site)} customPeriod={selection.custom ? { start: selection.period.start, end: selection.period.end } : undefined} />}>
     <main className="dashboard-shell site-analytics-shell">
       <header className="dashboard-header">
-        <div><p className="eyebrow">Projectpagina’s en accountmanagers</p><h1>Data management</h1></div>
+        <div><p className="eyebrow">Projecten en koppelingen</p><h1>Data management</h1></div>
         <div className="header-meta">
           <a className="header-meta-link" href="/dashboard?tab=data-management&refresh=1">Gegevens vernieuwen</a>
           {data.fetchedAt ? <span>Bijgewerkt {new Intl.DateTimeFormat("nl-BE", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Brussels" }).format(new Date(data.fetchedAt))}</span> : null}
         </div>
       </header>
-      <p className="data-management-intro">Projectpagina’s volgen waar mogelijk de accountmanager uit Gripp. Hier wijs je pagina’s zonder duidelijke koppeling toe. Handmatige toewijzingen worden alleen in dit dashboard bewaard.</p>
+      <p className="data-management-intro">Beheer je accountmanagers, CRM-pipelines en campagnes per project. Kies hieronder wat je wilt aanpassen.</p>
       {data.error ? <p className="data-notice" role="alert">{data.error}</p> : null}
-      <CrmPipelineManager key={JSON.stringify([crm.connections, mergePages])} pages={mergePages}
+      <DataManagementBoard key={data.fetchedAt ?? "unavailable"}
+        data={data} mergePages={mergePages} projectGroups={dashboard.projectPageGroups ?? []} googleCampaignMatches={googleCampaignMatches}
+        crmCount={crm.matches.length} crm={<CrmPipelineManager key={JSON.stringify([crm.connections, mergePages])} pages={mergePages}
         connections={crm.connections} initialMatches={crm.matches} error={crm.error} discoveryMessage={crm.message}
-        canSave={getJsonCacheMode() !== "memory" && !crm.error && !!mergePages.length} />
-      {data.fetchedAt ? <DataManagementBoard key={`${data.fetchedAt}:${(dashboard.projectPageGroups ?? []).map((group) => group.groupId).join(",")}`}
-        data={data} mergePages={mergePages} projectGroups={dashboard.projectPageGroups ?? []} googleCampaignMatches={googleCampaignMatches} /> : null}
+        canSave={getJsonCacheMode() !== "memory" && !crm.error && !!mergePages.length} />} />
     </main>
   </DashboardFrame>;
 }

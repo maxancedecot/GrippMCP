@@ -12,7 +12,9 @@ export function CrmPipelineManager({ pages, connections, initialMatches, canSave
   canSave: boolean; error?: string; discoveryMessage?: string;
 }) {
   const router = useRouter();
-  const [connectionIndex, setConnectionIndex] = useState(connections.length ? "0" : "");
+  const [connectionIndex, setConnectionIndex] = useState("");
+  const [connectionSearch, setConnectionSearch] = useState("");
+  const [matchSearch, setMatchSearch] = useState("");
   const [pipelines, setPipelines] = useState<CrmPipelineOption[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -22,7 +24,7 @@ export function CrmPipelineManager({ pages, connections, initialMatches, canSave
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(initialError);
   const [notice, setNotice] = useState("");
-  const connection = connections[Number(connectionIndex)];
+  const connection = connectionIndex ? connections[Number(connectionIndex)] : undefined;
   const options = useMemo(() => pages.filter((page) => !/bedankt|thankyou|thank[\s_-]*you/i.test(page.path))
     .sort((a, b) => a.siteName.localeCompare(b.siteName, "nl-BE") || a.title.localeCompare(b.title, "nl-BE")), [pages]);
   const keyFor = (page: { siteId: string; path: string }) => JSON.stringify([page.siteId, normalizeProjectPath(page.path)]);
@@ -31,6 +33,22 @@ export function CrmPipelineManager({ pages, connections, initialMatches, canSave
     ?? connections.find((item) => item.locationId === match.locationId);
   const query = search.trim().toLocaleLowerCase("nl-BE");
   const visiblePipelines = pipelines.filter((pipeline) => !query || `${pipeline.name} ${pipeline.id}`.toLocaleLowerCase("nl-BE").includes(query));
+  const connectionQuery = connectionSearch.trim().toLocaleLowerCase("nl-BE");
+  const visibleConnections = connections.map((item, index) => ({ item, index }))
+    .filter(({ item }) => !connectionQuery || item.label.toLocaleLowerCase("nl-BE").includes(connectionQuery));
+  const groupedMatches = new Map<string, CrmPipelineMatch[]>();
+  for (const match of matches) {
+    const key = keyFor({ siteId: match.siteId, path: match.sourcePath });
+    groupedMatches.set(key, [...(groupedMatches.get(key) ?? []), match]);
+  }
+  const matchQuery = matchSearch.trim().toLocaleLowerCase("nl-BE");
+  const visibleMatches = [...groupedMatches.entries()].filter(([, group]) => !matchQuery || group.some((match) =>
+    `${pageFor(match)?.title ?? ""} ${pageFor(match)?.siteName ?? ""} ${match.sourcePath} ${match.pipelineName} ${subaccountFor(match)?.label ?? ""}`
+      .toLocaleLowerCase("nl-BE").includes(matchQuery)));
+
+  function resetConnection() {
+    setConnectionIndex(""); setPipelines([]); setLoaded(false); setSelectedIds([]); setSearch(""); setError(""); setNotice("");
+  }
 
   async function load() {
     if (!connection) return;
@@ -78,11 +96,14 @@ export function CrmPipelineManager({ pages, connections, initialMatches, canSave
     <div className="panel-heading"><div><p className="eyebrow">CRM · GoHighLevel</p><h2 id="crm-pipeline-management-title">Pipelines aan projecten koppelen</h2></div>
       <span className="panel-total">{connections.length} subaccounts · {matches.length} handmatige koppelingen</span></div>
     {discoveryMessage ? <p className="data-notice" role="status">{discoveryMessage} <a href="/api/ghl/oauth/start">GoHighLevel verbinden</a></p> : null}
-    <p className="cell-muted data-management-help">Kies je CRM-subaccount, laad de pipelines en koppel ze aan een projectpagina. Meerdere pipelines mogen bij hetzelfde project horen: hun leads en afspraken worden opgeteld. Een handmatige koppeling krijgt voorrang op automatische naamherkenning. Kies een ander project om een pipeline te verplaatsen.</p>
+    <p className="cell-muted data-management-help">Kies een subaccount, laad de pipelines en selecteer het project. Je kunt meerdere pipelines koppelen; hun leads en afspraken worden opgeteld.</p>
     {connections.length ? <div className="data-management-assignment-controls">
+      <label>Subaccount zoeken<input type="search" value={connectionSearch} disabled={pending} placeholder="Bijvoorbeeld Immogra…"
+        onChange={(event) => { setConnectionSearch(event.target.value); resetConnection(); }} /></label>
       <label>CRM-subaccount<select value={connectionIndex} disabled={pending} onChange={(event) => {
         setConnectionIndex(event.target.value); setPipelines([]); setLoaded(false); setSelectedIds([]); setSearch(""); setError(""); setNotice("");
-      }}>{connections.map((item, index) => <option key={JSON.stringify([item.locationId, item.installId])} value={String(index)}>{item.label}{connections.filter((other) => other.locationId === item.locationId).length > 1 ? ` · verbinding ${connections.filter((other) => other.locationId === item.locationId).indexOf(item) + 1}` : ""}</option>)}</select></label>
+      }}><option value="">{visibleConnections.length ? "Kies een subaccount" : "Geen subaccounts gevonden"}</option>
+        {visibleConnections.map(({ item, index }) => <option key={JSON.stringify([item.locationId, item.installId])} value={String(index)}>{item.label}{connections.filter((other) => other.locationId === item.locationId).length > 1 ? ` · verbinding ${connections.filter((other) => other.locationId === item.locationId).indexOf(item) + 1}` : ""}</option>)}</select></label>
       <button type="button" disabled={pending || !connection} onClick={load}>{pending ? "Bezig…" : "Pipelines laden"}</button>
     </div> : !initialError ? <p className="empty-state">Er is nog geen CRM-subaccount verbonden. <a href="/api/ghl/oauth/start">Verbind GoHighLevel</a> en vernieuw daarna de gegevens.</p> : null}
     {!canSave && !initialError ? <p className="cell-muted">Koppelen is beschikbaar zodra projectpagina’s en permanente opslag beschikbaar zijn.</p> : null}
@@ -111,10 +132,19 @@ export function CrmPipelineManager({ pages, connections, initialMatches, canSave
     </form> : null}
     {notice ? <p className="data-management-success" role="status">{notice}</p> : null}
     {error ? <p className="data-management-error" role="alert">{error}</p> : null}
-    {matches.length ? <div className="project-group-list">{matches.map((match) => <article key={JSON.stringify([match.locationId, match.pipelineId])}>
-      <div><strong>{match.pipelineName || match.pipelineId} → {pageFor(match)?.title ?? match.sourcePath}</strong>
-        <span className="cell-muted">{pageFor(match)?.siteName ?? match.siteId} · {match.sourcePath} · {subaccountFor(match)?.label ?? `CRM-subaccount ${match.locationId}`}</span></div>
-      <button type="button" disabled={!canSave || pending} aria-label={`Handmatige koppeling verwijderen voor ${match.pipelineName || match.pipelineId}`} onClick={() => remove(match)}>Verwijderen</button>
-    </article>)}</div> : null}
+    {matches.length ? <div className="management-saved-links">
+      <h3>Opgeslagen koppelingen <span className="cell-muted">· {groupedMatches.size} projecten</span></h3>
+      <div className="data-management-filters"><label>Gekoppelde projecten zoeken<input type="search" value={matchSearch}
+        onChange={(event) => setMatchSearch(event.target.value)} placeholder="Project, pipeline of subaccount…" /></label></div>
+      <div className="project-group-list">{visibleMatches.map(([key, group]) => <details className="management-linked-project" key={key}>
+        <summary><span><strong>{pageFor(group[0])?.title ?? group[0].sourcePath}</strong>
+          <small>{pageFor(group[0])?.siteName ?? group[0].siteId}</small></span><span className="management-link-count">{group.length} pipeline{group.length === 1 ? "" : "s"}</span></summary>
+        <div className="management-linked-content">{group.map((match) => <div className="management-linked-row" key={JSON.stringify([match.locationId, match.pipelineId])}>
+          <div><strong>{match.pipelineName || match.pipelineId}</strong><span className="cell-muted">{subaccountFor(match)?.label ?? `CRM-subaccount ${match.locationId}`} · {match.sourcePath}</span></div>
+          <button type="button" disabled={!canSave || pending} aria-label={`Handmatige koppeling verwijderen voor ${match.pipelineName || match.pipelineId}`} onClick={() => remove(match)}>Verwijderen</button>
+        </div>)}</div>
+      </details>)}</div>
+      {!visibleMatches.length ? <p className="empty-state">Geen gekoppelde projecten gevonden.</p> : null}
+    </div> : <p className="empty-state">Nog geen CRM-pipelines gekoppeld. Kies hierboven een subaccount om te beginnen.</p>}
   </section>;
 }
