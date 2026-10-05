@@ -186,3 +186,23 @@ test("failed period insights retain verified live campaigns and report only safe
   assert.match(result.sync.message, /niet volledig/);
   assert.doesNotMatch(JSON.stringify(result), /private provider detail|isolated/);
 });
+
+test("discovery starts every account fairly before old creatives while bounding concurrent Graph requests", async () => {
+  const catalogs = new Set<string>();
+  let pending = 0, peak = 0;
+  const result = await discoverMetaAccounts({ sites, now, env: { META_ADS_ACCESS_TOKEN: "fair" }, fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/me/adaccounts")) return response({ data: Array.from({ length: 14 }, (_, i) => account(String(i + 1))) });
+    pending++; peak = Math.max(peak, pending);
+    try {
+      if (url.pathname.endsWith("/campaigns")) catalogs.add(url.pathname);
+      else assert.equal(catalogs.size, 14, "later accounts start before earlier accounts scan all their creatives");
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const id = url.pathname.split("/").at(-2)!.replace("act_", "");
+      return response({ data: url.pathname.endsWith("/campaigns") ? [campaign(id)] : [ad(id, "https://one.example/project")] });
+    } finally { pending--; }
+  } });
+  assert.equal(result.matches.length, 14);
+  assert.equal(result.sync.message, "");
+  assert.ok(peak <= 12, "no more than twelve Graph requests in flight");
+});
