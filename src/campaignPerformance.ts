@@ -9,6 +9,7 @@ import { ghlConversionsByPipeline, type GhlReadCall } from "./ghl/appointmentCon
 import { projectPagesFromDashboard } from "./projectPageManagement.js";
 import { projectPageGroup } from "./projectPageGroups.js";
 import { readCrmPipelineMatches, type CrmPipelineMatch } from "./crmPipelineManagement.js";
+import { GrippMcpError } from "./errors.js";
 
 export type CampaignSource<T> =
   | { state: "connected"; data: T; message: string }
@@ -586,6 +587,7 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
   const projects = projectPagesFromDashboard(dashboard, [...(options.savedPages ?? []),
     ...savedMatches.map((match) => ({ siteId: match.siteId, path: match.sourcePath }))]);
   const counts: ProjectCrmConversions["counts"] = new Map(), errors = new Set<string>(), configuredSites = new Set<string>();
+  const errorMessages = new Map<string, string>();
   const unmatchedSites = new Set<string>();
   await Promise.all(dashboard.sites.map(async (site) => {
     if (dashboard.source.mode !== "live") return;
@@ -624,10 +626,30 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
             appointments: pipeline.appointments === null || current?.appointments === null ? null : (current?.appointments ?? 0) + pipeline.appointments
           });
         }
-      } catch { errors.add(site.id); }
+      } catch (error) {
+        errors.add(site.id);
+        errorMessages.set(site.id, crmConversionErrorMessage(error));
+      }
     }
   }));
-  return { counts, errors, configuredSites, unmatchedSites };
+  return { counts, errors, errorMessages, configuredSites, unmatchedSites };
+}
+
+// Never expose provider bodies, tokens or lead details in the dashboard.
+export function crmConversionErrorMessage(error: unknown) {
+  if (error instanceof z.ZodError) {
+    const fields = new Set(["opportunities", "meta", "nextPage", "id", "pipelineId", "pipelineStageId", "createdAt", "lastStageChangeAt", "pipelines", "stages", "name"]);
+    const path = error.issues[0]?.path.filter((part) => typeof part === "string" && fields.has(part)).join(".");
+    return path ? `CRM-antwoord ongeldig (${path})` : "CRM-antwoord ongeldig";
+  }
+  if (error instanceof GrippMcpError && error.code === "ghl_upstream_error") {
+    const status = z.object({ status: z.number().int().min(400).max(599) }).safeParse(error.details);
+    if (status.success) return `CRM niet beschikbaar (HTTP ${status.data.status})`;
+  }
+  if (error instanceof Error && (error.message.startsWith("No unique GoHighLevel installation") || error.message.startsWith("No GoHighLevel OAuth installation"))) {
+    return "CRM-subaccount opnieuw verbinden";
+  }
+  return "CRM niet beschikbaar";
 }
 
 function projectNameKey(value: string) {

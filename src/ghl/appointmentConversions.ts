@@ -18,10 +18,10 @@ const pipelineResponse = z.object({
 const opportunityResponse = z.object({
   opportunities: z.array(z.object({
     id: z.string().min(1),
-    pipelineId: z.string().optional(),
-    pipelineStageId: z.string().optional(),
-    createdAt: z.union([z.string(), z.number()]).optional(),
-    lastStageChangeAt: z.union([z.string(), z.number()]).optional()
+    pipelineId: z.string().nullish(),
+    pipelineStageId: z.string().nullish(),
+    createdAt: z.union([z.string(), z.number()]).nullish(),
+    lastStageChangeAt: z.union([z.string(), z.number()]).nullish()
   })),
   meta: z.object({ nextPage: z.number().int().positive().nullable().optional() }).passthrough().optional()
 });
@@ -110,7 +110,7 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
   return counts;
 }
 
-function dateKey(value: string | number | undefined) {
+function dateKey(value: string | number | null | undefined) {
   const timestamp = typeof value === "number" ? value : Date.parse(value ?? "");
   return Number.isFinite(timestamp) && Number.isFinite(new Date(timestamp).getTime()) ? brusselsDateKey(timestamp) : "";
 }

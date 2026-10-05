@@ -73,3 +73,15 @@ test("GoHighLevel appointments count unique opportunities entering matching stag
   assert.equal(count, 1);
   assert.deepEqual(calls, ["/opportunities/pipelines:pipelines::v3", "/opportunities/search:project-a:1:v3"]);
 });
+
+test("nullable appointment fields do not discard valid CRM lead dates", async () => {
+  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
+    ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "meeting", name: "Afspraak" }] }] }
+    : { opportunities: [
+      { id: "new", pipelineId: "project", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z", lastStageChangeAt: null },
+      { id: "meeting", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-09-10T12:00:00Z", lastStageChangeAt: null }
+    ], meta: { nextPage: null } };
+  assert.deepEqual(await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
+    { start: "2026-09-08", end: "2026-09-14" }, call),
+    [{ pipelineId: "project", pipelineName: "Project", leads: 2, appointments: null }]);
+});

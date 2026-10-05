@@ -94,6 +94,7 @@ export type UnmatchedProjectCampaign = { channel: "facebook" | "google"; siteId:
 export type ProjectCrmConversions = {
   counts: Map<string, { leads: number | null; appointments: number | null }>;
   errors: Set<string>;
+  errorMessages?: Map<string, string>;
   configuredSites: Set<string>;
   unmatchedSites: Set<string>;
 };
@@ -201,7 +202,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
       : counts && counts.leads !== null && counts.appointments !== null ? "connected" : "unavailable";
     project.crmMessage = project.crmState === "connected" ? ""
       : project.crmState === "not_configured" ? "CRM niet gekoppeld"
-      : crm?.errors.has(project.siteId) ? "CRM niet beschikbaar"
+      : crm?.errors.has(project.siteId) ? crm.errorMessages?.get(project.siteId) ?? "CRM niet beschikbaar"
       : counts ? "CRM-conversiemeting onvolledig" : "CRM-pipeline nog aan dit project te koppelen";
     // New opportunities already include leads that booked an appointment.
     project.cvr = project.visitors === null || project.leads === null ? null
