@@ -87,7 +87,7 @@ test("nullable appointment fields do not discard valid CRM lead dates", async ()
 });
 
 test("CRM pagination accepts flags, zero and numeric strings without mixing page and cursor pagination", async () => {
-  for (const continuation of [true, "2", 2]) for (const terminal of [false, 0, "0", null]) {
+  for (const continuation of [true, "true", "2", 2]) for (const terminal of [false, "false", 0, "0", -1, "-1", "", null]) {
     const pages: unknown[] = [];
     const call: GhlReadCall = async ({ path, query }) => {
       if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [] }] };

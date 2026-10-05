@@ -25,7 +25,10 @@ const opportunityResponse = z.object({
     lastStageChangeAt: z.union([z.string(), z.number()]).nullish()
   })),
   meta: z.object({
-    nextPage: z.union([z.number().int().nonnegative(), z.boolean(), z.string().regex(/^\d+$/).transform(Number)]).nullish(),
+    nextPage: z.union([
+      z.number().int(), z.boolean(), z.string().regex(/^-?\d+$/).transform(Number),
+      z.literal("").transform(() => null), z.literal("false").transform(() => false), z.literal("true").transform(() => true)
+    ]).nullish()
   }).passthrough().optional()
 });
 
@@ -113,7 +116,8 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
         else if (changed >= period.start && changed <= period.end) appointments.add(opportunity.id);
       }
       const nextPage = result.meta?.nextPage;
-      if (nextPage === null || nextPage === false || nextPage === 0 || (nextPage === undefined && result.opportunities.length < 100)) break;
+      if (nextPage === null || nextPage === false || (typeof nextPage === "number" && nextPage <= 0)
+        || (nextPage === undefined && result.opportunities.length < 100)) break;
       if (request === 99) throw new Error("GoHighLevel opportunity pagination limit reached");
       if (typeof nextPage === "number" && nextPage <= page) throw new Error("Invalid GoHighLevel opportunity pagination");
       page = typeof nextPage === "number" ? nextPage : page + 1;
