@@ -85,3 +85,32 @@ test("nullable appointment fields do not discard valid CRM lead dates", async ()
     { start: "2026-09-08", end: "2026-09-14" }, call),
     [{ pipelineId: "project", pipelineName: "Project", leads: 2, appointments: null }]);
 });
+
+test("CRM pagination accepts flags, zero and numeric strings and follows provider cursors", async () => {
+  for (const continuation of [true, "2", 2]) for (const terminal of [false, 0, "0", null]) {
+    const pages: unknown[] = [];
+    const call: GhlReadCall = async ({ path, query }) => {
+      if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [] }] };
+      pages.push(query?.page);
+      if (query?.page === 1) return { opportunities: [{ id: "first", createdAt: "2026-09-10T12:00:00Z" }],
+        meta: { nextPage: continuation, startAfter: 123, startAfterId: "first" } };
+      assert.equal(query?.startAfter, 123);
+      assert.equal(query?.startAfterId, "first");
+      return { opportunities: [{ id: "second", createdAt: "2026-09-11T12:00:00Z" }], meta: { nextPage: terminal } };
+    };
+    const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
+      { start: "2026-09-08", end: "2026-09-14" }, call);
+    assert.equal(result[0]?.leads, 2);
+    assert.deepEqual(pages, [1, 2]);
+  }
+});
+
+test("CRM pagination rejects repeated pages rather than returning incomplete totals", async () => {
+  let requests = 0;
+  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
+    ? { pipelines: [{ id: "project", name: "Project", stages: [] }] }
+    : (requests++, { opportunities: [{ id: "repeated", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: true } });
+  await assert.rejects(ghlConversionsByPipeline({ locationId: "location", installId: "install" },
+    { start: "2026-09-08", end: "2026-09-14" }, call), /Repeated GoHighLevel/);
+  assert.equal(requests, 2);
+});

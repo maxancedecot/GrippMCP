@@ -23,7 +23,11 @@ const opportunityResponse = z.object({
     createdAt: z.union([z.string(), z.number()]).nullish(),
     lastStageChangeAt: z.union([z.string(), z.number()]).nullish()
   })),
-  meta: z.object({ nextPage: z.number().int().positive().nullable().optional() }).passthrough().optional()
+  meta: z.object({
+    nextPage: z.union([z.number().int().nonnegative(), z.boolean(), z.string().regex(/^\d+$/).transform(Number)]).nullish(),
+    startAfter: z.union([z.number(), z.string()]).nullish(),
+    startAfterId: z.string().nullish()
+  }).passthrough().optional()
 });
 
 export type GhlReadCall = (input: {
@@ -82,12 +86,19 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
     const stages = new Set(pipeline.stages.filter((stage) => isAppointmentStage(stage.name)).map((stage) => stage.id));
     const leads = new Set<string>(), appointments = new Set<string>();
     let completeLeads = true, completeAppointments = stages.size > 0, page = 1;
+    let startAfter: string | number | undefined, startAfterId: string | undefined;
+    const seenOpportunities = new Set<string>();
     for (let request = 0; request < 100; request++) {
       const result = opportunityResponse.parse(await read({
         installId, path: "/opportunities/search",
-        query: { locationId: config.locationId, pipelineId: pipeline.id, status: "all", limit: 100, page }, apiVersion: "v3"
+        query: { locationId: config.locationId, pipelineId: pipeline.id, status: "all", limit: 100, page,
+          startAfter, startAfterId }, apiVersion: "v3"
       }));
+      if (request > 0 && result.opportunities.length > 0 && result.opportunities.every((opportunity) => seenOpportunities.has(opportunity.id))) {
+        throw new Error("Repeated GoHighLevel opportunity page");
+      }
       for (const opportunity of result.opportunities) {
+        seenOpportunities.add(opportunity.id);
         if (opportunity.pipelineId && opportunity.pipelineId !== pipeline.id) throw new Error("Unexpected GoHighLevel pipeline");
         const created = dateKey(opportunity.createdAt);
         if (!created) completeLeads = false;
@@ -99,10 +110,14 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
         else if (changed >= period.start && changed <= period.end) appointments.add(opportunity.id);
       }
       const nextPage = result.meta?.nextPage;
-      if (nextPage === null || (nextPage === undefined && result.opportunities.length < 100)) break;
+      if (nextPage === null || nextPage === false || nextPage === 0 || (nextPage === undefined && result.opportunities.length < 100)) break;
       if (request === 99) throw new Error("GoHighLevel opportunity pagination limit reached");
-      if (nextPage !== undefined && nextPage !== null && nextPage <= page) throw new Error("Invalid GoHighLevel opportunity pagination");
-      page = nextPage ?? page + 1;
+      if (typeof nextPage === "number" && nextPage <= page) throw new Error("Invalid GoHighLevel opportunity pagination");
+      page = typeof nextPage === "number" ? nextPage : page + 1;
+      if (result.meta?.startAfter != null && result.meta.startAfterId) {
+        startAfter = result.meta.startAfter;
+        startAfterId = result.meta.startAfterId;
+      }
     }
     counts.push({ pipelineId: pipeline.id, pipelineName: pipeline.name,
       leads: completeLeads ? leads.size : null, appointments: completeAppointments ? appointments.size : null });
