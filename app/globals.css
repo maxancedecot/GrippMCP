@@ -1035,6 +1035,14 @@ select {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
+.pm-metric-grid--lite {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pm-shell--lite .pm-employee-table {
+  min-width: 680px;
+}
+
 .metric-card,
 .panel {
   border: 1px solid var(--border);

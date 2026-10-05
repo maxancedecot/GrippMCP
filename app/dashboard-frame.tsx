@@ -13,6 +13,7 @@ export function DashboardFrame({ children, showTopMenu = true, className = "", s
           <nav className="dashboard-nav" aria-label="Dashboards">
             <a href="/dashboard">WordPress</a>
             <a href="/pm">PM</a>
+            <a href="/pm/lite">PM Lite</a>
             <a href="/projectmanagement">Projecten</a>
             <a href="/alice-buyssehof">Kaart 3D</a>
           </nav>
