@@ -365,7 +365,7 @@ export default async function PmDashboard({ searchParams, lite = false }: {
   const profitPercentageLabel = profitPercentage === null ? "—" : `${formatPercent(profitPercentage)}%`;
 
   return (
-    <DashboardFrame>
+    <DashboardFrame showTopMenu={!lite}>
       <main className={`dashboard-shell pm-shell${lite ? " pm-shell--lite" : ""}`}>
         <header className="dashboard-header">
           <div>
