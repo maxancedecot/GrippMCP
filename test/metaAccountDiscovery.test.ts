@@ -167,7 +167,22 @@ test("an unavailable old campaign does not hide verified campaigns in the same a
     return response({ data: [ad("10", "https://one.example/working")] });
   } });
   assert.deepEqual(result.matches.map((match) => match.campaignId), ["10"]);
-  assert.match(result.sync.accounts[0].message, /1 campagnebestemmingen/);
+  assert.match(result.sync.accounts[0].message, /campagnebestemmingen.*HTTP 403/);
   assert.match(result.sync.message, /niet volledig/);
   assert.doesNotMatch(JSON.stringify(result), /private provider detail/);
+});
+
+test("failed period insights retain verified live campaigns and report only safe diagnostics", async () => {
+  const result = await discoverMetaAccounts({ sites, now, period: { start: "2026-09-08", end: "2026-09-14" }, env: { META_ADS_ACCESS_TOKEN: "isolated" }, fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/me/adaccounts")) return response({ data: [account("1")] });
+    if (url.pathname.endsWith("/campaigns")) return response({ data: [campaign("10"), { ...campaign("20"), effective_status: "PAUSED" }] });
+    if (url.pathname.endsWith("/insights")) return new Response("private provider detail", { status: 403 });
+    assert.ok(url.pathname.endsWith("/10/ads"), "unknown historical activity cannot become an unverified paused match");
+    return response({ data: [ad("10", "https://one.example/working")] });
+  } });
+  assert.deepEqual(result.matches.map((match) => match.campaignId), ["10"]);
+  assert.match(result.sync.accounts[0].message, /periodeactiviteit.*HTTP 403/);
+  assert.match(result.sync.message, /niet volledig/);
+  assert.doesNotMatch(JSON.stringify(result), /private provider detail|isolated/);
 });
