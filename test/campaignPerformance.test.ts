@@ -1148,11 +1148,12 @@ test("automatic Meta discovery adds accounts and campaigns without duplicating w
       if (url.pathname.endsWith("/campaigns")) return response({ data: (url.pathname.includes("act_123") ? ["1", "99"] : ["2"]).map((id) => ({ id, name: `Ledoux ${id}`, effective_status: id === "1" ? "PAUSED" : "ACTIVE" })) });
       if (url.pathname.endsWith("/ads")) {
         const campaignId = url.pathname.split("/").at(-2)!;
-        const destinations = campaignId === "99" ? ["https://site-a.example/advertised-alias"] : ["https://site-a.example/project", "https://site-b.example/project"];
-        return response({ data: destinations.map((link) => ({ campaign_id: campaignId, creative: { link_url: link } })) });
+        const destinations = campaignId === "99" ? ["https://site-a.example/advertised-alias"] : campaignId === "1" ? ["https://site-a.example/project"] : ["https://site-a.example/project", "https://site-b.example/project"];
+        return response({ data: destinations.map((link) => ({ id: `${campaignId}0`, campaign_id: campaignId, creative: { link_url: link } })) });
       }
       if (url.pathname.endsWith("/insights")) {
-        const ids = JSON.parse(url.searchParams.get("filtering")!)[0].value as string[];
+        if (url.searchParams.get("level") === "ad") return response({ data: [{ ad_id: "10", campaign_id: "1", impressions: "100", spend: "5" }] });
+        const ids = url.searchParams.has("filtering") ? JSON.parse(url.searchParams.get("filtering")!)[0].value as string[] : url.pathname.includes("act_123") ? ["1", "99"] : ["2"];
         return response({ data: ids.map((id) => ({ campaign_id: id, campaign_name: `Ledoux ${id}`, impressions: "100", clicks: "10", spend: id === "1" ? "5" : id === "99" ? "10" : "20", inline_link_click_ctr: id === "99" ? "2" : "6" })) });
       }
       return response({ currency: "EUR", account_status: 1 });
@@ -1168,6 +1169,58 @@ test("automatic Meta discovery adds accounts and campaigns without duplicating w
   assert.equal(result.facebookLinkCtr.campaigns, 3);
   assert.equal(result.facebookLinkCtr.ctr, 14 / 3, "shared campaign counted once, including paused period activity");
   assert.deepEqual(summarizeAds(result.rows.flatMap((row) => row.facebookAccounts!.map((account) => account.facebook))).spend, [{ currency: "EUR", amount: 35 }]);
+});
+
+test("automatic discovery connects a previously unknown paused Englebert campaign and includes its period metrics", async () => {
+  const result = await getCampaignPerformance(dashboard(), {
+    env: environment([], { META_ADS_ACCESS_TOKEN: "secret", META_ADS_AUTO_DISCOVERY: "true" }),
+    now: new Date("2026-09-16T12:00:00Z"),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/me/adaccounts")) return response({ data: [{ id: "act_123", name: "Englebert", account_status: 1 }] });
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", name: "Ledoux Englebert", effective_status: "PAUSED" }] });
+      if (url.searchParams.get("level") === "ad") return response({ data: [{ ad_id: "10", campaign_id: "1", impressions: "100", spend: "50" }] });
+      if (url.pathname.endsWith("/ads")) {
+        assert.equal(url.searchParams.has("filtering"), false);
+        return response({ data: [{ id: "10", campaign_id: "1", creative: { link_url: "https://site-a.example/englebert" } },
+          { id: "20", campaign_id: "1", creative: { link_url: "https://site-a.example/wrong-period" } }] });
+      }
+      if (url.pathname.endsWith("/insights")) {
+        assert.deepEqual(JSON.parse(url.searchParams.get("time_range")!), { since: period.start, until: period.end });
+        return response({ data: [{ campaign_id: "1", campaign_name: "Ledoux Englebert", impressions: "100", clicks: "5", spend: "50", inline_link_click_ctr: "3.25" }] });
+      }
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.metaSync?.message, "");
+  assert.equal(result.rows[0].facebook.state, "connected");
+  assert.equal(result.projects.length, 1);
+  assert.equal(result.projects[0].sourcePath, "/englebert");
+  assert.deepEqual(result.projects[0].campaigns.map(({ name, spend, ctr, live }) => ({ name, spend, ctr, live })),
+    [{ name: "Ledoux Englebert", spend: 50, ctr: 3.25, live: false }]);
+});
+
+test("a paused campaign with no period activity remains linked and shows confirmed zero spend", async () => {
+  const result = await getCampaignPerformance(dashboard(), {
+    env: environment([], { META_ADS_ACCESS_TOKEN: "secret", META_ADS_AUTO_DISCOVERY: "true" }),
+    now: new Date("2026-09-16T12:00:00Z"),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/me/adaccounts")) return response({ data: [{ id: "act_123", name: "Englebert", account_status: 1 }] });
+      if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "1", name: "Ledoux Englebert", effective_status: "PAUSED" }] });
+      if (url.pathname.endsWith("/ads")) {
+        assert.equal(url.searchParams.has("filtering"), false);
+        return response({ data: [{ id: "10", campaign_id: "1", creative: { link_url: "https://site-a.example/englebert" } }] });
+      }
+      assert.notEqual(url.searchParams.get("level"), "ad", "no historical measurements are required to confirm a destination with zero period spend");
+      if (url.pathname.endsWith("/insights")) return response({ data: [] });
+      return response({ currency: "EUR", account_status: 1 });
+    }
+  });
+  assert.equal(result.rows[0].facebook.state, "connected");
+  assert.equal(result.projects.length, 1);
+  assert.equal(result.projects[0].sourcePath, "/englebert");
+  assert.deepEqual(result.projects[0].campaigns.map(({ spend, ctr, live }) => ({ spend, ctr, live })), [{ spend: 0, ctr: null, live: false }]);
 });
 
 test("Meta account-list failure leaves configured campaigns available with a visible sync error", async () => {

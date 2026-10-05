@@ -94,3 +94,80 @@ test("one inaccessible account does not block others and incomplete pagination f
   assert.equal(incomplete.sync.state, "unavailable");
   assert.equal(incomplete.matches.length, 0);
 });
+
+test("period discovery finds paused and historical-only campaigns even in inactive accounts, using only delivered ads", async () => {
+  const period = { start: "2026-09-08", end: "2026-09-14" };
+  const result = await discoverMetaAccounts({ sites, now, period, env: { META_ADS_ACCESS_TOKEN: "period" }, fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/me/adaccounts")) return response({ data: [{ ...account("1"), account_status: 2 }] });
+    if (url.pathname.endsWith("/campaigns")) {
+      assert.equal(url.searchParams.has("effective_status"), false);
+      return response({ data: [{ ...campaign("10"), name: "Ledoux Englebert", effective_status: "PAUSED" },
+        { ...campaign("20"), name: "Renamed away" }, { ...campaign("30"), effective_status: "PAUSED" }] });
+    }
+    if (url.searchParams.get("level") === "campaign") return response({ data: ["10", "20", "30", "40", "50"].map((id) => ({
+      campaign_id: id, campaign_name: id === "50" ? "Other campaign" : "Ledoux old name", impressions: id === "30" ? "0" : "100", spend: "0"
+    })) });
+    if (url.pathname.endsWith("/insights")) {
+      assert.deepEqual(JSON.parse(url.searchParams.get("time_range")!), { since: period.start, until: period.end });
+      const id = url.pathname.split("/").at(-2)!;
+      assert.ok(["10", "40"].includes(id), "only period-active campaigns need delivered-ad insights");
+      return response({ data: [{ ad_id: `${id}1`, campaign_id: id, impressions: "100", spend: "0" }] });
+    }
+    if (url.pathname.endsWith("/ads")) {
+      const id = url.pathname.split("/").at(-2)!;
+      assert.ok(["10", "30", "40"].includes(id), "do not scan renamed or non-Ledoux campaigns");
+      assert.equal(url.searchParams.has("filtering"), false);
+      if (id === "30") return response({ data: [{ ...ad(id, "https://one.example/quiet-project"), id: "301" }] });
+      return response({ data: [{ ...ad(id, "https://one.example/englebert"), id: `${id}1` },
+        { ...ad(id, "https://two.example/project/wrong-period"), id: `${id}2` }] });
+    }
+    assert.fail(`Unexpected request ${url.pathname}`);
+  } });
+  assert.equal(result.sync.message, "");
+  assert.equal(result.sync.accounts[0].campaignCount, 0);
+  assert.deepEqual(result.matches.sort((a, b) => a.campaignId.localeCompare(b.campaignId)).map((match) => [match.campaignId, match.siteId, match.sourcePaths]),
+    [["10", "one", ["/englebert"]], ["30", "one", ["/quiet-project"]], ["40", "one", ["/englebert"]]]);
+});
+
+test("period discovery caches are isolated by date range and missing historical creatives cannot invent matches", async () => {
+  let scans = 0, missing = false;
+  const options = { sites, now, cache: true, env: { META_ADS_ACCESS_TOKEN: "period-cache" }, fetchImpl: async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/me/adaccounts")) return response({ data: [account("1")] });
+    if (url.pathname.endsWith("/campaigns")) { scans++; return response({ data: [{ ...campaign("10"), effective_status: "PAUSED" }] }); }
+    if (url.searchParams.get("level") === "campaign") return response({ data: [{ campaign_id: "10", campaign_name: "Ledoux Englebert", impressions: "100", spend: "10" }] });
+    if (url.searchParams.get("level") === "ad") {
+      const range = JSON.parse(url.searchParams.get("time_range")!);
+      return response({ data: [{ ad_id: range.since === "2026-09-08" ? "1" : "2", campaign_id: "10", impressions: "100", spend: "10" }] });
+    }
+    return response({ data: (missing ? ["3"] : ["1", "2"]).map((id) => ({ ...ad("10", `https://one.example/project-${id}`), id })) });
+  } };
+  const firstPeriod = { start: "2026-09-08", end: "2026-09-14" };
+  const first = await discoverMetaAccounts({ ...options, period: firstPeriod });
+  assert.deepEqual(first.matches[0].sourcePaths, ["/project-1"]);
+  const second = await discoverMetaAccounts({ ...options, period: { start: "2026-08-24", end: "2026-08-30" } });
+  assert.deepEqual(second.matches[0].sourcePaths, ["/project-2"]);
+  await discoverMetaAccounts({ ...options, period: firstPeriod });
+  assert.equal(scans, 2, "same period reused, different period rechecked");
+  missing = true;
+  const broken = await discoverMetaAccounts({ ...options, period: { start: "2026-08-01", end: "2026-08-07" } });
+  assert.equal(broken.matches.length, 0);
+  assert.match(broken.sync.message, /niet volledig/);
+  assert.doesNotMatch(JSON.stringify(broken), /project-3/);
+});
+
+test("an unavailable old campaign does not hide verified campaigns in the same account", async () => {
+  const result = await discoverMetaAccounts({ sites, now, period: { start: "2026-09-08", end: "2026-09-14" }, env: { META_ADS_ACCESS_TOKEN: "isolated" }, fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/me/adaccounts")) return response({ data: [account("1")] });
+    if (url.pathname.endsWith("/campaigns")) return response({ data: [campaign("10"), { ...campaign("20"), effective_status: "PAUSED" }] });
+    if (url.pathname.endsWith("/insights")) return response({ data: [] });
+    if (url.pathname.endsWith("/20/ads")) return new Response("private provider detail", { status: 403 });
+    return response({ data: [ad("10", "https://one.example/working")] });
+  } });
+  assert.deepEqual(result.matches.map((match) => match.campaignId), ["10"]);
+  assert.match(result.sync.accounts[0].message, /1 campagnebestemmingen/);
+  assert.match(result.sync.message, /niet volledig/);
+  assert.doesNotMatch(JSON.stringify(result), /private provider detail/);
+});

@@ -138,7 +138,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   // Do not discover real ad accounts when the dashboard is in demo mode.
   const sites = dashboard.source.mode === "live" ? dashboard.sites : [];
   const discovery = await discoverMetaAccounts({ sites: sites.length ? options.discoverySites ?? sites : [], env, now,
-    fetchImpl: options.fetchImpl, force: options.forceMetaSync });
+    period: dashboard.period, fetchImpl: options.fetchImpl, force: options.forceMetaSync });
   const savedMatches = new Set(projectMatches.map((match) => `${match.channel ?? "facebook"}:${match.siteId}:${match.accountId}:${match.campaignId}`));
   projectMatches.push(...discovery.matches.filter((match) => !savedMatches.has(`facebook:${match.siteId}:${match.accountId}:${match.campaignId}`)));
   // Also expose verified pages to Data management without querying Meta from that tab.

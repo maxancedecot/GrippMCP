@@ -8,8 +8,11 @@ import type { CampaignProjectMatch } from "./campaignProjects.js";
 const identifier = z.string().regex(/^\d+$/);
 const accountSchema = z.object({ id: z.string().regex(/^act_\d+$/), name: z.string(), account_status: z.number() });
 const campaignSchema = z.object({ id: identifier, name: z.string(), effective_status: z.string(), start_time: z.string().optional(), stop_time: z.string().optional() });
+const measurement = z.coerce.number().finite().nonnegative();
+const activitySchema = z.object({ campaign_id: identifier, campaign_name: z.string(), impressions: measurement, spend: measurement });
+const adActivitySchema = z.object({ campaign_id: identifier, ad_id: identifier, impressions: measurement, spend: measurement });
 const destinationSchema = z.object({ campaignId: identifier, name: z.string(), urls: z.array(z.string()) });
-const cacheSchema = z.object({ checkedAt: z.number(), destinations: z.array(destinationSchema), liveCampaignCount: z.number() });
+const cacheSchema = z.object({ checkedAt: z.number(), destinations: z.array(destinationSchema), liveCampaignCount: z.number(), unavailableCampaignCount: z.number().optional() });
 const pagingSchema = z.object({ next: z.string().optional(), cursors: z.object({ after: z.string().min(1).optional() }).optional() }).optional();
 const TTL_MS = 5 * 60_000;
 type Site = { id: string; name: string; url: string };
@@ -28,6 +31,7 @@ export async function discoverMetaAccounts(options: {
   env: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
   now: Date;
+  period?: { start: string; end: string };
   force?: boolean;
   cache?: boolean;
 }): Promise<{ sync: MetaAccountSync; matches: CampaignProjectMatch[] }> {
@@ -78,7 +82,9 @@ export async function discoverMetaAccounts(options: {
   for (let offset = 0; offset < accounts.length; offset += 6) {
     const results = await Promise.all(accounts.slice(offset, offset + 6).map(async (account) => {
       const accountId = account.id.slice(4);
-      const cacheKey = `meta-account-destinations:v1:${tokenScope}:${accountId}`;
+      const cacheKey = options.period
+        ? `meta-account-destinations:v2:${tokenScope}:${accountId}:${options.period.start}:${options.period.end}`
+        : `meta-account-destinations:v1:${tokenScope}:${accountId}`;
       const parsed = cacheSchema.safeParse(useCache ? await readJsonCache(cacheKey).catch(() => null) : null);
       const cached = parsed.success ? parsed.data : null;
       const age = cached ? now.getTime() - cached.checkedAt : Infinity;
@@ -86,27 +92,74 @@ export async function discoverMetaAccounts(options: {
       let message = "";
       if (!data) {
         try {
-          const campaigns = account.account_status === 1 ? await list(`${account.id}/campaigns`, "id,name,effective_status,start_time,stop_time", campaignSchema, { effective_status: JSON.stringify(["ACTIVE"]) }) : [];
-          const live = campaigns.filter((campaign) => campaign.name.toLowerCase().includes("ledoux") && campaign.effective_status === "ACTIVE"
+          const timeRange = options.period ? { time_range: JSON.stringify({ since: options.period.start, until: options.period.end }), time_increment: "all_days" } : null;
+          const [campaigns, activity] = await Promise.all([
+            account.account_status === 1 || options.period
+              ? list(`${account.id}/campaigns`, "id,name,effective_status,start_time,stop_time", campaignSchema, options.period ? {} : { effective_status: JSON.stringify(["ACTIVE"]) })
+              : Promise.resolve([]),
+            timeRange ? list(`${account.id}/insights`, "campaign_id,campaign_name,impressions,spend", activitySchema, { ...timeRange, level: "campaign" }) : Promise.resolve([])
+          ]);
+          const live = campaigns.filter((campaign) => account.account_status === 1 && campaign.name.toLowerCase().includes("ledoux") && campaign.effective_status === "ACTIVE"
             && (!campaign.start_time || Date.parse(campaign.start_time) <= now.getTime())
             && (!campaign.stop_time || Date.parse(campaign.stop_time) > now.getTime()));
-          // Keep verified links for stopped campaigns, so period spend remains attributable.
-          const destinations = new Map((cached?.destinations ?? []).map((item) => [item.campaignId, item]));
-          for (const campaign of live) {
-            const ads = await list(`${campaign.id}/ads`, "campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}",
-              z.object({ campaign_id: identifier, creative: z.unknown().optional() }),
-              { limit: "25", filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }]) });
-            if (ads.some((ad) => ad.campaign_id !== campaign.id)) throw new Error("Unexpected campaign");
-            destinations.set(campaign.id, { campaignId: campaign.id, name: campaign.name,
-              urls: [...new Set(ads.flatMap((ad) => facebookDestinationUrls(ad.creative)))].filter((url) => !isExcludedAnalyticsLink(url)) });
+          const names = new Map(campaigns.map((campaign) => [campaign.id, campaign.name]));
+          const eligible = new Map(live.map((campaign) => [campaign.id, { id: campaign.id, name: campaign.name, live: true, hasActivity: false }]));
+          for (const row of activity) {
+            // Current names take precedence, including renames away from Ledoux.
+            const name = names.get(row.campaign_id) ?? row.campaign_name;
+            if ((row.impressions > 0 || row.spend > 0) && name.toLowerCase().includes("ledoux") && !eligible.has(row.campaign_id)) {
+              eligible.set(row.campaign_id, { id: row.campaign_id, name, live: false, hasActivity: true });
+            }
           }
-          data = { checkedAt: now.getTime(), destinations: [...destinations.values()], liveCampaignCount: live.length };
-          if (useCache) await writeJsonCache(cacheKey, data).catch(() => undefined);
+          // A paused campaign can still be linked with zero period spend. Its
+          // accessible creatives establish the destination, not its name.
+          if (options.period) {
+            for (const campaign of campaigns) {
+              if (campaign.name.toLowerCase().includes("ledoux") && !eligible.has(campaign.id)) {
+                eligible.set(campaign.id, { id: campaign.id, name: campaign.name, live: false, hasActivity: false });
+              }
+            }
+          }
+          // Recheck stopped campaigns against the ads delivered in this period;
+          // a destination saved while live need not be their historical destination.
+          const destinations = new Map((options.period ? [] : cached?.destinations ?? []).map((item) => [item.campaignId, item]));
+          const selected = [...eligible.values()];
+          let unavailableCampaignCount = 0;
+          for (let offset = 0; offset < selected.length; offset += 3) {
+            await Promise.all(selected.slice(offset, offset + 3).map(async (campaign) => {
+              try {
+                let periodAds: Set<string> | null = null;
+                if (!campaign.live && campaign.hasActivity && timeRange) {
+                  const rows = await list(`${campaign.id}/insights`, "ad_id,campaign_id,impressions,spend", adActivitySchema, { ...timeRange, level: "ad" });
+                  if (rows.some((row) => row.campaign_id !== campaign.id)) throw new Error("Unexpected historical campaign");
+                  periodAds = new Set(rows.filter((row) => row.impressions > 0 || row.spend > 0).map((row) => row.ad_id));
+                  if (!periodAds.size) throw new Error("Missing historical ad measurements");
+                }
+                const ads = await list(`${campaign.id}/ads`, "id,campaign_id,creative{object_story_spec{link_data{link,child_attachments{link}},video_data{call_to_action{value{link}}},template_data{link}},asset_feed_spec{link_urls{website_url}},object_url,link_url}",
+                  z.object({ id: identifier.optional(), campaign_id: identifier, creative: z.unknown().optional() }),
+                  { limit: "25", ...(campaign.live ? { filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }]) } : {}) });
+                if (ads.some((ad) => ad.campaign_id !== campaign.id)) throw new Error("Unexpected campaign");
+                if (periodAds && [...periodAds].some((id) => !ads.some((ad) => ad.id === id))) throw new Error("Incomplete historical ad destinations");
+                destinations.set(campaign.id, { campaignId: campaign.id, name: campaign.name,
+                  urls: [...new Set(ads.filter((ad) => !periodAds || (ad.id && periodAds.has(ad.id))).flatMap((ad) => facebookDestinationUrls(ad.creative)))].filter((url) => !isExcludedAnalyticsLink(url)) });
+              } catch {
+                // An unavailable old creative must not hide working campaigns
+                // in the same account. Reuse only a recent same-period check.
+                unavailableCampaignCount++;
+                const previous = cached?.destinations.find((item) => item.campaignId === campaign.id);
+                if (previous && age >= 0 && age < 24 * 60 * 60_000) destinations.set(campaign.id, previous);
+              }
+            }));
+          }
+          data = { checkedAt: now.getTime(), destinations: [...destinations.values()], liveCampaignCount: live.length, unavailableCampaignCount };
+          // Do not extend the age of links returned from a failed refresh.
+          if (useCache && !unavailableCampaignCount) await writeJsonCache(cacheKey, data).catch(() => undefined);
         } catch {
           data = cached && age >= 0 && age < 24 * 60 * 60_000 ? cached : null;
           message = data ? "Meta reageert tijdelijk niet; bestemmingslinks uit de laatste geslaagde controle." : "Campagnes konden niet worden gecontroleerd. Controleer de Meta-toegang of probeer opnieuw.";
         }
       }
+      if (!message && data?.unavailableCampaignCount) message = `${data.unavailableCampaignCount} campagnebestemmingen konden niet worden gecontroleerd. Andere gecontroleerde koppelingen blijven beschikbaar.`;
       const accountMatches: CampaignProjectMatch[] = [];
       const siteNames = new Set<string>();
       for (const destination of data?.destinations ?? []) {
@@ -118,7 +171,7 @@ export async function discoverMetaAccounts(options: {
         }
       }
       return { failed: !!message, matches: accountMatches, account: { id: accountId, name: account.name, siteNames: [...siteNames], campaignCount: data?.liveCampaignCount ?? 0,
-        message: message || (accountMatches.length ? "" : account.account_status !== 1 ? "Advertentieaccount is niet actief." : !data?.liveCampaignCount ? "Geen lopende campagne met ‘Ledoux’ in de naam." : "Geen bestemmingslink naar een gekoppelde website gevonden.") } };
+        message: message || (accountMatches.length ? "" : account.account_status !== 1 ? "Advertentieaccount is niet actief." : !data?.destinations.length ? options.period ? "Geen Ledoux-campagne gevonden." : "Geen lopende campagne met ‘Ledoux’ in de naam." : "Geen bestemmingslink naar een gekoppelde website gevonden.") } };
     }));
     for (const result of results) { matches.push(...result.matches); sync.accounts.push(result.account); if (result.failed) failedAccounts++; }
   }
