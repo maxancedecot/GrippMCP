@@ -643,8 +643,9 @@ export function crmConversionErrorMessage(error: unknown) {
     return path ? `CRM-antwoord ongeldig (${path})` : "CRM-antwoord ongeldig";
   }
   if (error instanceof GrippMcpError && error.code === "ghl_upstream_error") {
-    const status = z.object({ status: z.number().int().min(400).max(599) }).safeParse(error.details);
-    if (status.success) return `CRM niet beschikbaar (HTTP ${status.data.status})`;
+    const status = z.object({ status: z.number().int().min(400).max(599), crmPage: z.number().int().positive().optional() }).safeParse(error.details);
+    if (status.success) return status.data.crmPage && status.data.crmPage > 1
+      ? `CRM-vervolgpagina niet beschikbaar (HTTP ${status.data.status})` : `CRM niet beschikbaar (HTTP ${status.data.status})`;
   }
   if (error instanceof Error && (error.message.startsWith("No unique GoHighLevel installation") || error.message.startsWith("No GoHighLevel OAuth installation"))) {
     return "CRM-subaccount opnieuw verbinden";

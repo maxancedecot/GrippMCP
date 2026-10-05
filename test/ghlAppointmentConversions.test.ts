@@ -86,7 +86,7 @@ test("nullable appointment fields do not discard valid CRM lead dates", async ()
     [{ pipelineId: "project", pipelineName: "Project", leads: 2, appointments: null }]);
 });
 
-test("CRM pagination accepts flags, zero and numeric strings and follows provider cursors", async () => {
+test("CRM pagination accepts flags, zero and numeric strings without mixing page and cursor pagination", async () => {
   for (const continuation of [true, "2", 2]) for (const terminal of [false, 0, "0", null]) {
     const pages: unknown[] = [];
     const call: GhlReadCall = async ({ path, query }) => {
@@ -94,8 +94,8 @@ test("CRM pagination accepts flags, zero and numeric strings and follows provide
       pages.push(query?.page);
       if (query?.page === 1) return { opportunities: [{ id: "first", createdAt: "2026-09-10T12:00:00Z" }],
         meta: { nextPage: continuation, startAfter: 123, startAfterId: "first" } };
-      assert.equal(query?.startAfter, 123);
-      assert.equal(query?.startAfterId, "first");
+      assert.equal(query?.startAfter, undefined);
+      assert.equal(query?.startAfterId, undefined);
       return { opportunities: [{ id: "second", createdAt: "2026-09-11T12:00:00Z" }], meta: { nextPage: terminal } };
     };
     const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
@@ -113,4 +113,19 @@ test("CRM pagination rejects repeated pages rather than returning incomplete tot
   await assert.rejects(ghlConversionsByPipeline({ locationId: "location", installId: "install" },
     { start: "2026-09-08", end: "2026-09-14" }, call), /Repeated GoHighLevel/);
   assert.equal(requests, 2);
+});
+
+test("CRM pipelines with more than 100 leads count the entire last page", async () => {
+  const pages: unknown[] = [];
+  const call: GhlReadCall = async ({ path, query }) => {
+    if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [] }] };
+    pages.push(query?.page);
+    return query?.page === 1
+      ? { opportunities: Array.from({ length: 100 }, (_, id) => ({ id: String(id), createdAt: "2026-09-10T12:00:00Z" })), meta: { nextPage: "2" } }
+      : { opportunities: [{ id: "last", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: 0 } };
+  };
+  const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
+    { start: "2026-09-08", end: "2026-09-14" }, call);
+  assert.equal(result[0]?.leads, 101);
+  assert.deepEqual(pages, [1, 2]);
 });

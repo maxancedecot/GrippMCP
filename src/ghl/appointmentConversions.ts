@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { GhlClient } from "./client.js";
 import { listGhlInstallations } from "./tokenStore.js";
+import { GrippMcpError } from "../errors.js";
 
 const appointmentWords = [
   "afspraak", "appointment", "booked", "booking", "meeting", "consult", "consultation", "bezichtiging", "viewing",
@@ -25,8 +26,6 @@ const opportunityResponse = z.object({
   })),
   meta: z.object({
     nextPage: z.union([z.number().int().nonnegative(), z.boolean(), z.string().regex(/^\d+$/).transform(Number)]).nullish(),
-    startAfter: z.union([z.number(), z.string()]).nullish(),
-    startAfterId: z.string().nullish()
   }).passthrough().optional()
 });
 
@@ -86,13 +85,17 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
     const stages = new Set(pipeline.stages.filter((stage) => isAppointmentStage(stage.name)).map((stage) => stage.id));
     const leads = new Set<string>(), appointments = new Set<string>();
     let completeLeads = true, completeAppointments = stages.size > 0, page = 1;
-    let startAfter: string | number | undefined, startAfterId: string | undefined;
     const seenOpportunities = new Set<string>();
     for (let request = 0; request < 100; request++) {
       const result = opportunityResponse.parse(await read({
         installId, path: "/opportunities/search",
-        query: { locationId: config.locationId, pipelineId: pipeline.id, status: "all", limit: 100, page,
-          startAfter, startAfterId }, apiVersion: "v3"
+        query: { locationId: config.locationId, pipelineId: pipeline.id, status: "all", limit: 100, page }, apiVersion: "v3"
+      }).catch((error: unknown) => {
+        if (error instanceof GrippMcpError && error.code === "ghl_upstream_error") {
+          const details = z.object({ status: z.number() }).passthrough().safeParse(error.details);
+          if (details.success) throw new GrippMcpError(error.code, error.message, { ...details.data, crmPage: page });
+        }
+        throw error;
       }));
       if (request > 0 && result.opportunities.length > 0 && result.opportunities.every((opportunity) => seenOpportunities.has(opportunity.id))) {
         throw new Error("Repeated GoHighLevel opportunity page");
@@ -114,10 +117,6 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
       if (request === 99) throw new Error("GoHighLevel opportunity pagination limit reached");
       if (typeof nextPage === "number" && nextPage <= page) throw new Error("Invalid GoHighLevel opportunity pagination");
       page = typeof nextPage === "number" ? nextPage : page + 1;
-      if (result.meta?.startAfter != null && result.meta.startAfterId) {
-        startAfter = result.meta.startAfter;
-        startAfterId = result.meta.startAfterId;
-      }
     }
     counts.push({ pipelineId: pipeline.id, pipelineName: pipeline.name,
       leads: completeLeads ? leads.size : null, appointments: completeAppointments ? appointments.size : null });
