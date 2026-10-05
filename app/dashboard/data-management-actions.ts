@@ -76,7 +76,7 @@ export async function deleteGoogleCampaignMatchAction(accountId: string, campaig
 }
 
 async function crmConnections() {
-  return listCrmConnections({ mappings: parseCampaignSiteMappings(process.env.CAMPAIGN_PERFORMANCE_SITES) });
+  return listCrmConnections({ mappings: parseCampaignSiteMappings(process.env.CAMPAIGN_PERFORMANCE_SITES), resolveNames: false });
 }
 
 export async function loadCrmPipelinesAction(input: { locationId: string; installId?: string }) {

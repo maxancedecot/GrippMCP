@@ -5,6 +5,7 @@ import { normalizeProjectPath } from "./projectPageGroups.js";
 import { getJsonCacheMode, readJsonCache, writeJsonCache } from "./jsonCache.js";
 import { listGhlInstallations } from "./ghl/tokenStore.js";
 import { listGhlPipelines, type GhlReadCall } from "./ghl/appointmentConversions.js";
+import { GhlClient } from "./ghl/client.js";
 import type { GhlInstallationSummary } from "./ghl/types.js";
 import type { CampaignSiteMapping } from "./campaignPerformance.js";
 
@@ -48,7 +49,9 @@ async function readRegistry(store: Store) {
   return { matches: parseCrmPipelineMatches(registry.matches), revision: registry.revision };
 }
 
-export async function listCrmConnections(options: { mappings?: CampaignSiteMapping[]; installations?: GhlInstallationSummary[] } = {}) {
+export async function listCrmConnections(options: {
+  mappings?: CampaignSiteMapping[]; installations?: GhlInstallationSummary[]; resolveNames?: boolean; call?: GhlReadCall;
+} = {}) {
   const installations = options.installations ?? await listGhlInstallations();
   const connections = new Map<string, CrmConnection>();
   for (const installation of installations) {
@@ -65,7 +68,25 @@ export async function listCrmConnections(options: { mappings?: CampaignSiteMappi
     const connection = { locationId: config.locationId, installId, label: `CRM-subaccount ${config.locationId} · ${mapping.siteId}` };
     connections.set(JSON.stringify([connection.locationId, connection.installId]), connection);
   }
-  return [...connections.values()];
+  const result = [...connections.values()];
+  if (options.resolveNames === false) return result;
+  // Limit parallel lookups; one failed name must not hide the other accounts.
+  for (let offset = 0; offset < result.length; offset += 4) {
+    await Promise.all(result.slice(offset, offset + 4).map(async (connection) => {
+      if (!connection.installId) return;
+      try {
+        const read: GhlReadCall = options.call ?? ((input) => new GhlClient(input.installId).call({
+          method: "GET", path: input.path, apiVersion: input.apiVersion, readOnly: true
+        }));
+        const response = z.object({ location: z.object({ id, name: z.string().trim().min(1) }) }).parse(await read({
+          installId: connection.installId, path: `/locations/${encodeURIComponent(connection.locationId)}`, apiVersion: "v3"
+        }));
+        if (response.location.id !== connection.locationId) throw new Error("Unexpected CRM subaccount");
+        connection.label = response.location.name;
+      } catch { /* Keep the account selectable when its name is unavailable. */ }
+    }));
+  }
+  return result.sort((left, right) => left.label.localeCompare(right.label, "nl-BE"));
 }
 
 export async function loadCrmPipelines(input: { locationId: string; installId?: string }, options: {

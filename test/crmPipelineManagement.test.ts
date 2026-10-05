@@ -25,8 +25,31 @@ test("CRM connections include installed locations and resolve existing configure
   const result = await listCrmConnections({ installations: [
     { installId: "install", locationId: "location", expiresAt: 1, createdAt: 1, updatedAt: 1 },
     { installId: "agency", expiresAt: 1, createdAt: 1, updatedAt: 1 }
-  ], mappings: [{ siteId: "site-a", ghl: { locationId: "location" } }] });
-  assert.deepEqual(result, [{ locationId: "location", installId: "install", label: "CRM-subaccount location · site-a" }]);
+  ], mappings: [{ siteId: "site-a", ghl: { locationId: "location" } }], call: async ({ installId, path, apiVersion }) => {
+    assert.equal(installId, "install"); assert.equal(path, "/locations/location"); assert.equal(apiVersion, "v3");
+    return { location: { id: "location", name: "  Graanmolenhof  ", email: "private@example.test", phone: "private" } };
+  } });
+  assert.deepEqual(result, [{ locationId: "location", installId: "install", label: "Graanmolenhof" }]);
+});
+
+test("CRM subaccounts sort by name and keep working when one name lookup fails or returns another account", async () => {
+  const installations = ["zeta", "alpha", "failed", "mismatch"].map((locationId) => ({
+    installId: `install-${locationId}`, locationId, expiresAt: 1, createdAt: 1, updatedAt: 1
+  }));
+  const result = await listCrmConnections({ installations, call: async ({ path }) => {
+    const locationId = path.split("/").at(-1);
+    if (locationId === "failed") throw new Error("Forbidden");
+    return { location: { id: locationId === "mismatch" ? "other" : locationId, name: locationId === "alpha" ? "Alice Buyssehof" : "Zeeduin" } };
+  } });
+  assert.deepEqual(result.map((item) => item.label), ["Alice Buyssehof", "CRM-subaccount failed", "CRM-subaccount mismatch", "Zeeduin"]);
+  assert.equal(result.find((item) => item.locationId === "failed")?.installId, "install-failed");
+});
+
+test("validating CRM pipeline actions does not fetch subaccount names", async () => {
+  const result = await listCrmConnections({ resolveNames: false, installations: [
+    { installId: "install", locationId: "location", expiresAt: 1, createdAt: 1, updatedAt: 1 }
+  ], call: async () => { assert.fail("Name requests are unnecessary for pipeline validation"); } });
+  assert.deepEqual(result, connections.map((item) => ({ ...item, label: "CRM-subaccount location" })));
 });
 
 test("loading CRM pipelines validates the location and installation pair before calling the provider", async () => {
