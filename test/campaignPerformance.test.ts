@@ -1,4 +1,5 @@
 import test from "node:test";
+import { siteAnalyticsPeriod } from "../src/dashboardPeriod.js";
 import assert from "node:assert/strict";
 import {
   getCampaignPerformance, parseCampaignSiteMappings, summarizeAds, summarizeWebsiteConversions, summarizeLinkCtr,
@@ -880,9 +881,12 @@ test("a linked landing page without conversion setup does not inherit website le
 });
 
 test("Ads Manager link CTR and both ad providers use the exact custom date range", async () => {
-  for (const range of [{ start: "2026-08-01", end: "2026-08-31" }, { start: "2026-09-08", end: "2026-09-08" }]) {
+  for (const range of [
+    { start: "2026-08-01", end: "2026-08-31" }, { start: "2026-09-08", end: "2026-09-08" },
+    { start: "2025-09-16", end: "2026-09-15" }, { start: "2023-01-01", end: "2026-09-15" }
+  ]) {
     const data = dashboard();
-    data.period = { ...period, ...range };
+    data.period = siteAnalyticsPeriod(range, new Date("2026-09-15T12:00:00Z"));
     const checked: string[] = [];
     const result = await getCampaignPerformance(data, {
       now: new Date("2026-09-15T12:00:00Z"),

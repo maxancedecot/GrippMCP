@@ -457,3 +457,30 @@ function groupMetrics(dashboard: SiteAnalyticsDashboardData) {
     siteId, sourcePath, visitors, leads, appointments
   }));
 }
+
+
+test("a full year of website data includes old and new visits without truncating the chosen period", async () => {
+  const siteId = `long-period-${Date.now()}`;
+  await withSiteAnalyticsEnv(siteId, "event-token", async () => {
+    const now = new Date("2026-10-06T10:00:00Z");
+    for (const [date, path, visitor] of [
+      ["2025-10-06", "/outside-period", "outside"],
+      ["2025-10-07", "/project/old", "first"],
+      ["2026-04-01", "/project/middle", "middle"],
+      ["2026-10-06", "/project/recent", "last"]
+    ]) {
+      await writeJsonCache(`site-analytics:v1:${siteId}:${date}`, {
+        version: 1, siteId, date, totals: { pageViews: 1, engagementMs: 0 }, visitors: [visitor], sessions: [visitor],
+        pages: { [path]: { path, title: path, url: `https://example.com${path}`, views: 1,
+          visitors: [visitor], sessions: [visitor], engagementMs: 0, scrollByView: {} } }, referrers: {}
+      });
+    }
+    const data = await getSiteAnalyticsDashboardData({ siteId, start: "2025-10-07", end: "2026-10-06", now });
+    assert.equal(data.period.days, 365);
+    assert.equal(data.dailyRows.length, 365);
+    assert.equal(data.dailyRows[0].date, "2025-10-07");
+    assert.equal(data.dailyRows.at(-1)?.date, "2026-10-06");
+    assert.deepEqual([data.totals.pageViews, data.totals.uniqueVisitors], [3, 3]);
+    assert.deepEqual(data.cvrPageCandidates.map((page) => page.path).sort(), ["/project/middle", "/project/old", "/project/recent"]);
+  });
+});

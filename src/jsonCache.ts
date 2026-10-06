@@ -21,11 +21,21 @@ export async function readJsonCache<T>(key: string): Promise<T | null> {
 }
 
 export async function readJsonCaches<T>(keys: string[]): Promise<(T | null)[]> {
-  if (!keys.length) return [];
-  if (getJsonCacheMode() !== "upstash_rest") return Promise.all(keys.map((key) => readJsonCache<T>(key)));
-  const values = await kvCommand<(string | null)[]>(["MGET", ...keys]);
-  if (!Array.isArray(values) || values.length !== keys.length) throw new Error("Incomplete cache response");
-  return values.map((value) => value === null ? null : JSON.parse(value) as T);
+  // Long reporting periods produce thousands of daily shard keys. Keep each
+  // storage request and the number of simultaneous file reads bounded.
+  const results: (T | null)[] = [];
+  const mode = getJsonCacheMode();
+  for (let offset = 0; offset < keys.length; offset += 256) {
+    const batch = keys.slice(offset, offset + 256);
+    if (mode !== "upstash_rest") {
+      results.push(...await Promise.all(batch.map((key) => readJsonCache<T>(key))));
+      continue;
+    }
+    const values = await kvCommand<(string | null)[]>(["MGET", ...batch]);
+    if (!Array.isArray(values) || values.length !== batch.length) throw new Error("Incomplete cache response");
+    results.push(...values.map((value) => value === null ? null : JSON.parse(value) as T));
+  }
+  return results;
 }
 
 export async function writeJsonCache(key: string, value: unknown): Promise<void> {

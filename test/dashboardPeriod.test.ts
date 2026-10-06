@@ -15,12 +15,12 @@ test("custom periods include both boundaries and calendar days across leap years
   assert.equal(siteAnalyticsPeriod({ start: "2026-06-18", end: "2026-09-15" }, now).days, 90);
 });
 
-test("invalid dates and oversized periods cannot silently become a different API range", () => {
+test("invalid dates cannot silently become a different API range", () => {
   for (const range of [
     { start: "2026-02-29", end: "2026-03-01" }, { start: "2026-09-15" },
     { end: "2026-09-15" }, { start: "", end: "2026-09-15" },
     { start: "2026-9-01", end: "2026-09-15" }, { start: "2026-09-14", end: "2026-09-13" },
-    { start: "2026-09-15", end: "2026-09-16" }, { start: "2026-06-17", end: "2026-09-15" },
+    { start: "2026-09-15", end: "2026-09-16" },
     { start: "2026-09-01' OR 1=1", end: "2026-09-15" }
   ]) {
     assert.throws(() => siteAnalyticsPeriod(range, now));
@@ -64,4 +64,35 @@ test("account manager links use their own page and drop dashboard-only filters",
   assert.equal(accountManagerHref({ params, days: 7, syncMeta: true }), "/accountmanager?days=7&syncMeta=1");
   assert.equal(accountManagerHref({ params: {}, days: 30 }), "/accountmanager");
   assert.equal(accountManagerHref({ params: { manager: "42" }, days: 7 }), "/accountmanager?manager=42&days=7");
+});
+
+
+test("periods longer than 90 days, including multiple years, retain their full inclusive range", () => {
+  for (const [start, end, days] of [
+    ["2026-06-17", "2026-09-15", 91],
+    ["2025-09-16", "2026-09-15", 365],
+    ["2024-01-01", "2024-12-31", 366],
+    ["2021-01-01", "2026-09-15", 2084]
+  ] as const) {
+    const selected = dashboardPeriodSelection({ start, end }, now);
+    assert.equal(selected.error, "");
+    assert.equal(selected.custom, true);
+    assert.deepEqual([selected.period.start, selected.period.end, selected.period.days], [start, end, days]);
+    assert.equal(dashboardHref({ params: {}, days, customPeriod: { start, end } }), `/dashboard?start=${start}&end=${end}`);
+    assert.equal(accountManagerHref({ params: {}, days, customPeriod: { start, end } }), `/accountmanager?start=${start}&end=${end}`);
+  }
+  assert.deepEqual(siteAnalyticsPeriod({ days: 365 }, now), {
+    days: 365, start: "2025-09-16", end: "2026-09-15", label: "Laatste 365 dagen"
+  });
+});
+
+test("180-day and 365-day presets work across website and accountmanager navigation", () => {
+  for (const days of [180, 365]) {
+    const selected = dashboardPeriodSelection({ days: String(days) }, now);
+    assert.equal(selected.custom, false);
+    assert.equal(selected.error, "");
+    assert.equal(selected.period.days, days);
+    assert.equal(dashboardHref({ params: {}, days }), `/dashboard?days=${days}`);
+    assert.equal(accountManagerHref({ params: {}, days }), `/accountmanager?days=${days}`);
+  }
 });

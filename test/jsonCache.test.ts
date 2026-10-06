@@ -68,3 +68,38 @@ test("persistent cache errors include the provider response", async (t) => {
 
   await assert.rejects(writeJsonCache("oversized", { value: "x" }), /KV command failed \(400\): request body is too large/);
 });
+
+
+test("long-period cache reads use bounded batches and preserve missing values, duplicates and ordering", async (t) => {
+  const envKeys = ["JSON_CACHE_STORE", "KV_REST_API_URL", "KV_REST_API_TOKEN"] as const;
+  const previous = envKeys.map((key) => process.env[key]);
+  const originalFetch = globalThis.fetch;
+  delete process.env.JSON_CACHE_STORE;
+  process.env.KV_REST_API_URL = "https://cache.example.test";
+  process.env.KV_REST_API_TOKEN = "test-only";
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    envKeys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; });
+  });
+  const keys = Array.from({ length: 600 }, (_, index) => index % 13 === 0 ? "missing" : `daily:${index % 333}`);
+  const expected = keys.map((key) => key === "missing" ? null : { key });
+  let calls = 0, incomplete = false;
+  globalThis.fetch = async (_url, init) => {
+    const [command, ...batch] = JSON.parse(String(init?.body)) as string[];
+    assert.equal(command, "MGET");
+    assert.ok(batch.length <= 256);
+    assert.equal(init?.cache, "no-store");
+    calls++;
+    const result = batch.map((key) => key === "missing" ? null : JSON.stringify({ key }));
+    if (incomplete && calls === 2) result.pop();
+    return Response.json({ result });
+  };
+  assert.deepEqual(await readJsonCaches(keys), expected);
+  assert.equal(calls, 3);
+  calls = 0; incomplete = true;
+  await assert.rejects(readJsonCaches(keys), /Incomplete cache response/);
+  assert.equal(calls, 2, "An incomplete later batch must stop the read without returning partial data");
+  calls = 0;
+  assert.deepEqual(await readJsonCaches([]), []);
+  assert.equal(calls, 0);
+});

@@ -27,7 +27,7 @@ import { DataManagementPage } from "./data-management.js";
 import { DashboardSidebarFooter, DashboardViewTabs } from "./view-tabs.js";
 import { SiteDeleteForm } from "./site-delete-form.js";
 import { isExcludedAnalyticsLink } from "../../src/analyticsPageFilter.js";
-import { accountManagerHref, dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, MAX_DASHBOARD_DAYS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
+import { accountManagerHref, dashboardHref, dashboardPeriodSelection, dashboardToday, DASHBOARD_PERIOD_OPTIONS, type DashboardSearchParams } from "../../src/dashboardPeriod.js";
 
 export const dynamic = "force-dynamic";
 
@@ -179,7 +179,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <label>Van<input type="date" name="start" required defaultValue={dashboard.period.start} max={dashboardToday(now)} /></label>
             <label>Tot en met<input type="date" name="end" required defaultValue={dashboard.period.end} max={dashboardToday(now)} /></label>
             <button type="submit">Toepassen</button>
-            <span>Max. {MAX_DASHBOARD_DAYS} dagen per periode</span>
           </form>
 
           {view === "website" ? <nav className="dashboard-tabs site-analytics-site-tabs" aria-label="Sites">

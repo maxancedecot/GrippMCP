@@ -1,7 +1,6 @@
 export type SiteAnalyticsPeriod = { days: number; start: string; end: string; label: string };
 export type DashboardSearchParams = Record<string, string | string[] | undefined>;
-export const MAX_DASHBOARD_DAYS = 90;
-export const DASHBOARD_PERIOD_OPTIONS = [7, 14, 30, 90];
+export const DASHBOARD_PERIOD_OPTIONS = [7, 14, 30, 90, 180, 365];
 const DAY_MS = 86_400_000;
 
 export function dashboardToday(now = new Date()): string {
@@ -20,12 +19,11 @@ export function siteAnalyticsPeriod(options: { days?: number; start?: string; en
     if (start > end) throw new Error("De begindatum moet op of vóór de einddatum liggen.");
     if (end > today) throw new Error("De einddatum mag niet in de toekomst liggen.");
     const days = (Date.parse(end) - Date.parse(start)) / DAY_MS + 1;
-    if (days > MAX_DASHBOARD_DAYS) throw new Error(`Kies een periode van maximaal ${MAX_DASHBOARD_DAYS} dagen.`);
     const format = (date: string) => date.split("-").reverse().join("/");
     return { days, start, end, label: `${format(start)} – ${format(end)}` };
   }
   const days = !options.days || !Number.isFinite(options.days) ? 30
-    : Math.max(1, Math.min(MAX_DASHBOARD_DAYS, Math.round(options.days)));
+    : Math.max(1, Math.round(options.days));
   const start = new Date(Date.parse(today) - (days - 1) * DAY_MS).toISOString().slice(0, 10);
   return { days, start, end: today, label: `Laatste ${days} dagen` };
 }

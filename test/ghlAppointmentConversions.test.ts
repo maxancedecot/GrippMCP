@@ -206,3 +206,18 @@ test("CRM pipelines with more than 100 leads count the entire last page", async 
   assert.equal(result[0]?.leads, 101);
   assert.deepEqual(pages, [1, 2]);
 });
+
+
+test("a full-year CRM period includes old new leads and old stage changes at both boundaries", async () => {
+  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
+    ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }] }
+    : { opportunities: [
+      { id: "old-lead", pipelineStageId: "new", createdAt: "2025-09-16T10:00:00Z" },
+      { id: "outside-lead", pipelineStageId: "new", createdAt: "2025-09-15T10:00:00Z" },
+      { id: "old-meeting", pipelineStageId: "meeting", createdAt: "2025-01-01T10:00:00Z", lastStageChangeAt: "2025-09-16T10:00:00Z" },
+      { id: "recent-meeting", pipelineStageId: "meeting", lastStageChangeAt: "2026-09-15T10:00:00Z" },
+      { id: "outside-meeting", pipelineStageId: "meeting", lastStageChangeAt: "2026-09-16T10:00:00Z" }
+    ] };
+  assert.deepEqual(await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
+    { start: "2025-09-16", end: "2026-09-15" }, call), [{ pipelineId: "project", pipelineName: "Project", leads: 1, appointments: 2 }]);
+});
