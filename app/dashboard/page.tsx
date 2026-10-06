@@ -17,6 +17,7 @@ import {
 } from "../../src/siteAnalytics.js";
 import { cvrOverviewRowsFromLinks, type CvrOverviewMetric, type CvrOverviewRow } from "../../src/siteAnalyticsConversions.js";
 import { DashboardFrame } from "../dashboard-frame.js";
+import { WebsiteRefreshButton } from "./website-refresh-button.js";
 import { CvrMappingBoard } from "./cvr-mapping-board.js";
 import { CvrTrendChart } from "./cvr-trend-chart.js";
 import { CampaignPerformance } from "./campaign-performance.js";
@@ -139,6 +140,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </span>
             <span>{dashboard.period.label}</span>
             <span>Bijgewerkt {dashboard.lastUpdated}</span>
+            {view === "website" ? <WebsiteRefreshButton /> : null}
           </div>
         </header>
 

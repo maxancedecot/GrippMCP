@@ -2886,6 +2886,35 @@ td .inline-bar {
   font-weight: 760;
 }
 
+.site-analytics-refresh-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 9px 12px;
+  clip-path: var(--clip-sm);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.site-analytics-refresh-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.site-analytics-refresh-button:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.site-analytics-refresh-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .cvr-mapping-panel {
   min-width: 0;
 }

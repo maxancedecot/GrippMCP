@@ -86,19 +86,16 @@ export function CvrMappingBoard({
   const sourceRefs = useRef(new Map<string, HTMLButtonElement>());
   const targetRefs = useRef(new Map<string, HTMLButtonElement>());
 
+  // Follow a changed dashboard filter while allowing a local site choice.
   useEffect(() => {
-    if (selectedSiteId && selectedSiteId !== activeSiteId) {
-      setActiveSiteId(selectedSiteId);
-      return;
+    if (selectedSiteId) setActiveSiteId(selectedSiteId);
+  }, [selectedSiteId]);
+
+  useEffect(() => {
+    if (!siteOptions.some((site) => site.id === activeSiteId)) {
+      setActiveSiteId(siteOptions.find((site) => site.id === selectedSiteId)?.id ?? siteOptions[0]?.id ?? "");
     }
-    if (!activeSiteId && defaultSiteId) {
-      setActiveSiteId(defaultSiteId);
-      return;
-    }
-    if (activeSiteId && siteOptions.length > 0 && !siteOptions.some((site) => site.id === activeSiteId)) {
-      setActiveSiteId(defaultSiteId);
-    }
-  }, [activeSiteId, defaultSiteId, selectedSiteId, siteOptions]);
+  }, [activeSiteId, selectedSiteId, siteOptions]);
 
   useEffect(() => {
     setSelectedSourcePath("");
