@@ -1,9 +1,11 @@
 # CRM-tellingen in het accountmanagerdashboard
 
-De huidige GoHighLevel-pipelinefase bepaalt de kolom. **Leads (CRM)** telt alleen opportunities in **Nieuwe lead** (of **New lead**). **Afspraken (CRM)** telt alleen opportunities in **Afspraak** (of **Appointment**), inclusief expliciete labels zoals **Afspraak ingepland** en **Appointment booked**. Andere fases, waaronder opvolging, geannuleerde afspraken en algemene intake- of demofases, tellen in geen van beide kolommen mee.
+De tags in de contactdetails bepalen de kolom. **Afspraken (CRM)** telt contacten met `ledoux` en `afspraak`. **Leads (CRM)** telt contacten met `ledoux` en `brochure` of `contact`. Afspraak heeft voorrang wanneer beide combinaties aanwezig zijn. De pipeline bepaalt het project; de pipelinefase bepaalt de telling niet.
 
-Een opportunity die van Nieuwe lead naar Afspraak verhuist, telt dus alleen nog als afspraak. De periodefilter blijft gebaseerd op de aanmaakdatum voor nieuwe leads en de laatste fasewijziging voor afspraken, met kalenderdagen in Europe/Brussels. Dit zijn tellingen op basis van de huidige fase, geen historisch overzicht van alle faseovergangen.
+Het periodefilter gebruikt de aanmaakdatum van het contact (`dateAdded`), met inclusieve kalenderdagen in Europe/Brussels. Elk contact telt binnen een project eenmaal mee, ook in meerdere gekoppelde pipelines. Verschillende CRM-subaccounts houden hun eigen contacten.
 
-Project-CVR en de CVR bij een accountmanagerfilter gebruiken `(leads + afspraken) / websitebezoekers × 100`. Beide kolommen zijn afzonderlijke groepen, zodat een opportunity niet dubbel meetelt. Een ontbrekende fase of noodzakelijke datum geeft een onbeschikbare telling; CVR blijft onbeschikbaar zolang een van de twee tellingen ontbreekt.
+Project-CVR en de CVR bij een accountmanagerfilter gebruiken `(leads + afspraken) / websitebezoekers × 100`. Ontbrekende contactgegevens of relevante datums geven een onbeschikbare telling; CVR blijft onbeschikbaar zolang een van de twee tellingen ontbreekt.
 
-Verificatie: `npm test` bevat tests voor faseherkenning, verplaatsing tussen fases, ontdubbeling over pagina’s, periodegrenzen, ontbrekende CRM-data, projectaggregatie en accountmanager-CVR.
+CRM-aanvragen worden per subaccount gedoseerd en binnen een dashboardlading gedeeld. Een tijdelijke HTTP 429 leidt tot maximaal twee herpogingen na de vereiste wachttijd. Een resterende tijdelijke aanvraaglimiet in de dashboardcache mag na één minuut opnieuw laden. Een uitgeputte daglimiet wordt afzonderlijk gemeld en niet automatisch opnieuw geprobeerd binnen dezelfde aanvraag.
+
+Verificatie: `npm test` controleert tags, overlap, ontdubbeling, periodegrenzen, ontbrekende gegevens, projectaggregatie, aanvraaglimieten, herpogingen en snapshotherstel.

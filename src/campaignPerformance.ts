@@ -1,3 +1,4 @@
+import { GhlClient } from "./ghl/client.js";
 import { z } from "zod";
 import { facebookDestinationUrls, matchCampaignPages } from "./campaignDestinations.js";
 import { discoverMetaAccounts, type MetaAccountSync } from "./metaAccountDiscovery.js";
@@ -607,6 +608,19 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
   const errorMessages = new Map<string, string>();
   const unmatchedSites = new Set<string>();
   const projectContacts = new Map<string, { leads: Set<string>; appointments: Set<string> }>();
+  const crmReads = new Map<string, Promise<unknown>>();
+  const sharedRead: GhlReadCall = (input) => {
+    const query = Object.entries(input.query ?? {}).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b));
+    const key = JSON.stringify([input.installId, input.apiVersion, input.path, query]);
+    let result = crmReads.get(key);
+    if (!result) {
+      result = Promise.resolve().then(() => options.ghlCall ? options.ghlCall(input) : new GhlClient(input.installId).call({
+        method: "GET", path: input.path, query: input.query, apiVersion: input.apiVersion, readOnly: true
+      }));
+      crmReads.set(key, result);
+    }
+    return result;
+  };
   await Promise.all(dashboard.sites.map(async (site) => {
     if (dashboard.source.mode !== "live") return;
     const scopes = new Map<string, NonNullable<CampaignSiteMapping["ghl"]>>();
@@ -624,7 +638,7 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
     configuredSites.add(site.id);
     for (const config of scopes.values()) {
       try {
-        const pipelines = await ghlConversionsByPipeline(config, dashboard.period, options.ghlCall);
+        const pipelines = await ghlConversionsByPipeline(config, dashboard.period, sharedRead);
         for (const pipeline of pipelines) {
           const manual = savedMatches.find((match) => match.locationId === config.locationId && match.pipelineId === pipeline.pipelineId);
           if (manual && manual.siteId !== site.id) continue;
@@ -667,6 +681,10 @@ export function crmConversionErrorMessage(error: unknown) {
   }
   if (error instanceof GrippMcpError && error.code === "ghl_upstream_error") {
     const status = z.object({ status: z.number().int().min(400).max(599), crmPage: z.number().int().positive().optional() }).safeParse(error.details);
+    if (status.success && status.data.status === 429) {
+      const daily = z.object({ rateLimit: z.literal("daily") }).safeParse(error.details).success;
+      return daily ? "CRM-daglimiet bereikt; probeer later opnieuw" : "CRM-aanvraaglimiet bereikt; probeer later opnieuw";
+    }
     if (status.success) return status.data.crmPage && status.data.crmPage > 1
       ? `CRM-vervolgpagina niet beschikbaar (HTTP ${status.data.status})` : `CRM niet beschikbaar (HTTP ${status.data.status})`;
   }

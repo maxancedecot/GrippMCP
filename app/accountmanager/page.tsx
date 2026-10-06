@@ -35,9 +35,11 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const forceMetaSync = first(params.syncMeta) === "1";
   const [projectGroupRevision, crmRevision] = await Promise.all([getProjectPageGroupRevision(), getCrmPipelineRevision()]);
   const snapshotKey = selection.custom
-    ? `accountmanager-dashboard:v12:custom:${selection.period.start}:${selection.period.end}:${projectGroupRevision}:${crmRevision}`
-    : `accountmanager-dashboard:v12:rolling:${days}:${projectGroupRevision}:${crmRevision}`;
-  const snapshot = await loadScheduledSnapshot({ key: snapshotKey, now, force: forceMetaSync, load: async () => {
+    ? `accountmanager-dashboard:v13:custom:${selection.period.start}:${selection.period.end}:${projectGroupRevision}:${crmRevision}`
+    : `accountmanager-dashboard:v13:rolling:${days}:${projectGroupRevision}:${crmRevision}`;
+  const snapshot = await loadScheduledSnapshot({ key: snapshotKey, now, force: forceMetaSync,
+    retryWhen: (data) => data.performance.projects.some((project) => project.crmMessage?.startsWith("CRM-aanvraaglimiet bereikt")),
+    load: async () => {
     const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
     const performance = await loadCampaignPerformanceBaseData({ dashboard, discoverySites: dashboard.sites, forceMetaSync });
     return { dashboard, performance };

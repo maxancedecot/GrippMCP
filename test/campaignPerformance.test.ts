@@ -1576,3 +1576,27 @@ test("malformed contact tags report a safe field name and never fall back to web
   assert.equal(project.crmMessage, "CRM-antwoord ongeldig (contact.tags)");
   assert.doesNotMatch(JSON.stringify(result), /private@example|private-tag|private-contact|private-opportunity/);
 });
+
+test("websites sharing a CRM location reuse in-flight pipeline and contact reads", async () => {
+  const data = dashboard(["site-a", "site-b"]);
+  data.cvrPageCandidates = data.sites.map((site) => ({ siteId: site.id, siteName: site.name,
+    path: "/project/alpha", title: "Alpha", uniqueVisitors: 50, pageViews: 60 }));
+  const requests = new Map<string, number>();
+  const result = await getCampaignPerformance(data, {
+    env: environment([]), requireCrmConversions: true,
+    crmMatches: data.sites.map((site, index) => ({ siteId: site.id, sourcePath: "/project/alpha", locationId: "location",
+      installId: "install", pipelineId: index === 0 ? "social" : "search", pipelineName: "Alpha" })),
+    ghlCall: async ({ path, query }) => {
+      const key = `${path}:${query?.pipelineId ?? ""}`;
+      requests.set(key, (requests.get(key) ?? 0) + 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      if (path.endsWith("/pipelines")) return { pipelines: ["social", "search"].map((id) => ({ id, name: "Alpha" })) };
+      if (path.startsWith("/contacts/")) return { contact: { id: "shared", tags: ["ledoux", "brochure"], dateAdded: "2026-09-10T12:00:00Z" } };
+      return { opportunities: [{ id: `${query?.pipelineId}-opportunity`, pipelineId: query?.pipelineId, contactId: "shared" }] };
+    }
+  });
+  assert.equal(requests.get("/opportunities/pipelines:"), 1);
+  assert.equal(requests.get("/contacts/shared:"), 1);
+  assert.deepEqual(result.projects.map((project) => [project.siteId, project.leads, project.appointments, project.crmState]),
+    [["site-a", 1, 0, "connected"], ["site-b", 1, 0, "connected"]]);
+});

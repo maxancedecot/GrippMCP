@@ -39,3 +39,27 @@ test("scheduled snapshots serve stale data when a refresh fails", async () => {
     load: async () => { throw new Error("provider unavailable"); } });
   assert.deepEqual(result, cached);
 });
+
+test("transient snapshots retry after one minute outside work hours with a separate short lease", async () => {
+  const cached = { refreshedAt: "2026-09-19T20:00:00.000Z", data: { retry: true } };
+  const claims: [string, number][] = []; let loads = 0;
+  const options = { key: "crm", retryWhen: (data: { retry: boolean }) => data.retry,
+    store: { read: async <T>() => cached as T, write: async () => undefined,
+      claim: async (key: string, ttl: number) => { claims.push([key, ttl]); return true; } },
+    load: async () => { loads++; return { retry: false }; } };
+  assert.deepEqual(await loadScheduledSnapshot({ ...options, now: new Date("2026-09-19T20:00:59.000Z") }), cached);
+  assert.equal(loads, 0);
+  const result = await loadScheduledSnapshot({ ...options, now: new Date("2026-09-19T20:01:00.000Z") });
+  assert.deepEqual(result.data, { retry: false }); assert.equal(loads, 1);
+  assert.deepEqual(claims, [["crm:retry:2026-09-19T20:00:00.000Z", 60000]]);
+});
+
+test("transient retry leases prevent concurrent loads; successful snapshots keep the ordinary schedule", async () => {
+  for (const retry of [true, false]) {
+    const cached = { refreshedAt: "2026-09-19T20:00:00.000Z", data: { retry } }; let loads = 0, claims = 0;
+    const result = await loadScheduledSnapshot({ key: "crm", now: new Date("2026-09-19T20:02:00.000Z"), retryWhen: (data: { retry: boolean }) => data.retry,
+      store: { read: async <T>() => cached as T, write: async () => undefined, claim: async () => { claims++; return false; } },
+      load: async () => { loads++; return { retry: false }; } });
+    assert.deepEqual(result, cached); assert.equal(loads, 0); assert.equal(claims, retry ? 1 : 0);
+  }
+});

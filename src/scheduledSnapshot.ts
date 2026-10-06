@@ -1,5 +1,6 @@
 import { claimJsonCacheLease, readJsonCache, writeJsonCache } from "./jsonCache.js";
 
+const RETRY_MS = 60_000;
 const HOUR_MS = 60 * 60_000;
 const REFRESH_START_HOUR = 8;
 const REFRESH_END_HOUR = 19;
@@ -24,20 +25,23 @@ const defaultStore: SnapshotStore = {
   claim: claimJsonCacheLease
 };
 
-export async function loadScheduledSnapshot<T>({ key, now = new Date(), force = false, load, store = defaultStore }: {
+export async function loadScheduledSnapshot<T>({ key, now = new Date(), force = false, load, retryWhen, store = defaultStore }: {
   key: string;
   now?: Date;
   force?: boolean;
   load: () => Promise<T>;
+  retryWhen?: (data: T) => boolean;
   store?: SnapshotStore;
 }): Promise<Snapshot<T>> {
   const cached = snapshotFrom(await store.read<unknown>(key)) as Snapshot<T> | null;
-  if (!force && cached && !shouldRefreshSnapshot(cached.refreshedAt, now)) return cached;
+  const retry = cached !== null && retryWhen?.(cached.data) === true;
+  const due = cached && (retry ? now.getTime() - Date.parse(cached.refreshedAt) >= RETRY_MS : shouldRefreshSnapshot(cached.refreshedAt, now));
+  if (!force && cached && !due) return cached;
 
   let claimed = force;
   if (!force) {
     try {
-      claimed = await store.claim(`${key}:refresh`, REFRESH_LEASE_MS);
+      claimed = await store.claim(retry ? `${key}:retry:${cached!.refreshedAt}` : `${key}:refresh`, retry ? RETRY_MS : REFRESH_LEASE_MS);
     } catch {
       if (cached) return cached;
       claimed = true;

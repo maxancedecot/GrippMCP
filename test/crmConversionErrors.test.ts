@@ -13,3 +13,10 @@ test("CRM diagnostics describe response failures without exposing provider data"
   assert.equal(crmConversionErrorMessage(new Error("No GoHighLevel OAuth installation found for install_id 'private-id'.")), "CRM-subaccount opnieuw verbinden");
   assert.equal(crmConversionErrorMessage(new Error("private-token")), "CRM niet beschikbaar");
 });
+
+test("CRM request and daily limits explain the cause without exposing provider details", () => {
+  assert.equal(crmConversionErrorMessage(new GrippMcpError("ghl_upstream_error", "private-token", { status: 429, body: "private-details" })),
+    "CRM-aanvraaglimiet bereikt; probeer later opnieuw");
+  assert.equal(crmConversionErrorMessage(new GrippMcpError("ghl_upstream_error", "private-token", { status: 429, rateLimit: "daily", body: "private-details" })),
+    "CRM-daglimiet bereikt; probeer later opnieuw");
+});

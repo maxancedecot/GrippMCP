@@ -1,3 +1,4 @@
+import { ghlRequestQueue } from "./requestQueue.js";
 import { GrippMcpError } from "../errors.js";
 import { JsonValue } from "../types.js";
 import { getFreshGhlTokenRecord } from "./oauth.js";
@@ -15,8 +16,11 @@ export class GhlClient {
     const record = await getFreshGhlTokenRecord(this.installId);
     const url = buildUrl(input.path, input.query);
 
-    const response = await fetch(url, {
+    const resource = record.locationId ?? record.companyId ?? this.installId;
+    const retryable = input.method === "GET" || (input.method === "POST" && input.readOnly === true);
+    const response = await ghlRequestQueue(resource, () => fetch(url, {
       method: input.method,
+      cache: "no-store",
       headers: {
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -24,7 +28,7 @@ export class GhlClient {
         "Version": input.apiVersion ?? DEFAULT_API_VERSION
       },
       body: input.body === undefined || input.method === "GET" ? undefined : JSON.stringify(input.body)
-    });
+    }), retryable);
 
     const text = await response.text();
     const payload = parseJson(text);
@@ -32,6 +36,7 @@ export class GhlClient {
       throw new GrippMcpError("ghl_upstream_error", "GoHighLevel request failed.", {
         status: response.status,
         statusText: response.statusText,
+        ...(response.status === 429 && response.headers.get("x-ratelimit-daily-remaining") === "0" ? { rateLimit: "daily" } : {}),
         body: payload
       });
     }
