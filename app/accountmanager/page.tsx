@@ -17,6 +17,7 @@ import {
   type DashboardSearchParams
 } from "../../src/dashboardPeriod.js";
 import { AccountManagerLoadingProvider, AccountManagerLoadingRegion } from "./loading-overlay.js";
+import { AccountManagerInitialLoadComplete } from "./initial-loading.js";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,7 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
     accountManagerHref({ params, days, customPeriod, syncMeta: true }));
 
   return <AccountManagerLoadingProvider>
+    <AccountManagerInitialLoadComplete />
     <DashboardFrame showTopMenu={false} className="dashboard-app--accountmanager"
       sidebar={<DashboardViewTabs view="campaigns" params={params} days={days}
       customPeriod={customPeriod} managers={performance.managers} selectedManager={performance.selectedManager}

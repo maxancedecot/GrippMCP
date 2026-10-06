@@ -17,6 +17,7 @@ export function AccountManagerLoadingGame() {
   const engine = useRef(game);
   const selected = useRef(false);
   const surface = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [limited, setLimited] = useState(false);
@@ -34,6 +35,7 @@ export function AccountManagerLoadingGame() {
     } catch { /* Rotation also works when browser storage is unavailable. */ }
     nextGameIndex = (index + 1) % 3;
     publish(createLoadingGame(gameForLoad(index)));
+    setReady(true);
   }, []);
 
   useEffect(() => {
@@ -62,10 +64,13 @@ export function AccountManagerLoadingGame() {
     return () => cancelAnimationFrame(frame);
   }, [playing, limited, startedAt]);
 
-  function start() {
+  function start(input?: GameInput) {
+    if (!ready) return;
     if (limited || playTimeExpired(startedAt, performance.now())) { setLimited(true); return; }
-    if (engine.current.over) publish(createLoadingGame(engine.current.kind));
-    if (engine.current.kind === "flappy") publish(controlLoadingGame(engine.current, "action"));
+    let next = engine.current.over ? createLoadingGame(engine.current.kind) : engine.current;
+    if (next.kind === "flappy") next = controlLoadingGame(next, "action");
+    else if (input) next = controlLoadingGame(next, input);
+    publish(next);
     if (startedAt === null) setStartedAt(performance.now());
     setPlaying(true);
   }
@@ -76,13 +81,14 @@ export function AccountManagerLoadingGame() {
     if (engine.current.over) setPlaying(false);
   }
   function keyDown(event: KeyboardEvent) {
-    const input: GameInput | undefined = ({ ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", " ": "action" } as Record<string, GameInput>)[event.key];
-    if (!input || limited) return;
-    // Keep normal Space activation on the start/retry button.
+    // Let buttons keep their normal Space/Enter activation.
+    if ((event.key === " " || event.key === "Enter") && event.target !== surface.current) return;
+    const input: GameInput | undefined = ({ ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", " ": "action", Enter: "action" } as Record<string, GameInput>)[event.key];
+    if (!input || limited || !ready) return;
     if (!playing && event.target !== surface.current) return;
     event.preventDefault();
-    if (!playing) start();
-    control(input);
+    if (!playing) start(input);
+    else control(input);
   }
 
   return <div className="loading-game" onKeyDown={keyDown}>
@@ -91,14 +97,14 @@ export function AccountManagerLoadingGame() {
       <strong>stop met spelen en werk door</strong>
       <p>De gegevens worden verder geladen.</p>
     </div> : <>
-      <div ref={surface} className="loading-game-surface" tabIndex={0} role="group"
+      <div ref={surface} className="loading-game-surface" tabIndex={ready ? 0 : -1} role={playing ? "group" : "button"} aria-disabled={!ready}
         aria-label={`${titles[game.kind]} speelveld`} aria-describedby={instructionsId}
-        onPointerDown={() => { if (game.kind === "flappy") { if (!playing) start(); else control("action"); } }}>
+        onClick={() => { if (!ready) return; if (!playing) start(); else if (game.kind === "flappy") control("action"); }}>
         <GameBoard game={game} />
-        {!playing ? <div className="loading-game-board-caption" aria-hidden="true">{game.over ? "Game over" : "Klaar voor de start?"}</div> : null}
+        {!playing ? <div className="loading-game-board-caption" aria-hidden="true">{!ready ? "Spel wordt klaargezet…" : game.over ? "Game over" : "Klik of tik om te starten"}</div> : null}
       </div>
       <p className="loading-game-instructions" id={instructionsId}>{instructions[game.kind]}</p>
-      {!playing ? <button className="loading-game-start" type="button" onClick={start}>{game.over ? "Opnieuw proberen" : "Speel tijdens het laden"}</button>
+      {!playing ? <button className="loading-game-start" type="button" disabled={!ready} onClick={() => start()}>{!ready ? "Spel wordt klaargezet…" : game.over ? "Opnieuw proberen" : "Speel tijdens het laden"}</button>
         : <div className="loading-game-controls" aria-label="Spelbediening">
           {game.kind === "flappy" ? <button type="button" onClick={() => control("action")}>Vlieg ↑</button>
             : <>
