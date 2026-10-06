@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation.js";
+import { AccountManagerLoadingGame } from "./loading-game.js";
 
 const AccountManagerLoadingContext = createContext(false);
 
@@ -45,16 +46,23 @@ export function AccountManagerLoadingProvider({ children }: { children: ReactNod
 
 export function AccountManagerLoadingRegion({ children }: { children: ReactNode }) {
   const loading = useContext(AccountManagerLoadingContext);
-  return <section className="accountmanager-loading-region" aria-busy={loading}>
-    {children}
-    {loading ? <div className="accountmanager-loading-overlay" role="status" aria-live="polite" aria-label="Nieuwe dashboardgegevens laden">
-      <div className="accountmanager-loading-card">
+  return <section className={`accountmanager-loading-region${loading ? " accountmanager-loading-region--active" : ""}`}>
+    <div aria-busy={loading} inert={loading}>{children}</div>
+    {loading ? <AccountManagerLoadingOverlay /> : null}
+  </section>;
+}
+
+export function AccountManagerLoadingOverlay() {
+  return <div className="accountmanager-loading-overlay" role="group" aria-label="Nieuwe dashboardgegevens laden">
+    <div className="accountmanager-loading-card">
+      <div className="accountmanager-loading-status" role="status">
         <span className="accountmanager-loading-spinner" aria-hidden="true" />
         <strong>Nieuwe data laden</strong>
         <span>Het dashboard wordt bijgewerkt…</span>
       </div>
-    </div> : null}
-  </section>;
+      <AccountManagerLoadingGame />
+    </div>
+  </div>;
 }
 
 export function isAccountManagerNavigation(href: string, origin: string) {

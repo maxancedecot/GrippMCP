@@ -503,10 +503,11 @@ select {
   z-index: 1;
   top: 32px;
   display: grid;
-  width: min(100%, 360px);
+  width: min(100%, 380px);
   justify-items: center;
   gap: 10px;
-  padding: 28px;
+  padding: 22px;
+  cursor: default;
   border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
   border-radius: 20px;
   background: color-mix(in srgb, var(--surface) 76%, transparent);
@@ -520,11 +521,6 @@ select {
 .accountmanager-loading-card strong {
   font-family: var(--font-display);
   font-size: 20px;
-}
-
-.accountmanager-loading-card > span:last-child {
-  color: var(--muted);
-  font-size: 13px;
 }
 
 .accountmanager-loading-spinner {
@@ -544,6 +540,36 @@ select {
   .accountmanager-loading-spinner {
     animation-duration: 1800ms;
   }
+}
+
+/* A small game only while accountmanager data are loading. */
+.accountmanager-loading-region--active { min-height: 760px; }
+.accountmanager-loading-status { display: grid; justify-items: center; gap: 8px; }
+.accountmanager-loading-status > span:last-child { color: var(--muted); font-size: 13px; }
+.accountmanager-loading-status .accountmanager-loading-spinner { width: 26px; height: 26px; }
+.loading-game { width: 100%; margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--border-strong); }
+.loading-game-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.loading-game-heading h2 { margin: 0; font-family: var(--font-display); font-size: 18px; }
+.loading-game-heading > span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.loading-game-surface { position: relative; display: grid; place-items: center; width: 100%; height: 280px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--background); touch-action: manipulation; }
+.loading-game-surface svg { display: block; height: 100%; width: auto; max-width: 100%; }
+.loading-game-pipe, .loading-game-snake { fill: var(--good); }
+.loading-game-board-caption { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--background) 55%, transparent); font-family: var(--font-display); font-weight: 800; pointer-events: none; }
+.loading-game-instructions { margin: 10px 0; min-height: 38px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.loading-game button { min-height: 44px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+.loading-game button:hover { border-color: var(--good); }
+.loading-game button:focus-visible, .loading-game-surface:focus-visible { outline: 2px solid var(--good); outline-offset: 3px; }
+.loading-game-start { width: 100%; padding: 10px 16px; }
+.loading-game-controls { display: flex; justify-content: center; gap: 8px; }
+.loading-game-controls button { flex: 1; font-size: 20px; }
+.loading-game-limit { display: block; margin-top: 10px; color: var(--muted); font-size: 11px; }
+.loading-game-timeout { display: grid; align-content: center; min-height: 160px; padding: 20px 12px; }
+.loading-game-timeout strong { color: var(--good); line-height: 1.4; }
+.loading-game-timeout p { color: var(--muted); font-size: 13px; }
+@media (max-width: 600px) {
+  .accountmanager-loading-overlay { padding: 24px 12px; }
+  .accountmanager-loading-region--active { min-height: 680px; }
+  .accountmanager-loading-card { padding: 18px; }
 }
 
 .dashboard-shell {
