@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deleteFacebookCampaignMatch, listFacebookCampaigns, saveFacebookCampaignMatches } from "../src/facebookCampaignManagement.js";
+import { deleteFacebookCampaignMatch, listFacebookAdAccounts, listFacebookCampaigns, saveFacebookCampaignMatches } from "../src/facebookCampaignManagement.js";
 import { CAMPAIGN_PROJECT_MATCHES_KEY, type CampaignProjectMatch } from "../src/campaignProjects.js";
 
 function fixture(initial: CampaignProjectMatch[] = []) {
@@ -106,4 +106,65 @@ test("Facebook storage failures are surfaced instead of reporting a saved link",
   const broken = { ...options, store: { ...options.store, async write() { throw new Error("Unavailable"); } } };
   await assert.rejects(saveFacebookCampaignMatches({ siteId: "site", accountId: "123", campaignIds: ["1"], sourcePath: "/project" }, broken), /Unavailable/);
   await assert.rejects(deleteFacebookCampaignMatch("123", "1", broken), /Unavailable/);
+});
+
+
+test("Facebook account selection reads every accessible account by name, deduplicating paginated IDs", async () => {
+  const urls: URL[] = [];
+  const accounts = await listFacebookAdAccounts({ env: { META_ADS_ACCESS_TOKEN: "secret", META_ADS_AUTO_DISCOVERY: "false" },
+    fetchImpl: async (input, init) => {
+      const url = new URL(String(input)); urls.push(url);
+      assert.equal(url.hostname, "graph.facebook.com");
+      assert.match(url.pathname, /\/me\/adaccounts$/);
+      assert.equal(url.searchParams.get("fields"), "id,name,account_status");
+      assert.equal(url.searchParams.has("access_token"), false);
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer secret");
+      assert.equal(init?.redirect, "error");
+      return Response.json(url.searchParams.has("after") ? { data: [
+        { id: "act_123", name: " Zeta ", account_status: 1 }, { id: "act_456", name: "Alpha", account_status: 2 },
+        { id: "act_789", name: " ", account_status: 1 }
+      ] } : { data: [{ id: "act_123", name: "Zeta", account_status: 1 }],
+        paging: { next: "https://untrusted.example/?access_token=secret", cursors: { after: "page-two" } } });
+    }
+  });
+  assert.deepEqual(accounts, [
+    { id: "456", name: "Alpha", status: 2 }, { id: "789", name: "Facebook-account 789", status: 1 }, { id: "123", name: "Zeta", status: 1 }
+  ]);
+  assert.equal(urls.length, 2);
+  assert.equal(urls[1].searchParams.get("after"), "page-two");
+});
+
+test("an accessible Facebook account list can be empty without fabricating saved or discovered accounts", async () => {
+  assert.deepEqual(await listFacebookAdAccounts({ env: { META_ADS_ACCESS_TOKEN: "secret" },
+    fetchImpl: async () => Response.json({ data: [] }) }), []);
+});
+
+test("Facebook account loading rejects missing credentials and invalid versions before fetching", async () => {
+  let requests = 0;
+  const fetchImpl: typeof fetch = async () => { requests++; return Response.json({ data: [] }); };
+  await assert.rejects(listFacebookAdAccounts({ env: {}, fetchImpl }));
+  await assert.rejects(listFacebookAdAccounts({ env: { META_ADS_ACCESS_TOKEN: "secret", META_ADS_API_VERSION: "invalid" }, fetchImpl }));
+  assert.equal(requests, 0);
+});
+
+test("malformed or incomplete Facebook account lists cannot appear as selectable accounts", async () => {
+  for (const payload of [
+    { error: { message: "private" } }, { data: [{ id: "bad", name: "Alpha", account_status: 1 }] },
+    { data: [{ id: "act_123", name: "Alpha" }] }, { data: [], paging: { next: "next" } }
+  ]) await assert.rejects(listFacebookAdAccounts({ env: { META_ADS_ACCESS_TOKEN: "secret" }, fetchImpl: async () => Response.json(payload) }));
+  let requests = 0;
+  await assert.rejects(listFacebookAdAccounts({ env: { META_ADS_ACCESS_TOKEN: "secret" },
+    fetchImpl: async () => { requests++; return Response.json({ data: [], paging: { next: "next", cursors: { after: "repeat" } } }); }
+  }), /Incomplete Facebook/);
+  assert.equal(requests, 2);
+});
+
+test("a failure on a Facebook account continuation page never returns a partial account list", async () => {
+  let requests = 0;
+  await assert.rejects(listFacebookAdAccounts({ env: { META_ADS_ACCESS_TOKEN: "secret" }, fetchImpl: async () => {
+    requests++;
+    return requests === 1 ? Response.json({ data: [{ id: "act_123", name: "Alpha", account_status: 1 }],
+      paging: { next: "next", cursors: { after: "second" } } }) : new Response("private provider error", { status: 403 });
+  } }), /Facebook Ads request failed/);
+  assert.equal(requests, 2);
 });

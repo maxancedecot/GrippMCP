@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { deleteProjectPageGroup, saveProjectPageGroup, type ResolvedProjectPageGroup } from "../../src/projectPageGroupStore.js";
 import { getProjectPageManagementData, invalidateProjectPageInventory, saveProjectPageManager, type ManagedProjectPage } from "../../src/projectPageManagement.js";
-import { deleteFacebookCampaignMatch, listFacebookCampaigns, saveFacebookCampaignMatches } from "../../src/facebookCampaignManagement.js";
+import { deleteFacebookCampaignMatch, listFacebookAdAccounts, listFacebookCampaigns, saveFacebookCampaignMatches } from "../../src/facebookCampaignManagement.js";
 import { deleteGoogleCampaignMatch, listGoogleCampaigns, saveGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
 import { deleteCrmPipelineMatch, listCrmConnections, loadCrmPipelines, saveCrmPipelineMatches } from "../../src/crmPipelineManagement.js";
 import { parseCampaignSiteMappings } from "../../src/campaignPerformance.js";
@@ -77,9 +77,14 @@ export async function deleteGoogleCampaignMatchAction(accountId: string, campaig
   } catch { return { ok: false as const, error: "De Google-campagnekoppeling kon niet worden verwijderd." }; }
 }
 
+export async function loadFacebookAdAccountsAction() {
+  try { return { ok: true as const, accounts: await listFacebookAdAccounts() }; }
+  catch { return { ok: false as const, error: "De Facebook-advertentieaccounts konden niet worden geladen. Controleer de Meta-toegang en probeer opnieuw." }; }
+}
+
 export async function loadFacebookCampaignsAction(accountId: string) {
   try { return { ok: true as const, ...await listFacebookCampaigns(accountId) }; }
-  catch { return { ok: false as const, error: "De Facebook Ads-campagnes konden niet worden geladen. Controleer het advertentieaccount-ID en de accounttoegang." }; }
+  catch { return { ok: false as const, error: "De Facebook Ads-campagnes konden niet worden geladen. Controleer de toegang tot het gekozen advertentieaccount." }; }
 }
 
 export async function saveFacebookCampaignMatchesAction(input: { siteId: string; accountId: string; campaignIds: string[]; sourcePath: string }) {

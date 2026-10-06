@@ -7,43 +7,64 @@ const id = z.string().trim().min(1);
 const numericId = id.regex(/^\d+$/);
 const accountIdSchema = id.transform((value) => value.replace(/^act_/, "")).pipe(numericId);
 const campaignSchema = z.object({ id: numericId, name: id, effective_status: id });
-const responseSchema = z.object({ data: z.array(campaignSchema), paging: z.object({
+const accountSchema = z.object({ id: id.regex(/^act_\d+$/), name: z.string(), account_status: z.number().int().nonnegative() });
+const pagingSchema = z.object({
   next: z.string().optional(), cursors: z.object({ after: id.optional() }).optional()
-}).optional() });
+}).optional();
 const projectPath = id.refine((value) => value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"), "Use a local project path")
   .transform(normalizeProjectPath);
+export type FacebookAdAccountOption = { id: string; name: string; status: number };
 export type FacebookCampaignOption = { id: string; name: string; status: string };
 type MatchStore = { read<T>(key: string): Promise<T | null>; write(key: string, value: unknown): Promise<void> };
 type StoreOptions = { store?: MatchStore; pages?: { siteId: string; path: string }[] };
 
-export async function listFacebookCampaigns(accountIdInput: string, options: { env?: Partial<NodeJS.ProcessEnv>; fetchImpl?: typeof fetch } = {}) {
-  const accountId = accountIdSchema.parse(accountIdInput);
+type FacebookReadOptions = { env?: Partial<NodeJS.ProcessEnv>; fetchImpl?: typeof fetch };
+
+async function listFacebookRows<T extends z.ZodTypeAny>(path: string, fields: string, schema: T, options: FacebookReadOptions) {
   const env = options.env ?? process.env;
   if (!env.META_ADS_ACCESS_TOKEN) throw new Error("Facebook Ads is not configured");
   const version = z.string().regex(/^v\d+\.\d+$/).parse(env.META_ADS_API_VERSION ?? "v26.0");
   const fetchImpl = options.fetchImpl ?? fetch;
-  const params = new URLSearchParams({ fields: "id,name,effective_status", limit: "100" });
-  const campaigns = new Map<string, FacebookCampaignOption>();
+  const params = new URLSearchParams({ fields, limit: "100" });
+  const rows: z.output<T>[] = [];
   const cursors = new Set<string>();
   const signal = AbortSignal.timeout(45_000);
   for (let page = 0; page < 100; page++) {
-    const response = await fetchImpl(`https://graph.facebook.com/${version}/act_${accountId}/campaigns?${params}`, {
+    const response = await fetchImpl(`https://graph.facebook.com/${version}/${path}?${params}`, {
       headers: { Authorization: `Bearer ${env.META_ADS_ACCESS_TOKEN}` }, cache: "no-store", redirect: "error",
       signal: AbortSignal.any([signal, AbortSignal.timeout(12_000)])
     });
     if (!response.ok) throw new Error("Facebook Ads request failed");
-    const result = responseSchema.parse(await response.json());
-    for (const campaign of result.data) {
-      if (["DELETED", "ARCHIVED"].includes(campaign.effective_status)) continue;
-      campaigns.set(campaign.id, { id: campaign.id, name: campaign.name, status: campaign.effective_status });
-    }
-    if (!result.paging?.next) return { accountId, campaigns: [...campaigns.values()].sort((a, b) => a.name.localeCompare(b.name, "nl-BE")) };
+    const result = z.object({ data: z.array(schema), paging: pagingSchema }).parse(await response.json());
+    rows.push(...result.data);
+    if (!result.paging?.next) return rows;
     const after = result.paging.cursors?.after;
-    if (!after || cursors.has(after)) throw new Error("Incomplete Facebook campaign pagination");
+    if (!after || cursors.has(after)) throw new Error("Incomplete Facebook pagination");
     cursors.add(after);
     params.set("after", after);
   }
-  throw new Error("Facebook campaign pagination limit reached");
+  throw new Error("Facebook pagination limit reached");
+}
+
+export async function listFacebookAdAccounts(options: FacebookReadOptions = {}): Promise<FacebookAdAccountOption[]> {
+  const rows = await listFacebookRows("me/adaccounts", "id,name,account_status", accountSchema, options);
+  const accounts = new Map<string, FacebookAdAccountOption>();
+  for (const account of rows) {
+    const accountId = accountIdSchema.parse(account.id);
+    accounts.set(accountId, { id: accountId, name: account.name.trim() || `Facebook-account ${accountId}`, status: account.account_status });
+  }
+  return [...accounts.values()].sort((a, b) => a.name.localeCompare(b.name, "nl-BE") || a.id.localeCompare(b.id));
+}
+
+export async function listFacebookCampaigns(accountIdInput: string, options: FacebookReadOptions = {}) {
+  const accountId = accountIdSchema.parse(accountIdInput);
+  const rows = await listFacebookRows(`act_${accountId}/campaigns`, "id,name,effective_status", campaignSchema, options);
+  const campaigns = new Map<string, FacebookCampaignOption>();
+  for (const campaign of rows) {
+    if (["DELETED", "ARCHIVED"].includes(campaign.effective_status)) continue;
+    campaigns.set(campaign.id, { id: campaign.id, name: campaign.name, status: campaign.effective_status });
+  }
+  return { accountId, campaigns: [...campaigns.values()].sort((a, b) => a.name.localeCompare(b.name, "nl-BE")) };
 }
 
 export async function readFacebookCampaignMatches() {
