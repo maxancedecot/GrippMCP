@@ -606,6 +606,7 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
   const counts: ProjectCrmConversions["counts"] = new Map(), errors = new Set<string>(), configuredSites = new Set<string>();
   const errorMessages = new Map<string, string>();
   const unmatchedSites = new Set<string>();
+  const projectContacts = new Map<string, { leads: Set<string>; appointments: Set<string> }>();
   await Promise.all(dashboard.sites.map(async (site) => {
     if (dashboard.source.mode !== "live") return;
     const scopes = new Map<string, NonNullable<CampaignSiteMapping["ghl"]>>();
@@ -638,9 +639,14 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
           if (candidates.length !== 1) { unmatchedSites.add(site.id); continue; }
           const key = `${site.id}:${normalizeProjectPath(candidates[0]!.path)}`;
           const current = counts.get(key);
+          const contacts = projectContacts.get(key) ?? { leads: new Set<string>(), appointments: new Set<string>() };
+          for (const id of pipeline.leadContactIds) contacts.leads.add(JSON.stringify([config.locationId, id]));
+          for (const id of pipeline.appointmentContactIds) contacts.appointments.add(JSON.stringify([config.locationId, id]));
+          for (const id of contacts.appointments) contacts.leads.delete(id);
+          projectContacts.set(key, contacts);
           counts.set(key, {
-            leads: pipeline.leads === null || current?.leads === null ? null : (current?.leads ?? 0) + pipeline.leads,
-            appointments: pipeline.appointments === null || current?.appointments === null ? null : (current?.appointments ?? 0) + pipeline.appointments
+            leads: pipeline.leads === null || current?.leads === null ? null : contacts.leads.size,
+            appointments: pipeline.appointments === null || current?.appointments === null ? null : contacts.appointments.size
           });
         }
       } catch (error) {
@@ -655,7 +661,7 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
 // Never expose provider bodies, tokens or lead details in the dashboard.
 export function crmConversionErrorMessage(error: unknown) {
   if (error instanceof z.ZodError) {
-    const fields = new Set(["opportunities", "meta", "nextPage", "id", "pipelineId", "pipelineStageId", "createdAt", "lastStageChangeAt", "pipelines", "stages", "name"]);
+    const fields = new Set(["opportunities", "meta", "nextPage", "id", "pipelineId", "pipelineStageId", "createdAt", "lastStageChangeAt", "pipelines", "stages", "name", "contactId", "contact", "tags", "dateAdded", "locationId"]);
     const path = error.issues[0]?.path.filter((part) => typeof part === "string" && fields.has(part)).join(".");
     return path ? `CRM-antwoord ongeldig (${path})` : "CRM-antwoord ongeldig";
   }

@@ -400,12 +400,15 @@ test("configured GoHighLevel pipelines replace both website conversion counts", 
   const result = await getCampaignPerformance(data, {
     env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineIds: ["project"],
       pipelineProjects: [{ pipelineId: "project", sourcePath: "/project" }] } }]),
-    ghlCall: async ({ path }) => path.endsWith("/pipelines")
+    ghlCall: async ({ path }) => path.startsWith("/contacts/")
+      ? { contact: { id: path.slice(10), tags: ["ledoux", path.endsWith("/c") || path.endsWith("/lead") ? "brochure" : "afspraak"],
+          dateAdded: path.endsWith("/b") ? "2026-08-08T10:00:00Z" : path.endsWith("/appointment") ? null : "2026-09-08T10:00:00Z" } }
+      : path.endsWith("/pipelines")
       ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Appointment booked" }] }] }
       : { opportunities: [
-        { id: "a", pipelineId: "project", pipelineStageId: "appointment", createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" },
-        { id: "c", pipelineId: "project", pipelineStageId: "new", createdAt: "2026-09-08T10:00:00Z" },
-        { id: "b", pipelineId: "project", pipelineStageId: "appointment", createdAt: "2026-08-08T10:00:00Z", lastStageChangeAt: "2026-08-10T10:00:00Z" }
+        { id: "a", contactId: "a", pipelineId: "project", pipelineStageId: "appointment", createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" },
+        { id: "c", contactId: "c", pipelineId: "project", pipelineStageId: "new", createdAt: "2026-09-08T10:00:00Z" },
+        { id: "b", contactId: "b", pipelineId: "project", pipelineStageId: "appointment", createdAt: "2026-08-08T10:00:00Z", lastStageChangeAt: "2026-08-10T10:00:00Z" }
       ], meta: {} }
   });
   assert.equal(result.rows[0].leads.data?.count, 1);
@@ -417,20 +420,23 @@ test("configured GoHighLevel pipelines replace both website conversion counts", 
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 4);
 });
 
-test("CRM project CVR stays unavailable when appointment dates are missing", async () => {
+test("CRM project CVR stays unavailable when tagged appointment contacts have no creation date", async () => {
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 40), conversionLink("site-a", "/bedankt-afspraak", 20)];
   const result = await getCampaignPerformance(data, {
     requireCrmConversions: true,
     env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install",
       pipelineProjects: [{ pipelineId: "project", sourcePath: "/project" }] } }]),
-    ghlCall: async ({ path }) => path.endsWith("/pipelines")
+    ghlCall: async ({ path }) => path.startsWith("/contacts/")
+      ? { contact: { id: path.slice(10), tags: ["ledoux", path.endsWith("/c") || path.endsWith("/lead") ? "brochure" : "afspraak"],
+          dateAdded: path.endsWith("/b") ? "2026-08-08T10:00:00Z" : path.endsWith("/appointment") ? null : "2026-09-08T10:00:00Z" } }
+      : path.endsWith("/pipelines")
       ? { pipelines: [{ id: "project", name: "Project", stages: [
         { id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" }
       ] }] }
       : { opportunities: [
-        { id: "lead", pipelineStageId: "new", createdAt: "2026-09-08T10:00:00Z" },
-        { id: "appointment", pipelineStageId: "appointment", createdAt: "2026-09-08T10:00:00Z" }
+        { id: "lead", contactId: "lead", pipelineStageId: "new", createdAt: "2026-09-08T10:00:00Z" },
+        { id: "appointment", contactId: "appointment", pipelineStageId: "appointment", createdAt: "2026-09-08T10:00:00Z" }
       ] }
   });
   const project = result.projects.find((project) => project.sourcePath === "/project")!;
@@ -455,12 +461,14 @@ test("CRM pipelines match managed landing pages without a thank-you mapping and 
   const result = await getCampaignPerformance(data, {
     env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineProjects: [{ pipelineId: "search", sourcePath: "/project/alpha/" }] } }]),
     requireCrmConversions: true,
-    ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
+    ghlCall: async ({ path, query }) => path.startsWith("/contacts/")
+      ? { contact: { id: path.slice(10), tags: ["ledoux", "afspraak"], dateAdded: "2026-09-08T10:00:00Z" } }
+      : path.endsWith("/pipelines")
       ? { pipelines: [
         { id: "social", name: "Pipeline Alpha", stages: [{ id: "social-new", name: "Nieuwe lead" }, { id: "social-meeting", name: "Afspraak ingepland" }] },
         { id: "search", name: "Search", stages: [{ id: "search-new", name: "Nieuwe lead" }, { id: "search-meeting", name: "Afspraak ingepland" }] }
       ] }
-      : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: `${query?.pipelineId}-meeting`,
+      : { opportunities: [{ id: `${query?.pipelineId}-lead`, contactId: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: `${query?.pipelineId}-meeting`,
         createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
   });
   assert.equal(result.projects.length, 1);
@@ -1378,12 +1386,14 @@ test("saved CRM mappings override configured names, stay scoped to one website, 
     env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install",
       pipelineProjects: [{ pipelineId: "social", sourcePath: "/alpha" }] } }]),
     crmMatches, requireCrmConversions: true,
-    ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
+    ghlCall: async ({ path, query }) => path.startsWith("/contacts/")
+      ? { contact: { id: path.slice(10), tags: ["ledoux", "afspraak"], dateAdded: "2026-09-08T10:00:00Z" } }
+      : path.endsWith("/pipelines")
       ? { pipelines: [
         { id: "social", name: "Alpha", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] },
         { id: "search", name: "Unrelated", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }
       ] }
-      : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: "meeting",
+      : { opportunities: [{ id: `${query?.pipelineId}-lead`, contactId: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: "meeting",
         createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
   });
   assert.equal(result.projects.filter((project) => project.siteId === "site-a").length, 0);
@@ -1401,9 +1411,11 @@ test("saved CRM mappings include pipelines excluded by legacy configuration and 
       pipelineProjects: [{ pipelineId: "legacy", sourcePath: "/home" }] } }]),
     crmMatches: [{ siteId: "site-a", sourcePath: "/home-fr", locationId: "location", installId: "install", pipelineId: "new", pipelineName: "New" }],
     requireCrmConversions: true,
-    ghlCall: async ({ path, query }) => path.endsWith("/pipelines")
+    ghlCall: async ({ path, query }) => path.startsWith("/contacts/")
+      ? { contact: { id: path.slice(10), tags: ["ledoux", "afspraak"], dateAdded: "2026-09-08T10:00:00Z" } }
+      : path.endsWith("/pipelines")
       ? { pipelines: ["legacy", "new"].map((id) => ({ id, name: id, stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] })) }
-      : { opportunities: [{ id: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: "meeting",
+      : { opportunities: [{ id: `${query?.pipelineId}-lead`, contactId: `${query?.pipelineId}-lead`, pipelineId: query?.pipelineId, pipelineStageId: "meeting",
         createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] }
   });
   assert.equal(result.projects.length, 1);
@@ -1419,10 +1431,11 @@ test("one project can aggregate saved pipelines from multiple CRM subaccounts", 
       siteId: "site-a", sourcePath: "/alpha", locationId, installId: `install-${locationId}`, pipelineId: "shared-id", pipelineName: "Campaign"
     })),
     ghlCall: async ({ path, query, installId }) => {
+      if (path.startsWith("/contacts/")) return { contact: { id: path.slice(10), tags: ["ledoux", "afspraak"], dateAdded: "2026-09-08T10:00:00Z" } };
       assert.equal(installId, `install-${query?.locationId}`);
       return path.endsWith("/pipelines")
         ? { pipelines: [{ id: "shared-id", name: "Campaign", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }] }
-        : { opportunities: [{ id: "lead", pipelineId: "shared-id", pipelineStageId: "meeting",
+        : { opportunities: [{ id: "lead", contactId: "lead", pipelineId: "shared-id", pipelineStageId: "meeting",
           createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-10T10:00:00Z" }] };
     }
   });
@@ -1522,4 +1535,44 @@ test("CRM results cannot invent project rows while known pages with zero visitor
   assert.deepEqual(result.projects.map((project) => [project.sourcePath, project.visitors, project.leads, project.appointments]), [["/project/alpha", 0, 2, 1]]);
   const empty = campaignProjectOverview(dashboard(), base.rows, crm, true);
   assert.deepEqual(empty.projects, []);
+});
+
+test("project CRM counts merge contact tags across pipelines without duplicate leads or appointments", async () => {
+  const data = dashboard();
+  data.cvrPageCandidates = [{ siteId: "site-a", siteName: "site-a", path: "/project/alpha", title: "Project", uniqueVisitors: 50, pageViews: 60 }];
+  const result = await getCampaignPerformance(data, {
+    requireCrmConversions: true,
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install",
+      pipelineProjects: ["social", "search"].map((pipelineId) => ({ pipelineId, sourcePath: "/project/alpha" })) } }]),
+    ghlCall: async ({ path, query }) => {
+      if (path.endsWith("/pipelines")) return { pipelines: ["social", "search"].map((id) => ({ id, name: id, stages: [] })) };
+      if (path.startsWith("/contacts/")) return { contact: { id: path.slice(10), locationId: "location", dateAdded: "2026-09-08T10:00:00Z",
+        tags: path.endsWith("/meeting") ? ["ledoux", "brochure", "contact", "afspraak"] : ["ledoux", "brochure", "contact"] } };
+      return { opportunities: ["lead", "meeting"].map((contactId) => ({ id: `${query?.pipelineId}-${contactId}`, contactId,
+        pipelineId: query?.pipelineId, pipelineStageId: contactId === "meeting" ? "Nieuwe lead" : "Afspraak" })) };
+    }
+  });
+  const project = result.projects.find((project) => project.sourcePath === "/project/alpha")!;
+  assert.deepEqual([project.leads, project.appointments, project.cvr, project.crmState], [1, 1, 4, "connected"]);
+  assert.equal(result.rows[0]?.leads.data?.count, 1);
+  assert.equal(result.rows[0]?.appointments.data?.count, 1);
+});
+
+test("malformed contact tags report a safe field name and never fall back to website leads", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 100)];
+  const result = await getCampaignPerformance(data, {
+    requireCrmConversions: true,
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install",
+      pipelineProjects: [{ pipelineId: "project", sourcePath: "/project" }] } }]),
+    ghlCall: async ({ path }) => {
+      if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project" }] };
+      if (path.startsWith("/contacts/")) return { contact: { id: "private-contact", email: "private@example.com", tags: "private-tag" } };
+      return { opportunities: [{ id: "private-opportunity", contactId: "private-contact" }] };
+    }
+  });
+  const project = result.projects.find((project) => project.sourcePath === "/project")!;
+  assert.deepEqual([project.leads, project.appointments, project.cvr, project.crmState], [null, null, null, "unavailable"]);
+  assert.equal(project.crmMessage, "CRM-antwoord ongeldig (contact.tags)");
+  assert.doesNotMatch(JSON.stringify(result), /private@example|private-tag|private-contact|private-opportunity/);
 });

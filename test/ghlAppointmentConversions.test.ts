@@ -1,223 +1,174 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { countGhlAppointments, ghlConversionsByPipeline, isAppointmentStage, isNewLeadStage, type GhlReadCall } from "../src/ghl/appointmentConversions.js";
+import { countGhlAppointments, ghlConversionsByPipeline, classifyGhlContactTags, type GhlReadCall } from "../src/ghl/appointmentConversions.js";
 
-test("new leads recognize only the explicit new-lead stage", () => {
-  for (const name of ["Nieuwe lead", " NIEUWE  LEAD ", "New lead", "New leads"]) assert.equal(isNewLeadStage(name), true, name);
-  for (const name of ["Lead", "Lead opvolgen", "Gekwalificeerde lead", "Afspraak", "Nieuwe lead geannuleerd"]) {
-    assert.equal(isNewLeadStage(name), false, name);
-  }
-});
-
-test("appointment stages recognize Dutch and English labels but exclude cancelled stages", () => {
-  for (const name of ["Afspraak", " AFSPRAAK  ", "Afspraak ingepland", "Appointment booked", "Appointment"]) {
-    assert.equal(isAppointmentStage(name), true, name);
-  }
-  for (const name of ["Nieuwe lead", "Appointment cancelled", "Afspraak geannuleerd", "No-show meeting", "Consultation", "Bezichtiging", "Demo scheduled", "Intakegesprek", "Afspraak aanvragen", "Geen afspraak"]) {
-    assert.equal(isAppointmentStage(name), false, name);
-  }
-});
-
-test("CRM leads use creation date while appointments use stage date, deduplicating across pages", async () => {
-  const pages: number[] = [];
-  const lead = { id: "lead", pipelineId: "project", pipelineStageId: "new", createdAt: "2026-09-07T22:30:00Z" };
-  const call: GhlReadCall = async ({ path, query, apiVersion }) => {
-    assert.equal(apiVersion, "v3");
-    if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [
-      { id: "new", name: "New lead" }, { id: "meeting", name: "Appointment booked" }, { id: "cancelled", name: "Afspraak geannuleerd" }
-    ] }] };
-    assert.equal(query?.locationId, "location");
-    assert.equal(query?.pipelineId, "project");
-    assert.equal(query?.status, "all");
-    pages.push(Number(query?.page));
-    return query?.page === 1 ? { opportunities: [lead], meta: { nextPage: 2 } } : { opportunities: [
-      lead,
-      { id: "old-lead-new-meeting", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-08-01T10:00:00Z", lastStageChangeAt: "2026-09-14T21:59:59Z" },
-      { id: "new-lead-old-meeting", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-07T21:59:59Z" },
-      { id: "cancelled", pipelineId: "project", pipelineStageId: "cancelled", createdAt: "2026-09-08T10:00:00Z", lastStageChangeAt: "2026-09-08T10:00:00Z" },
-      { id: "future", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-09-14T22:00:00Z", lastStageChangeAt: "2026-09-14T22:00:00Z" }
-    ], meta: { nextPage: null } };
+const config = { locationId: "location", installId: "install" };
+const period = { start: "2026-09-08", end: "2026-09-14" };
+const pipeline = { id: "project", name: "Project" };
+const contact = (id: string, tags: string[] = ["ledoux", "brochure"], dateAdded: string | null = "2026-09-10T12:00:00Z") => ({ id, locationId: "location", tags, dateAdded });
+const opportunity = (id: string, contactId = id) => ({ id, contactId, pipelineId: "project" });
+function read(opportunities: unknown[], contacts: ReturnType<typeof contact>[], nextPage: unknown = null): GhlReadCall {
+  return async ({ path }) => {
+    if (path.endsWith("/pipelines")) return { pipelines: [pipeline] };
+    if (path.startsWith("/contacts/")) return { contact: contacts.find((item) => item.id === decodeURIComponent(path.slice(10))) };
+    return { opportunities, meta: { nextPage } };
   };
-  const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" }, { start: "2026-09-08", end: "2026-09-14" }, call);
-  assert.deepEqual(result, [{ pipelineId: "project", pipelineName: "Project", leads: 1, appointments: 1 }]);
-  assert.deepEqual(pages, [1, 2]);
+}
+const counts = (result: Awaited<ReturnType<typeof ghlConversionsByPipeline>>) => result.map(({ leads, appointments }) => [leads, appointments]);
+
+test("contact tags require Ledoux, recognize brochure and contact leads, and give appointment priority", () => {
+  for (const tags of [["ledoux", "brochure"], [" Ledoux ", "CONTACT"], ["ledoux_brochure"], ["LÉDOUX - contact"], ["ledoux", "brochure", "contact"]]) {
+    assert.equal(classifyGhlContactTags(tags), "lead");
+  }
+  for (const tags of [["ledoux", "afspraak"], ["ledoux-afspraak"], ["ledoux", "afspraak", "brochure", "contact"]]) {
+    assert.equal(classifyGhlContactTags(tags), "appointment");
+  }
+  for (const tags of [[], ["ledoux"], ["brochure"], ["afspraak"], ["contact"], ["notledoux", "contact"], ["ledoux", "contactpersoon"], ["ledoux", "brochures"]]) {
+    assert.equal(classifyGhlContactTags(tags), null);
+  }
 });
 
-test("CRM counts preserve zero but never fabricate counts from malformed responses or missing dates", async () => {
-  const config = { locationId: "location", installId: "install" }, period = { start: "2026-09-08", end: "2026-09-14" };
-  const pipeline = { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Appointment booked" }] }] };
-  const read = (opportunities: unknown): GhlReadCall => async ({ path }) => path.endsWith("/pipelines") ? pipeline : opportunities;
-  assert.deepEqual(await ghlConversionsByPipeline(config, period, read({ opportunities: [] })), [{ pipelineId: "project", pipelineName: "Project", leads: 0, appointments: 0 }]);
-  assert.deepEqual(await ghlConversionsByPipeline(config, period, read({ opportunities: [{ id: "one", pipelineStageId: "meeting" }, { id: "two", pipelineStageId: "new" }] })),
-    [{ pipelineId: "project", pipelineName: "Project", leads: null, appointments: null }]);
-  await assert.rejects(ghlConversionsByPipeline(config, period, read({ error: "unauthorized" })));
-  await assert.rejects(ghlConversionsByPipeline({ ...config, pipelineIds: ["missing"] }, period, read({ opportunities: [] })));
-  await assert.rejects(ghlConversionsByPipeline(config, period, read({ opportunities: [{ id: "one", pipelineId: "other", pipelineStageId: "meeting" }] })));
-  await assert.rejects(ghlConversionsByPipeline(config, period, read({ opportunities: [], meta: { nextPage: 1 } })));
+test("contact details override embedded tags and pipeline stage; each contact counts once", async () => {
+  const visits: string[] = [];
+  const fixture = read([
+    { ...opportunity("one", "lead"), pipelineStageId: "appointment", contact: { id: "lead", tags: ["ledoux", "afspraak"] } },
+    { ...opportunity("duplicate", "lead"), pipelineStageId: null },
+    { ...opportunity("two", "meeting"), pipelineStageId: "new" },
+    { ...opportunity("three", "contact"), pipelineStageId: "unknown" },
+    opportunity("unrelated")
+  ], [contact("lead"), contact("meeting", ["ledoux", "afspraak", "brochure"]), contact("contact", ["ledoux", "contact"]), contact("unrelated", ["brochure"])]);
+  const call: GhlReadCall = async (input) => { assert.equal(input.apiVersion, "v3"); visits.push(input.path); return fixture(input); };
+  const result = await ghlConversionsByPipeline(config, period, call);
+  assert.deepEqual(counts(result), [[2, 1]]);
+  assert.deepEqual(result[0]?.leadContactIds, ["lead", "contact"]);
+  assert.deepEqual(result[0]?.appointmentContactIds, ["meeting"]);
+  assert.equal(visits.filter((path) => path === "/contacts/lead").length, 1);
 });
 
-test("GoHighLevel appointments count unique opportunities entering matching stages in the selected Brussels period", async () => {
-  const calls: string[] = [];
-  const call: GhlReadCall = async ({ path, query, apiVersion }) => {
-    calls.push(`${path}:${query?.pipelineId ?? "pipelines"}:${query?.page ?? ""}:${apiVersion}`);
-    if (path.endsWith("/pipelines")) return { pipelines: [
-      { id: "project-a", name: "Project A", stages: [
-        { id: "lead", name: "New lead" }, { id: "appointment", name: "Afspraak ingepland" },
-        { id: "cancelled", name: "Appointment cancelled" }
-      ] },
-      { id: "ignored", name: "Other", stages: [{ id: "meeting", name: "Meeting booked" }] }
-    ] };
-    return { opportunities: [
-      { id: "one", pipelineId: "project-a", pipelineStageId: "appointment", lastStageChangeAt: "2026-09-08T00:30:00+02:00" },
-      { id: "old", pipelineId: "project-a", pipelineStageId: "appointment", lastStageChangeAt: "2026-09-07T23:59:59+02:00" },
-      { id: "cancelled", pipelineId: "project-a", pipelineStageId: "cancelled", lastStageChangeAt: "2026-09-10T12:00:00Z" }
-    ], meta: {} };
+test("period uses contact creation dates, inclusive Brussels boundaries, independently of opportunity dates", async () => {
+  const contacts = [
+    contact("start", ["ledoux", "brochure"], "2026-09-07T22:00:00Z"),
+    contact("end", ["ledoux", "afspraak"], "2026-09-14T21:59:59Z"),
+    contact("before", ["ledoux", "contact"], "2026-09-07T21:59:59Z"),
+    contact("after", ["ledoux", "afspraak"], "2026-09-14T22:00:00Z")
+  ];
+  const call = read(contacts.map(({ id }) => ({ ...opportunity(id), createdAt: "2000-01-01", lastStageChangeAt: "2000-01-01" })), contacts);
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, call)), [[1, 1]]);
+});
+
+test("missing contact date invalidates only the matching bucket and unrelated contacts need no date", async () => {
+  for (const [tags, expected] of [
+    [["ledoux", "brochure"], [null, 1]], [["ledoux", "afspraak"], [1, null]], [[], [1, 1]]
+  ] as [string[], (number | null)[]][]) {
+    assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, read(
+      [opportunity("lead"), opportunity("meeting"), opportunity("missing")],
+      [contact("lead"), contact("meeting", ["ledoux", "afspraak"]), contact("missing", tags, null)]
+    ))), [expected]);
+  }
+});
+
+test("empty pipelines return reliable zero regardless of configured stage names", async () => {
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, read([], []))), [[0, 0]]);
+  assert.equal(await countGhlAppointments(config, period, read([opportunity("one")], [contact("one", ["ledoux", "afspraak"])])), 1);
+});
+
+test("missing contact identifiers leave counts unavailable; embedded contact id is supported", async () => {
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, read([{ id: "missing" }], []))), [[null, null]]);
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, read([{ id: "one", contact: { id: "one" } }], [contact("one")]))), [[1, 0]]);
+});
+
+test("malformed contacts, missing tags, wrong identifiers and locations never produce false totals", async () => {
+  for (const invalid of [{}, { id: "one" }, { ...contact("one"), tags: "ledoux" }, { ...contact("wrong") }, { ...contact("one"), locationId: "other" }]) {
+    const fixture = read([opportunity("one")], []);
+    const call: GhlReadCall = async (input) => input.path.startsWith("/contacts/") ? { contact: invalid } : fixture(input);
+    await assert.rejects(ghlConversionsByPipeline(config, period, call));
+  }
+  await assert.rejects(ghlConversionsByPipeline(config, period, read([{ ...opportunity("one"), contact: { id: "different" } }], [])), /Unexpected GoHighLevel contact/);
+});
+
+test("contact failures fail the CRM read rather than silently dropping contacts", async () => {
+  const fixture = read([opportunity("one")], []);
+  const call: GhlReadCall = async (input) => {
+    if (input.path.startsWith("/contacts/")) throw new Error("Contact unavailable");
+    return fixture(input);
   };
-  const count = await countGhlAppointments(
-    { locationId: "location", installId: "install", pipelineIds: ["project-a"] },
-    { start: "2026-09-08", end: "2026-09-14" }, call
-  );
-  assert.equal(count, 1);
-  assert.deepEqual(calls, ["/opportunities/pipelines:pipelines::v3", "/opportunities/search:project-a:1:v3"]);
+  await assert.rejects(ghlConversionsByPipeline(config, period, call), /Contact unavailable/);
 });
 
-test("nullable appointment fields do not discard valid CRM lead dates", async () => {
-  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-    ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }] }
-    : { opportunities: [
-      { id: "new", pipelineId: "project", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z", lastStageChangeAt: null },
-      { id: "meeting", pipelineId: "project", pipelineStageId: "meeting", createdAt: "2026-09-10T12:00:00Z", lastStageChangeAt: null }
-    ], meta: { nextPage: null } };
-  assert.deepEqual(await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
-    { start: "2026-09-08", end: "2026-09-14" }, call),
-    [{ pipelineId: "project", pipelineName: "Project", leads: 1, appointments: null }]);
-});
-
-test("moving a new lead into Afspraak changes its bucket without double counting", async () => {
-  let stage = "new";
-  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-    ? { pipelines: [{ id: "project", name: "Project", stages: [
-      { id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" },
-      { id: "follow-up", name: "Lead opvolgen" }, { id: "cancelled", name: "Afspraak geannuleerd" }
-    ] }] }
-    : { opportunities: [
-      { id: "one", pipelineStageId: stage, createdAt: "2026-09-10T12:00:00Z", lastStageChangeAt: "2026-09-11T12:00:00Z" },
-      { id: "follow-up", pipelineStageId: "follow-up" }, { id: "cancelled", pipelineStageId: "cancelled" }
-    ] };
-  const count = () => ghlConversionsByPipeline({ locationId: "location", installId: "install" },
-    { start: "2026-09-08", end: "2026-09-14" }, call);
-  assert.deepEqual((await count()).map(({ leads, appointments }) => [leads, appointments]), [[1, 0]]);
-  stage = "appointment";
-  assert.deepEqual((await count()).map(({ leads, appointments }) => [leads, appointments]), [[0, 1]]);
-});
-
-test("a stage change between paginated duplicates cannot count an opportunity in both buckets", async () => {
-  const call: GhlReadCall = async ({ path, query }) => path.endsWith("/pipelines")
-    ? { pipelines: [{ id: "project", name: "Project", stages: [
-      { id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" }
-    ] }] }
-    : query?.page === 1
-      ? { opportunities: [{ id: "one", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: 2 } }
-      : { opportunities: [
-        { id: "one", pipelineStageId: "appointment", lastStageChangeAt: "2026-09-11T12:00:00Z" },
-        { id: "two", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }
-      ], meta: { nextPage: null } };
-  const counts = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
-    { start: "2026-09-08", end: "2026-09-14" }, call);
-  assert.deepEqual(counts.map(({ leads, appointments }) => [leads, appointments]), [[1, 1]]);
-});
-
-test("missing configured stages or opportunity stages leave counts unavailable", async () => {
-  const config = { locationId: "location", installId: "install" }, period = { start: "2026-09-08", end: "2026-09-14" };
-  const stages = [{ id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" }];
-  for (const missingStage of [null, undefined, "unknown"]) {
-    const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-      ? { pipelines: [{ id: "project", name: "Project", stages }] }
-      : { opportunities: [{ id: "one", pipelineStageId: missingStage, createdAt: "2026-09-10T12:00:00Z" }] };
-    assert.deepEqual((await ghlConversionsByPipeline(config, period, call)).map(({ leads, appointments }) => [leads, appointments]), [[null, null]]);
-  }
-  for (const [configuredStages, expected] of [
-    [[], [null, null]], [[stages[0]], [0, null]], [[stages[1]], [null, 0]]
-  ] as const) {
-    const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-      ? { pipelines: [{ id: "project", name: "Project", stages: configuredStages }] }
-      : { opportunities: [] };
-    assert.deepEqual((await ghlConversionsByPipeline(config, period, call)).map(({ leads, appointments }) => [leads, appointments]), [expected]);
-  }
-});
-
-test("appointments do not require lead creation dates and missing lead dates only invalidate leads", async () => {
-  let includeLead = false;
-  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-    ? { pipelines: [{ id: "project", name: "Project", stages: [
-      { id: "new", name: "Nieuwe lead" }, { id: "appointment", name: "Afspraak" }
-    ] }] }
-    : { opportunities: [
-      { id: "one", pipelineStageId: "appointment", createdAt: null, lastStageChangeAt: "2026-09-10T12:00:00Z" },
-      ...(includeLead ? [{ id: "two", pipelineStageId: "new" }] : [])
-    ] };
-  const count = () => ghlConversionsByPipeline({ locationId: "location", installId: "install" },
-    { start: "2026-09-08", end: "2026-09-14" }, call);
-  assert.deepEqual((await count()).map(({ leads, appointments }) => [leads, appointments]), [[0, 1]]);
-  includeLead = true;
-  assert.deepEqual((await count()).map(({ leads, appointments }) => [leads, appointments]), [[null, 1]]);
+test("changing contact tags changes the bucket on the next read without double counting", async () => {
+  const one = contact("one");
+  const call = read([opportunity("one")], [one]);
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, call)), [[1, 0]]);
+  one.tags.push("afspraak");
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, call)), [[0, 1]]);
 });
 
 test("CRM pagination accepts flags, zero and numeric strings without mixing page and cursor pagination", async () => {
   for (const continuation of [true, "true", "2", 2]) for (const terminal of [false, "false", 0, "0", -1, "-1", "", null]) {
     const pages: unknown[] = [];
-    const call: GhlReadCall = async ({ path, query }) => {
-      if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }] }] };
+    const fixture = read([], [contact("first"), contact("second")]);
+    const call: GhlReadCall = async (input) => {
+      if (input.path !== "/opportunities/search") return fixture(input);
+      const { query } = input;
+      assert.equal(query?.locationId, "location"); assert.equal(query?.pipelineId, "project"); assert.equal(query?.status, "all");
       pages.push(query?.page);
-      if (query?.page === 1) return { opportunities: [{ id: "first", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }],
-        meta: { nextPage: continuation, startAfter: 123, startAfterId: "first" } };
-      assert.equal(query?.startAfter, undefined);
-      assert.equal(query?.startAfterId, undefined);
-      return { opportunities: [{ id: "second", pipelineStageId: "new", createdAt: "2026-09-11T12:00:00Z" }], meta: { nextPage: terminal } };
+      assert.equal(query?.startAfter, undefined); assert.equal(query?.startAfterId, undefined);
+      return query?.page === 1 ? { opportunities: [opportunity("first")], meta: { nextPage: continuation } }
+        : { opportunities: [opportunity("first"), opportunity("second")], meta: { nextPage: terminal } };
     };
-    const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
-      { start: "2026-09-08", end: "2026-09-14" }, call);
-    assert.equal(result[0]?.leads, 2);
+    assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, call)), [[2, 0]]);
     assert.deepEqual(pages, [1, 2]);
   }
 });
 
-test("CRM pagination rejects repeated pages rather than returning incomplete totals", async () => {
+test("pagination rejects repeated, backwards and failed pages instead of incomplete totals", async () => {
   let requests = 0;
-  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-    ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }] }] }
-    : (requests++, { opportunities: [{ id: "repeated", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: true } });
-  await assert.rejects(ghlConversionsByPipeline({ locationId: "location", installId: "install" },
-    { start: "2026-09-08", end: "2026-09-14" }, call), /Repeated GoHighLevel/);
+  const fixture = read([], []);
+  const call: GhlReadCall = async (input) => input.path !== "/opportunities/search" ? fixture(input)
+    : (requests++, { opportunities: [opportunity("repeated")], meta: { nextPage: true } });
+  await assert.rejects(ghlConversionsByPipeline(config, period, call), /Repeated GoHighLevel/);
   assert.equal(requests, 2);
+  await assert.rejects(ghlConversionsByPipeline(config, period, read([], [], 1)), /Invalid GoHighLevel/);
+  await assert.rejects(ghlConversionsByPipeline({ ...config, pipelineIds: ["missing"] }, period, read([], [])), /Unknown GoHighLevel/);
+  await assert.rejects(ghlConversionsByPipeline(config, period, read([{ ...opportunity("one"), pipelineId: "other" }], [])), /Unexpected GoHighLevel pipeline/);
 });
 
-test("CRM pipelines with more than 100 leads count the entire last page", async () => {
+test("pipelines with over 100 contacts include the final page and fetch details with bounded concurrency", async () => {
+  const contacts = Array.from({ length: 103 }, (_, index) => contact(String(index)));
+  const fixture = read([], contacts);
+  let active = 0, peak = 0;
   const pages: unknown[] = [];
-  const call: GhlReadCall = async ({ path, query }) => {
-    if (path.endsWith("/pipelines")) return { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }] }] };
-    pages.push(query?.page);
-    return query?.page === 1
-      ? { opportunities: Array.from({ length: 100 }, (_, id) => ({ id: String(id), pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" })), meta: { nextPage: "2" } }
-      : { opportunities: [{ id: "last", pipelineStageId: "new", createdAt: "2026-09-10T12:00:00Z" }], meta: { nextPage: 0 } };
+  const call: GhlReadCall = async (input) => {
+    if (input.path === "/opportunities/search") {
+      pages.push(input.query?.page);
+      return { opportunities: contacts.slice(input.query?.page === 1 ? 0 : 100, input.query?.page === 1 ? 100 : undefined).map(({ id }) => opportunity(id)) };
+    }
+    if (input.path.startsWith("/contacts/")) {
+      active++; peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+    }
+    return fixture(input);
   };
-  const result = await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
-    { start: "2026-09-08", end: "2026-09-14" }, call);
-  assert.equal(result[0]?.leads, 101);
-  assert.deepEqual(pages, [1, 2]);
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, call)), [[103, 0]]);
+  assert.deepEqual(pages, [1, 2]); assert.equal(peak, 4);
 });
 
+test("shared contacts are fetched once across pipelines and duplicate opportunity updates use the final contact", async () => {
+  let requests = 0;
+  const call: GhlReadCall = async ({ path, query }) => {
+    if (path.endsWith("/pipelines")) return { pipelines: [{ id: "a", name: "A" }, { id: "b", name: "B" }] };
+    if (path.startsWith("/contacts/")) { requests++; return { contact: contact("shared") }; }
+    if (query?.pipelineId === "a" && query?.page === 1) return { opportunities: [{ id: "one", contactId: "old" }], meta: { nextPage: 2 } };
+    return { opportunities: [{ id: "one", contactId: "shared" }, { id: "two", contactId: "shared" }], meta: { nextPage: null } };
+  };
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, call)), [[1, 0], [1, 0]]);
+  assert.equal(requests, 1);
+});
 
-test("a full-year CRM period includes old new leads and old stage changes at both boundaries", async () => {
-  const call: GhlReadCall = async ({ path }) => path.endsWith("/pipelines")
-    ? { pipelines: [{ id: "project", name: "Project", stages: [{ id: "new", name: "Nieuwe lead" }, { id: "meeting", name: "Afspraak" }] }] }
-    : { opportunities: [
-      { id: "old-lead", pipelineStageId: "new", createdAt: "2025-09-16T10:00:00Z" },
-      { id: "outside-lead", pipelineStageId: "new", createdAt: "2025-09-15T10:00:00Z" },
-      { id: "old-meeting", pipelineStageId: "meeting", createdAt: "2025-01-01T10:00:00Z", lastStageChangeAt: "2025-09-16T10:00:00Z" },
-      { id: "recent-meeting", pipelineStageId: "meeting", lastStageChangeAt: "2026-09-15T10:00:00Z" },
-      { id: "outside-meeting", pipelineStageId: "meeting", lastStageChangeAt: "2026-09-16T10:00:00Z" }
-    ] };
-  assert.deepEqual(await ghlConversionsByPipeline({ locationId: "location", installId: "install" },
-    { start: "2025-09-16", end: "2026-09-15" }, call), [{ pipelineId: "project", pipelineName: "Project", leads: 1, appointments: 2 }]);
+test("year-long periods include contacts at both Brussels boundaries and in older months", async () => {
+  const contacts = [contact("start", undefined, "2024-12-31T23:00:00Z"), contact("middle", undefined, "2025-03-01T12:00:00Z"),
+    contact("end", ["ledoux", "afspraak"], "2025-12-31T22:59:59Z"), contact("outside", undefined, "2025-12-31T23:00:00Z")];
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, { start: "2025-01-01", end: "2025-12-31" },
+    read(contacts.map(({ id }) => opportunity(id)), contacts))), [[2, 1]]);
 });

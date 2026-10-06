@@ -3,13 +3,6 @@ import { GhlClient } from "./client.js";
 import { listGhlInstallations } from "./tokenStore.js";
 import { GrippMcpError } from "../errors.js";
 
-const newLeadLabels = new Set(["nieuwe lead", "nieuwe leads", "new lead", "new leads"]);
-const appointmentLabels = new Set([
-  "afspraak", "afspraken", "afspraak ingepland", "afspraak geboekt", "afspraak bevestigd",
-  "appointment", "appointments", "appointment booked", "appointment scheduled", "appointment confirmed",
-  "booked appointment", "scheduled appointment", "confirmed appointment"
-]);
-
 const pipelineResponse = z.object({
   pipelines: z.array(z.object({
     id: z.string().min(1),
@@ -21,9 +14,8 @@ const opportunityResponse = z.object({
   opportunities: z.array(z.object({
     id: z.string().min(1),
     pipelineId: z.string().nullish(),
-    pipelineStageId: z.string().nullish(),
-    createdAt: z.union([z.string(), z.number()]).nullish(),
-    lastStageChangeAt: z.union([z.string(), z.number()]).nullish()
+    contactId: z.string().min(1).nullish(),
+    contact: z.object({ id: z.string().min(1).nullish() }).nullish()
   })),
   meta: z.object({
     nextPage: z.union([
@@ -31,6 +23,15 @@ const opportunityResponse = z.object({
       z.literal("").transform(() => null), z.literal("false").transform(() => false), z.literal("true").transform(() => true)
     ]).nullish()
   }).passthrough().optional()
+});
+
+const contactResponse = z.object({
+  contact: z.object({
+    id: z.string().min(1),
+    locationId: z.string().nullish(),
+    tags: z.array(z.string()),
+    dateAdded: z.union([z.string(), z.number()]).nullish()
+  })
 });
 
 export type GhlReadCall = (input: {
@@ -46,7 +47,14 @@ export type GhlAppointmentConfig = {
   pipelineIds?: string[];
 };
 export type GhlPipelineAppointmentCount = { pipelineId: string; pipelineName: string; count: number };
-export type GhlPipelineConversionCount = { pipelineId: string; pipelineName: string; leads: number | null; appointments: number | null };
+export type GhlPipelineConversionCount = {
+  pipelineId: string;
+  pipelineName: string;
+  leads: number | null;
+  appointments: number | null;
+  leadContactIds: string[];
+  appointmentContactIds: string[];
+};
 
 export async function listGhlPipelines(config: GhlAppointmentConfig, call?: GhlReadCall) {
   const installId = config.installId ?? await installIdForLocation(config.locationId);
@@ -58,16 +66,12 @@ export async function listGhlPipelines(config: GhlAppointmentConfig, call?: GhlR
   })).pipelines;
 }
 
-function normalizeStageName(name: string) {
-  return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
-}
-
-export function isNewLeadStage(name: string) {
-  return newLeadLabels.has(normalizeStageName(name));
-}
-
-export function isAppointmentStage(name: string) {
-  return appointmentLabels.has(normalizeStageName(name));
+export function classifyGhlContactTags(tags: readonly string[]): "lead" | "appointment" | null {
+  const words = new Set(tags.flatMap((tag) => tag.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)));
+  if (!words.has("ledoux")) return null;
+  if (words.has("afspraak")) return "appointment";
+  return words.has("brochure") || words.has("contact") ? "lead" : null;
 }
 
 export async function countGhlAppointments(config: GhlAppointmentConfig, period: { start: string; end: string }, call?: GhlReadCall) {
@@ -90,13 +94,12 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
   if (config.pipelineIds?.some((pipelineId) => !available.some((pipeline) => pipeline.id === pipelineId))) throw new Error("Unknown GoHighLevel pipeline");
   const pipelines = available.filter((pipeline) => !config.pipelineIds || config.pipelineIds.includes(pipeline.id));
 
+  // Fetch each contact once per location, even when it occurs in multiple linked pipelines.
+  const contacts = new Map<string, z.infer<typeof contactResponse>["contact"]>();
   const counts: GhlPipelineConversionCount[] = [];
   for (const pipeline of pipelines) {
-    const newLeadStages = new Set(pipeline.stages.filter((stage) => isNewLeadStage(stage.name)).map((stage) => stage.id));
-    const appointmentStages = new Set(pipeline.stages.filter((stage) => isAppointmentStage(stage.name)).map((stage) => stage.id));
-    const knownStages = new Set(pipeline.stages.map((stage) => stage.id));
-    const leads = new Set<string>(), appointments = new Set<string>();
-    let completeLeads = newLeadStages.size > 0, completeAppointments = appointmentStages.size > 0, page = 1;
+    const opportunities = new Map<string, z.infer<typeof opportunityResponse>["opportunities"][number]>();
+    let page = 1;
     const seenOpportunities = new Set<string>();
     for (let request = 0; request < 100; request++) {
       const result = opportunityResponse.parse(await read({
@@ -114,20 +117,11 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
       }
       for (const opportunity of result.opportunities) {
         seenOpportunities.add(opportunity.id);
-        leads.delete(opportunity.id);
-        appointments.delete(opportunity.id);
         if (opportunity.pipelineId && opportunity.pipelineId !== pipeline.id) throw new Error("Unexpected GoHighLevel pipeline");
-        const stageId = opportunity.pipelineStageId;
-        if (!stageId || !knownStages.has(stageId)) { completeLeads = false; completeAppointments = false; continue; }
-        if (newLeadStages.has(stageId)) {
-          const created = dateKey(opportunity.createdAt);
-          if (!created) completeLeads = false;
-          else if (created >= period.start && created <= period.end) leads.add(opportunity.id);
-        } else if (appointmentStages.has(stageId)) {
-          const changed = dateKey(opportunity.lastStageChangeAt);
-          if (!changed) completeAppointments = false;
-          else if (changed >= period.start && changed <= period.end) appointments.add(opportunity.id);
+        if (opportunity.contactId && opportunity.contact?.id && opportunity.contactId !== opportunity.contact.id) {
+          throw new Error("Unexpected GoHighLevel contact");
         }
+        opportunities.set(opportunity.id, opportunity);
       }
       const nextPage = result.meta?.nextPage;
       if (nextPage === null || nextPage === false || (typeof nextPage === "number" && nextPage <= 0)
@@ -136,8 +130,38 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
       if (typeof nextPage === "number" && nextPage <= page) throw new Error("Invalid GoHighLevel opportunity pagination");
       page = typeof nextPage === "number" ? nextPage : page + 1;
     }
+    const contactIds = [...new Set([...opportunities.values()].map((opportunity) => opportunity.contactId ?? opportunity.contact?.id).filter((id): id is string => Boolean(id)))];
+    const missingContacts = contactIds.filter((id) => !contacts.has(id));
+    for (let offset = 0; offset < missingContacts.length; offset += 4) {
+      const batch = await Promise.all(missingContacts.slice(offset, offset + 4).map(async (id) => {
+        const contact = contactResponse.parse(await read({
+          installId, path: `/contacts/${encodeURIComponent(id)}`, apiVersion: "v3"
+        })).contact;
+        if (contact.id !== id || (contact.locationId && contact.locationId !== config.locationId)) {
+          throw new Error("Unexpected GoHighLevel contact");
+        }
+        return contact;
+      }));
+      for (const contact of batch) contacts.set(contact.id, contact);
+    }
+    const leads = new Set<string>(), appointments = new Set<string>();
+    let completeLeads = [...opportunities.values()].every((opportunity) => opportunity.contactId || opportunity.contact?.id);
+    let completeAppointments = completeLeads;
+    for (const id of contactIds) {
+      const contact = contacts.get(id)!;
+      const classification = classifyGhlContactTags(contact.tags);
+      if (!classification) continue;
+      const created = dateKey(contact.dateAdded);
+      if (!created) {
+        if (classification === "lead") completeLeads = false;
+        else completeAppointments = false;
+      } else if (created >= period.start && created <= period.end) {
+        (classification === "lead" ? leads : appointments).add(id);
+      }
+    }
     counts.push({ pipelineId: pipeline.id, pipelineName: pipeline.name,
-      leads: completeLeads ? leads.size : null, appointments: completeAppointments ? appointments.size : null });
+      leads: completeLeads ? leads.size : null, appointments: completeAppointments ? appointments.size : null,
+      leadContactIds: [...leads], appointmentContactIds: [...appointments] });
   }
   return counts;
 }
