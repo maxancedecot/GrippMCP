@@ -2,6 +2,8 @@ import { z } from "zod";
 import { GhlClient } from "./client.js";
 import { listGhlInstallations } from "./tokenStore.js";
 import { GrippMcpError } from "../errors.js";
+import type { JsonValue } from "../types.js";
+import { loadCachedGhlContacts, type ContactCacheOptions } from "./contactCache.js";
 
 const pipelineResponse = z.object({
   pipelines: z.array(z.object({
@@ -41,6 +43,8 @@ export type GhlReadCall = (input: {
   path: string;
   query?: Record<string, string | number | boolean | undefined>;
   apiVersion: string;
+  method?: "GET" | "POST";
+  body?: JsonValue;
 }) => Promise<unknown>;
 
 export type GhlAppointmentConfig = {
@@ -61,7 +65,7 @@ export type GhlPipelineConversionCount = {
 export async function listGhlPipelines(config: GhlAppointmentConfig, call?: GhlReadCall) {
   const installId = config.installId ?? await installIdForLocation(config.locationId);
   const read: GhlReadCall = call ?? (async (input) => new GhlClient(input.installId).call({
-    method: "GET", path: input.path, query: input.query, apiVersion: input.apiVersion, readOnly: true
+    method: input.method ?? "GET", path: input.path, query: input.query, body: input.body, apiVersion: input.apiVersion, readOnly: true
   }));
   return pipelineResponse.parse(await read({
     installId, path: "/opportunities/pipelines", query: { locationId: config.locationId }, apiVersion: "v3"
@@ -87,10 +91,10 @@ export async function ghlAppointmentsByPipeline(config: GhlAppointmentConfig, pe
   }]);
 }
 
-export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, period: { start: string; end: string }, call?: GhlReadCall) {
+export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, period: { start: string; end: string }, call?: GhlReadCall, options: { contactCache?: ContactCacheOptions | false } = {}) {
   const installId = config.installId ?? await installIdForLocation(config.locationId);
   const read: GhlReadCall = call ?? (async (input) => new GhlClient(input.installId).call({
-    method: "GET", path: input.path, query: input.query, apiVersion: input.apiVersion, readOnly: true
+    method: input.method ?? "GET", path: input.path, query: input.query, body: input.body, apiVersion: input.apiVersion, readOnly: true
   }));
   const available = await listGhlPipelines({ ...config, installId }, read);
   if (config.pipelineIds?.some((pipelineId) => !available.some((pipeline) => pipeline.id === pipelineId))) throw new Error("Unknown GoHighLevel pipeline");
@@ -98,7 +102,7 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
 
   // Fetch each contact once per location, even when it occurs in multiple linked pipelines.
   const contacts = new Map<string, z.infer<typeof contactResponse>["contact"]>();
-  const counts: GhlPipelineConversionCount[] = [];
+  const pipelineOpportunities: { pipeline: typeof pipelines[number]; opportunities: Map<string, z.infer<typeof opportunityResponse>["opportunities"][number]> }[] = [];
   for (const pipeline of pipelines) {
     const opportunities = new Map<string, z.infer<typeof opportunityResponse>["opportunities"][number]>();
     let page = 1;
@@ -132,20 +136,30 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
       if (typeof nextPage === "number" && nextPage <= page) throw new Error("Invalid GoHighLevel opportunity pagination");
       page = typeof nextPage === "number" ? nextPage : page + 1;
     }
+    pipelineOpportunities.push({ pipeline, opportunities });
+  }
+  const contactIds = [...new Set(pipelineOpportunities.flatMap(({ opportunities }) => [...opportunities.values()]).map((opportunity) => opportunity.contactId ?? opportunity.contact?.id).filter((id): id is string => Boolean(id)))];
+  const missingContacts = contactIds.filter((id) => !contacts.has(id));
+  const cacheOptions = options.contactCache ?? (call ? false : {});
+  if (cacheOptions !== false) {
+    const cachedContacts = await loadCachedGhlContacts(missingContacts, { installId, locationId: config.locationId }, read, cacheOptions);
+    for (const [id, contact] of cachedContacts) contacts.set(id, contact);
+  }
+  for (let offset = 0; cacheOptions === false && offset < missingContacts.length; offset += 4) {
+    const batch = await Promise.all(missingContacts.slice(offset, offset + 4).map(async (id) => {
+      const contact = contactResponse.parse(await read({
+        installId, path: `/contacts/${encodeURIComponent(id)}`, apiVersion: CONTACT_API_VERSION
+      })).contact;
+      if (contact.id !== id || (contact.locationId && contact.locationId !== config.locationId)) {
+        throw new Error("Unexpected GoHighLevel contact");
+      }
+      return contact;
+    }));
+    for (const contact of batch) contacts.set(contact.id, contact);
+  }
+  const counts: GhlPipelineConversionCount[] = [];
+  for (const { pipeline, opportunities } of pipelineOpportunities) {
     const contactIds = [...new Set([...opportunities.values()].map((opportunity) => opportunity.contactId ?? opportunity.contact?.id).filter((id): id is string => Boolean(id)))];
-    const missingContacts = contactIds.filter((id) => !contacts.has(id));
-    for (let offset = 0; offset < missingContacts.length; offset += 4) {
-      const batch = await Promise.all(missingContacts.slice(offset, offset + 4).map(async (id) => {
-        const contact = contactResponse.parse(await read({
-          installId, path: `/contacts/${encodeURIComponent(id)}`, apiVersion: CONTACT_API_VERSION
-        })).contact;
-        if (contact.id !== id || (contact.locationId && contact.locationId !== config.locationId)) {
-          throw new Error("Unexpected GoHighLevel contact");
-        }
-        return contact;
-      }));
-      for (const contact of batch) contacts.set(contact.id, contact);
-    }
     const leads = new Set<string>(), appointments = new Set<string>();
     let completeLeads = [...opportunities.values()].every((opportunity) => opportunity.contactId || opportunity.contact?.id);
     let completeAppointments = completeLeads;

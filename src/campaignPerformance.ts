@@ -176,7 +176,7 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   // CRM may wait for rate limits; advertising requests must use their own budget
   // and start immediately rather than spending it on contact retrieval.
   const ghlProjectsRequest = getGhlProjectConversions(dashboard, { env, ghlCall: options.ghlCall, mappings,
-    crmMatches: options.crmMatches,
+    crmMatches: options.crmMatches, forceContacts: options.forceMetaSync,
     savedPages: projectMatches.flatMap((match) => match.sourcePaths.map((path) => ({ siteId: match.siteId, path }))) })
     .catch((error: unknown): ProjectCrmConversions => ({
       counts: new Map(), errors: new Set(sites.map((site) => site.id)), configuredSites: new Set(sites.map((site) => site.id)),
@@ -607,7 +607,7 @@ export async function getGhlProjectAppointments(dashboard: SiteAnalyticsDashboar
 
 export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboardData, options: {
   env?: Env; ghlCall?: GhlReadCall; mappings?: CampaignSiteMapping[]; savedPages?: { siteId: string; path: string }[];
-  crmMatches?: CrmPipelineMatch[];
+  crmMatches?: CrmPipelineMatch[]; forceContacts?: boolean;
 } = {}): Promise<ProjectCrmConversions> {
   const mappings = options.mappings ?? parseCampaignSiteMappings((options.env ?? process.env).CAMPAIGN_PERFORMANCE_SITES);
   const savedMatches = options.crmMatches ?? await readCrmPipelineMatches();
@@ -620,11 +620,11 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
   const crmReads = new Map<string, Promise<unknown>>();
   const sharedRead: GhlReadCall = (input) => {
     const query = Object.entries(input.query ?? {}).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b));
-    const key = JSON.stringify([input.installId, input.apiVersion, input.path, query]);
+    const key = JSON.stringify([input.installId, input.apiVersion, input.method ?? "GET", input.path, query, input.body]);
     let result = crmReads.get(key);
     if (!result) {
       result = Promise.resolve().then(() => options.ghlCall ? options.ghlCall(input) : new GhlClient(input.installId).call({
-        method: "GET", path: input.path, query: input.query, apiVersion: input.apiVersion, readOnly: true
+        method: input.method ?? "GET", path: input.path, query: input.query, body: input.body, apiVersion: input.apiVersion, readOnly: true
       }));
       crmReads.set(key, result);
     }
@@ -647,7 +647,7 @@ export async function getGhlProjectConversions(dashboard: SiteAnalyticsDashboard
     configuredSites.add(site.id);
     for (const config of scopes.values()) {
       try {
-        const pipelines = await ghlConversionsByPipeline(config, dashboard.period, sharedRead);
+        const pipelines = await ghlConversionsByPipeline(config, dashboard.period, sharedRead, { contactCache: options.ghlCall ? false : { force: options.forceContacts } });
         for (const pipeline of pipelines) {
           const manual = savedMatches.find((match) => match.locationId === config.locationId && match.pipelineId === pipeline.pipelineId);
           if (manual && manual.siteId !== site.id) continue;

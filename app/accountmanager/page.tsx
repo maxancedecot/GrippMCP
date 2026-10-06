@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { after } from "next/server.js";
 import { DashboardFrame } from "../dashboard-frame.js";
 import {
   CampaignPerformanceView,
@@ -7,7 +8,7 @@ import {
 } from "../dashboard/campaign-performance.js";
 import { DashboardSidebarFooter, DashboardViewTabs } from "../dashboard/view-tabs.js";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
-import { loadScheduledSnapshot } from "../../src/scheduledSnapshot.js";
+import { loadBackgroundSnapshot } from "../../src/backgroundSnapshot.js";
 import { getProjectPageGroupRevision } from "../../src/projectPageGroupStore.js";
 import { getCrmPipelineRevision } from "../../src/crmPipelineManagement.js";
 import {
@@ -17,9 +18,11 @@ import {
   type DashboardSearchParams
 } from "../../src/dashboardPeriod.js";
 import { AccountManagerLoadingProvider, AccountManagerLoadingRegion } from "./loading-overlay.js";
+import { AccountManagerRefreshStatus } from "./refresh-status.js";
 import { AccountManagerInitialLoadComplete } from "./initial-loading.js";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export const metadata: Metadata = {
   title: "Accountmanager dashboard",
@@ -38,7 +41,8 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
   const snapshotKey = selection.custom
     ? `accountmanager-dashboard:v15:custom:${selection.period.start}:${selection.period.end}:${projectGroupRevision}:${crmRevision}`
     : `accountmanager-dashboard:v15:rolling:${days}:${projectGroupRevision}:${crmRevision}`;
-  const snapshot = await loadScheduledSnapshot({ key: snapshotKey, now, force: forceMetaSync,
+  const snapshot = await loadBackgroundSnapshot({ key: snapshotKey, now, force: forceMetaSync,
+    schedule: (work) => after(work),
     retryWhen: (data) => data.performance.projects.some((project) => project.crmMessage?.startsWith("CRM-aanvraaglimiet bereikt")),
     load: async () => {
       const dashboard = await getSiteAnalyticsDashboardData({ days, ...customPeriod, now });
@@ -47,6 +51,9 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
     }
   });
   const { dashboard } = snapshot.data;
+  const updatedAt = new Intl.DateTimeFormat("nl-BE", { timeZone: "Europe/Brussels",
+    dateStyle: "short", timeStyle: "short" }).format(new Date(snapshot.refreshedAt));
+  const cleanHref = accountManagerHref({ params, days, customPeriod });
   const clearFilterHref = accountManagerHref({ params: { ...params, manager: undefined }, days, customPeriod });
   const performance = filterCampaignPerformanceViewData(snapshot.data.performance, selectedAccountManager,
     accountManagerHref({ params, days, customPeriod, syncMeta: true }));
@@ -67,7 +74,9 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
               {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}
             </span>
             <span>{dashboard.period.label}</span>
-            <span>Bijgewerkt {dashboard.lastUpdated}</span>
+            <span>Bijgewerkt {updatedAt}</span>
+            <AccountManagerRefreshStatus refreshId={snapshot.refreshId} refreshedAt={snapshot.refreshedAt}
+              refreshing={snapshot.refreshing} refreshFailed={snapshot.refreshFailed} cleanHref={cleanHref} />
           </div>
         </header>
 

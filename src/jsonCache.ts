@@ -59,6 +59,11 @@ export async function claimJsonCacheLease(key: string, ttlMs: number): Promise<b
   return true;
 }
 
+export async function releaseJsonCacheLease(key: string): Promise<void> {
+  if (getJsonCacheMode() === "upstash_rest") await kvCommand(["DEL", key]);
+  else memoryLeases.delete(key);
+}
+
 export function getJsonCacheMode(): JsonCacheMode {
   if (process.env.JSON_CACHE_STORE === "memory") {
     return "memory";

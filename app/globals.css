@@ -4362,3 +4362,14 @@ td .inline-bar {
     justify-content: flex-start;
   }
 }
+
+.accountmanager-refresh-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.accountmanager-refresh-status .accountmanager-loading-spinner {
+  width: 1rem;
+  height: 1rem;
+}
+.accountmanager-refresh-status--failed { color: #eabf6f; }
