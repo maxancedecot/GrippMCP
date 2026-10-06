@@ -15,9 +15,10 @@ const matchSchema = z.object({
   channel: z.enum(["facebook", "google"]).optional(),
   siteId: identifier,
   accountId: identifier.regex(/^\d+$/),
+  loginCustomerId: identifier.regex(/^\d+$/).optional(),
   campaignId: identifier.regex(/^\d+$/),
   sourcePaths: z.array(projectPath).min(1).transform((paths) => [...new Set(paths)])
-}).strict();
+}).strict().refine((match) => !match.loginCustomerId || match.channel === "google", "Only Google Ads links have a manager account");
 export type CampaignProjectMatch = z.infer<typeof matchSchema>;
 
 export function parseCampaignProjectMatches(value: unknown): CampaignProjectMatch[] {

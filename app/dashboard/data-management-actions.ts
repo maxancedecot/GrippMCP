@@ -5,7 +5,7 @@ import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { deleteProjectPageGroup, saveProjectPageGroup, type ResolvedProjectPageGroup } from "../../src/projectPageGroupStore.js";
 import { getProjectPageManagementData, invalidateProjectPageInventory, saveProjectPageManager, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 import { deleteFacebookCampaignMatch, listFacebookAdAccounts, listFacebookCampaigns, saveFacebookCampaignMatches } from "../../src/facebookCampaignManagement.js";
-import { deleteGoogleCampaignMatch, listGoogleCampaigns, saveGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
+import { deleteGoogleCampaignMatch, listGoogleAdAccounts, listGoogleCampaigns, saveGoogleCampaignMatches } from "../../src/googleCampaignManagement.js";
 import { deleteCrmPipelineMatch, listCrmConnections, loadCrmPipelines, saveCrmPipelineMatches } from "../../src/crmPipelineManagement.js";
 import { parseCampaignSiteMappings } from "../../src/campaignPerformance.js";
 import { CrmPipelineLoadError, crmPipelineLoadErrorMessage } from "../../src/crmPipelineErrors.js";
@@ -56,12 +56,17 @@ export async function deleteProjectPageGroupAction(groupId: string): Promise<{ o
   }
 }
 
-export async function loadGoogleCampaignsAction(customerId: string) {
-  try { return { ok: true as const, ...await listGoogleCampaigns(customerId) }; }
-  catch { return { ok: false as const, error: "De Google Ads-campagnes konden niet worden geladen. Controleer het klantnummer en de accounttoegang." }; }
+export async function loadGoogleAdAccountsAction() {
+  try { return { ok: true as const, accounts: await listGoogleAdAccounts() }; }
+  catch { return { ok: false as const, error: "De Google Ads-accounts konden niet worden geladen. Controleer de Google-toegang en probeer opnieuw." }; }
 }
 
-export async function saveGoogleCampaignMatchesAction(input: { siteId: string; accountId: string; campaignIds: string[]; sourcePath: string }) {
+export async function loadGoogleCampaignsAction(customerId: string, loginCustomerId?: string) {
+  try { return { ok: true as const, ...await listGoogleCampaigns(customerId, { loginCustomerId }) }; }
+  catch { return { ok: false as const, error: "De Google Ads-campagnes konden niet worden geladen. Controleer de toegang tot het gekozen advertentieaccount." }; }
+}
+
+export async function saveGoogleCampaignMatchesAction(input: { siteId: string; accountId: string; loginCustomerId?: string; campaignIds: string[]; sourcePath: string }) {
   try {
     const matches = await saveGoogleCampaignMatches(input);
     revalidatePath("/dashboard"); revalidatePath("/accountmanager");

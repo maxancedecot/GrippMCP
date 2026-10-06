@@ -127,9 +127,10 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
   }
   for (const match of projectMatches.filter((item) => item.channel === "google")) {
     const existing = mappings.find((mapping) => mapping.siteId === match.siteId);
-    if (!existing) mappings.push({ siteId: match.siteId, google: { customerId: match.accountId, campaignIds: [match.campaignId] } });
-    else if (!existing.google) existing.google = { customerId: match.accountId, campaignIds: [match.campaignId] };
+    if (!existing) mappings.push({ siteId: match.siteId, google: { customerId: match.accountId, campaignIds: [match.campaignId], ...(match.loginCustomerId ? { loginCustomerId: match.loginCustomerId } : {}) } });
+    else if (!existing.google) existing.google = { customerId: match.accountId, campaignIds: [match.campaignId], ...(match.loginCustomerId ? { loginCustomerId: match.loginCustomerId } : {}) };
     else if (existing.google.customerId === match.accountId) {
+      if (match.loginCustomerId) existing.google.loginCustomerId = match.loginCustomerId;
       existing.google.campaignIds = [...new Set([...(existing.google.campaignIds ?? []), match.campaignId])];
     }
   }

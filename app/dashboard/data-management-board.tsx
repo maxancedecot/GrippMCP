@@ -9,8 +9,8 @@ import type { SiteAnalyticsCvrPageCandidate, SiteAnalyticsProjectPageGroup } fro
 import type { ManagedProjectPage, ProjectPageManagementData } from "../../src/projectPageManagement.js";
 import type { CampaignProjectMatch } from "../../src/campaignProjects.js";
 import type { FacebookAdAccountOption, FacebookCampaignOption } from "../../src/facebookCampaignManagement.js";
-import type { GoogleCampaignOption } from "../../src/googleCampaignManagement.js";
-import { deleteFacebookCampaignMatchAction, loadFacebookAdAccountsAction, loadFacebookCampaignsAction, saveFacebookCampaignMatchesAction, deleteGoogleCampaignMatchAction, deleteProjectPageGroupAction, loadGoogleCampaignsAction, saveAccountManagerAction, saveGoogleCampaignMatchesAction, saveProjectPageGroupAction } from "./data-management-actions.js";
+import type { GoogleAdAccountOption, GoogleCampaignOption } from "../../src/googleCampaignManagement.js";
+import { deleteFacebookCampaignMatchAction, loadFacebookAdAccountsAction, loadFacebookCampaignsAction, saveFacebookCampaignMatchesAction, deleteGoogleCampaignMatchAction, deleteProjectPageGroupAction, loadGoogleAdAccountsAction, loadGoogleCampaignsAction, saveAccountManagerAction, saveGoogleCampaignMatchesAction, saveProjectPageGroupAction } from "./data-management-actions.js";
 
 export function DataManagementBoard({ data, mergePages, projectGroups, googleCampaignMatches, facebookCampaignMatches, crm, crmCount }: {
   data: ProjectPageManagementData;
@@ -87,9 +87,10 @@ function CampaignManager({ channel, active, pages, initialMatches, canSave, onCo
   const router = useRouter();
   const platform = channel === "google" ? "Google Ads" : "Facebook Ads";
   const campaignLabel = channel === "google" ? "Google" : "Facebook";
-  const accountLabel = channel === "google" ? "Klantnummer" : "Advertentieaccount";
+  const accountLabel = channel === "google" ? "Google Ads-account" : "Advertentieaccount";
   const [accountInput, setAccountInput] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [accountLoginCustomerId, setAccountLoginCustomerId] = useState<string>();
   const [campaigns, setCampaigns] = useState<(GoogleCampaignOption | FacebookCampaignOption)[]>([]);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [campaignSearch, setCampaignSearch] = useState("");
@@ -99,31 +100,33 @@ function CampaignManager({ channel, active, pages, initialMatches, canSave, onCo
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [matches, setMatches] = useState(initialMatches);
-  const [facebookAccounts, setFacebookAccounts] = useState<FacebookAdAccountOption[]>([]);
-  const [accountsPending, setAccountsPending] = useState(channel === "facebook");
+  const [accounts, setAccounts] = useState<(FacebookAdAccountOption | GoogleAdAccountOption)[]>([]);
+  const [accountsPending, setAccountsPending] = useState(true);
   const [accountLoadError, setAccountLoadError] = useState("");
   const [accountRefresh, setAccountRefresh] = useState(0);
   const busy = pending || accountsPending;
 
   function changeAccount(value: string) {
-    setAccountInput(value); setAccountId(""); setCampaigns([]); setSelectedCampaignIds([]); setNotice(""); setError("");
+    setAccountInput(value); setAccountId(""); setAccountLoginCustomerId(undefined); setCampaigns([]); setSelectedCampaignIds([]); setNotice(""); setError("");
   }
 
   useEffect(() => {
-    if (channel !== "facebook" || !active) return;
+    if (!active) return;
     let cancelled = false;
     setAccountsPending(true); setAccountLoadError("");
     void (async () => {
       try {
-        const result = await loadFacebookAdAccountsAction();
+        const result = channel === "google" ? await loadGoogleAdAccountsAction() : await loadFacebookAdAccountsAction();
         if (cancelled) return;
-        if (!result.ok) { setFacebookAccounts([]); changeAccount(""); setAccountLoadError(result.error); return; }
-        setFacebookAccounts(result.accounts);
-        if (!result.accounts.some((account) => account.id === accountInput)) changeAccount("");
+        if (!result.ok) { setAccounts([]); changeAccount(""); setAccountLoadError(result.error); return; }
+        setAccounts(result.accounts);
+        const selectedAccount = result.accounts.find((account) => account.id === accountInput);
+        if (!selectedAccount) changeAccount("");
+        else if (accountLoginCustomerId && "loginCustomerId" in selectedAccount && selectedAccount.loginCustomerId !== accountLoginCustomerId) changeAccount(accountInput);
       } catch {
         if (!cancelled) {
-          setFacebookAccounts([]); changeAccount("");
-          setAccountLoadError("De Facebook-advertentieaccounts konden niet worden geladen. Probeer opnieuw.");
+          setAccounts([]); changeAccount("");
+          setAccountLoadError(`De ${platform}-accounts konden niet worden geladen. Probeer opnieuw.`);
         }
       } finally { if (!cancelled) setAccountsPending(false); }
     })();
@@ -151,9 +154,11 @@ function CampaignManager({ channel, active, pages, initialMatches, canSave, onCo
     setPending(true); setError(""); setNotice("");
     setAccountId(""); setCampaigns([]); setSelectedCampaignIds([]);
     try {
-      const result = channel === "google" ? await loadGoogleCampaignsAction(accountInput) : await loadFacebookCampaignsAction(accountInput);
+      const selectedAccount = accounts.find((account) => account.id === accountInput);
+      const loginCustomerId = selectedAccount && "loginCustomerId" in selectedAccount ? selectedAccount.loginCustomerId : undefined;
+      const result = channel === "google" ? await loadGoogleCampaignsAction(accountInput, loginCustomerId) : await loadFacebookCampaignsAction(accountInput);
       if (!result.ok) { setError(result.error); return; }
-      setAccountId("customerId" in result ? result.customerId : result.accountId); setCampaigns(result.campaigns); setSelectedCampaignIds([]); setCampaignSearch("");
+      setAccountLoginCustomerId(loginCustomerId); setAccountId("customerId" in result ? result.customerId : result.accountId); setCampaigns(result.campaigns); setSelectedCampaignIds([]); setCampaignSearch("");
       setNotice(`${result.campaigns.length} campagnes geladen.`);
     } catch { setError(`De ${platform}-campagnes konden niet worden geladen.`); }
     finally { setPending(false); }
@@ -164,7 +169,8 @@ function CampaignManager({ channel, active, pages, initialMatches, canSave, onCo
     if (!page) { setPending(false); setError("Kies een projectpagina."); return; }
     try {
       const saveMatches = channel === "google" ? saveGoogleCampaignMatchesAction : saveFacebookCampaignMatchesAction;
-      const result = await saveMatches({ siteId: page.siteId, accountId, campaignIds: selectedCampaignIds, sourcePath: page.path });
+      const result = await saveMatches({ siteId: page.siteId, accountId, campaignIds: selectedCampaignIds, sourcePath: page.path,
+        ...(channel === "google" && accountLoginCustomerId ? { loginCustomerId: accountLoginCustomerId } : {}) });
       if (!result.ok) { setError(result.error); return; }
       const selected = new Set(selectedCampaignIds);
       const nextMatches = [...matches.filter((item) => !(item.accountId === accountId && selected.has(item.campaignId))), ...result.matches];
@@ -189,18 +195,17 @@ function CampaignManager({ channel, active, pages, initialMatches, canSave, onCo
   return <section className="panel data-management-panel" aria-labelledby={`${channel}-campaign-management-title`}>
     <div className="panel-heading"><div><p className="eyebrow">{platform}</p><h2 id={`${channel}-campaign-management-title`}>Campagnes aan projecten koppelen</h2></div><span className="panel-total">{matches.length} koppelingen</span></div>
     <p className="cell-muted data-management-help">Laad een {platform}-account, kies een project en selecteer de campagnes die erbij horen. Hun CTR en spend worden samen weergegeven in het dashboard.</p>
-    <div className="data-management-assignment-controls"><label>{accountLabel}{channel === "facebook"
-      ? <select value={accountInput} disabled={busy || !facebookAccounts.length} onChange={(event) => changeAccount(event.target.value)}>
+    <div className="data-management-assignment-controls"><label>{accountLabel}
+      <select value={accountInput} disabled={busy || !accounts.length} onChange={(event) => changeAccount(event.target.value)}>
         <option value="">{accountsPending ? "Advertentieaccounts laden…" : "Kies een advertentieaccount"}</option>
-        {facebookAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.id}{account.status !== 1 ? " · Inactief" : ""}</option>)}
-      </select>
-      : <input value={accountInput} disabled={busy} onChange={(event) => changeAccount(event.target.value)} placeholder="123-456-7890" />}</label>
+        {accounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.id}{["CANCELED", "SUSPENDED", "CLOSED"].includes(String(account.status)) || (typeof account.status === "number" && account.status !== 1) ? " · Inactief" : ""}</option>)}
+      </select></label>
       <button type="button" disabled={busy || !accountInput.trim()} onClick={load}>{pending ? "Laden…" : "Campagnes laden"}</button>
-      {channel === "facebook" ? <button type="button" disabled={busy} onClick={() => setAccountRefresh((current) => current + 1)}>Accounts vernieuwen</button> : null}
+      <button type="button" disabled={busy} onClick={() => setAccountRefresh((current) => current + 1)}>Accounts vernieuwen</button>
     </div>
-    {channel === "facebook" && accountsPending ? <p className="cell-muted" role="status">Facebook-advertentieaccounts laden…</p> : null}
-    {channel === "facebook" && accountLoadError ? <p className="data-management-error" role="alert">{accountLoadError}</p> : null}
-    {channel === "facebook" && !accountsPending && !accountLoadError && !facebookAccounts.length ? <p className="empty-state">Geen Facebook-advertentieaccounts beschikbaar via de huidige Meta-koppeling.</p> : null}
+    {accountsPending ? <p className="cell-muted" role="status">{platform}-advertentieaccounts laden…</p> : null}
+    {accountLoadError ? <p className="data-management-error" role="alert">{accountLoadError}</p> : null}
+    {!accountsPending && !accountLoadError && !accounts.length ? <p className="empty-state">Geen {platform}-advertentieaccounts beschikbaar via de huidige {channel === "google" ? "Google" : "Meta"}-koppeling.</p> : null}
     {campaigns.length ? <form className="project-group-form" onSubmit={save}>
       <div className="data-management-assignment-controls google-campaign-link-controls">
         <label>Projectpagina<select value={pageKey} disabled={!canSave || busy} onChange={(event) => setPageKey(event.target.value)}><option value="">Kies een projectpagina</option>{options.map((page) => <option key={`${page.siteId}:${page.path}`} value={`${page.siteId}:${normalizeProjectPath(page.path)}`}>{page.siteName} · {page.title} · {page.path}</option>)}</select></label>
@@ -227,7 +232,7 @@ function CampaignManager({ channel, active, pages, initialMatches, canSave, onCo
       return <details className="management-linked-project" key={key}><summary><span><strong>{page?.title ?? group[0].sourcePaths[0]}</strong><small>{page?.siteName ?? group[0].siteId}</small></span>
         <span className="management-link-count">{group.length} campagne{group.length === 1 ? "" : "s"}</span></summary>
         <div className="management-linked-content">{group.map((match) => <div className="management-linked-row" key={`${match.accountId}:${match.campaignId}`}>
-          <div><strong>{campaigns.find((campaign) => accountId === match.accountId && campaign.id === match.campaignId)?.name ?? `Campagne ${match.campaignId}`}</strong><span className="cell-muted">{channel === "facebook" ? facebookAccounts.find((account) => account.id === match.accountId)?.name ?? `${platform}-account ${match.accountId}` : `${platform}-account ${match.accountId}`}</span></div>
+          <div><strong>{campaigns.find((campaign) => accountId === match.accountId && campaign.id === match.campaignId)?.name ?? `Campagne ${match.campaignId}`}</strong><span className="cell-muted">{accounts.find((account) => account.id === match.accountId)?.name ?? `${platform}-account ${match.accountId}`}</span></div>
           <button type="button" disabled={!canSave || busy} aria-label={`Koppeling verwijderen voor ${campaignLabel}-campagne ${match.campaignId}`} onClick={() => remove(match)}>Verwijderen</button>
         </div>)}</div></details>;
     })}</div>{!visibleMatches.length ? <p className="empty-state">Geen gekoppelde projecten gevonden.</p> : null}</div>

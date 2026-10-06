@@ -1051,10 +1051,11 @@ test("multiple saved Google campaigns share one project result without a Vercel 
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 3, "/project")];
   const result = await getCampaignPerformance(data, {
-    env: environment([], googleCredentials),
-    projectMatches: ["10", "11"].map((campaignId) => ({ channel: "google", siteId: "site-a", accountId: "5365783098", campaignId, sourcePaths: ["/project"] })),
+    env: environment([], { ...googleCredentials, GOOGLE_ADS_LOGIN_CUSTOMER_ID: "888" }),
+    projectMatches: ["10", "11"].map((campaignId) => ({ channel: "google", siteId: "site-a", accountId: "5365783098", loginCustomerId: "900", campaignId, sourcePaths: ["/project"] })),
     fetchImpl: async (input, init) => {
       if (String(input).includes("oauth2")) return response({ access_token: "access" });
+      assert.equal((init?.headers as Record<string, string>)["login-customer-id"], "900", "Saved manager is used for every metrics and status request");
       const query = JSON.parse(String(init?.body)).query as string;
       if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
       assert.match(query, /campaign\.id IN \(10,11\)/);
