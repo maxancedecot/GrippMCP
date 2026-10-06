@@ -25,11 +25,13 @@ const opportunityResponse = z.object({
   }).passthrough().optional()
 });
 
+// Use the documented contact-detail version with tags and dateAdded.
+const CONTACT_API_VERSION = "2021-07-28";
 const contactResponse = z.object({
   contact: z.object({
     id: z.string().min(1),
     locationId: z.string().nullish(),
-    tags: z.array(z.string()),
+    tags: z.array(z.string()).nullish().transform((tags) => tags ?? []),
     dateAdded: z.union([z.string(), z.number()]).nullish()
   })
 });
@@ -135,7 +137,7 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
     for (let offset = 0; offset < missingContacts.length; offset += 4) {
       const batch = await Promise.all(missingContacts.slice(offset, offset + 4).map(async (id) => {
         const contact = contactResponse.parse(await read({
-          installId, path: `/contacts/${encodeURIComponent(id)}`, apiVersion: "v3"
+          installId, path: `/contacts/${encodeURIComponent(id)}`, apiVersion: CONTACT_API_VERSION
         })).contact;
         if (contact.id !== id || (contact.locationId && contact.locationId !== config.locationId)) {
           throw new Error("Unexpected GoHighLevel contact");

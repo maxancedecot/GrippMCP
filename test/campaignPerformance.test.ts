@@ -1668,3 +1668,27 @@ test("slow or unavailable CRM cannot expire Google and Facebook requests before 
     } finally { releaseCrm(); await operation; }
   }
 });
+
+test("THUZ Villa Hippodrome counts valid brochure tags even when another contact has no tags", async () => {
+  for (const untagged of [undefined, null, []]) {
+    const data = dashboard(["thuz"]);
+    data.cvrPageCandidates = [{ siteId: "thuz", siteName: "THUZ", path: "/project/villa-hippodrome", title: "Villa Hippodrome", uniqueVisitors: 50, pageViews: 60 }];
+    const result = await getCampaignPerformance(data, {
+      env: environment([]), requireCrmConversions: true,
+      crmMatches: [{ siteId: "thuz", sourcePath: "/project/villa-hippodrome", locationId: "location", installId: "install", pipelineId: "villa", pipelineName: "Villa Hippodrome" }],
+      ghlCall: async ({ path, apiVersion }) => {
+        if (path.endsWith("/pipelines")) return { pipelines: [{ id: "villa", name: "Villa Hippodrome" }] };
+        if (path.startsWith("/contacts/")) {
+          assert.equal(apiVersion, "2021-07-28");
+          return { contact: { id: path.slice(10), locationId: "location", dateAdded: "2026-09-10T12:00:00Z",
+            ...(path.endsWith("/brochure") ? { tags: ["brochure", "ledoux", "villa hippodrome"] } : untagged === undefined ? {} : { tags: untagged }) } };
+        }
+        return { opportunities: ["brochure", "untagged"].map((contactId) => ({ id: `${contactId}-opportunity`, contactId, pipelineId: "villa" })) };
+      }
+    });
+    assert.deepEqual(result.projects.map((project) => [project.title, project.leads, project.appointments, project.cvr, project.crmState, project.crmMessage]),
+      [["Villa Hippodrome", 1, 0, 2, "connected", ""]]);
+    assert.equal(result.rows[0]?.leads.data?.count, 1);
+    assert.equal(result.rows[0]?.appointments.data?.count, 0);
+  }
+});

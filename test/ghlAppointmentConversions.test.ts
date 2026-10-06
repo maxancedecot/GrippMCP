@@ -37,7 +37,7 @@ test("contact details override embedded tags and pipeline stage; each contact co
     { ...opportunity("three", "contact"), pipelineStageId: "unknown" },
     opportunity("unrelated")
   ], [contact("lead"), contact("meeting", ["ledoux", "afspraak", "brochure"]), contact("contact", ["ledoux", "contact"]), contact("unrelated", ["brochure"])]);
-  const call: GhlReadCall = async (input) => { assert.equal(input.apiVersion, "v3"); visits.push(input.path); return fixture(input); };
+  const call: GhlReadCall = async (input) => { assert.equal(input.apiVersion, input.path.startsWith("/contacts/") ? "2021-07-28" : "v3"); visits.push(input.path); return fixture(input); };
   const result = await ghlConversionsByPipeline(config, period, call);
   assert.deepEqual(counts(result), [[2, 1]]);
   assert.deepEqual(result[0]?.leadContactIds, ["lead", "contact"]);
@@ -77,8 +77,8 @@ test("missing contact identifiers leave counts unavailable; embedded contact id 
   assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, read([{ id: "one", contact: { id: "one" } }], [contact("one")]))), [[1, 0]]);
 });
 
-test("malformed contacts, missing tags, wrong identifiers and locations never produce false totals", async () => {
-  for (const invalid of [{}, { id: "one" }, { ...contact("one"), tags: "ledoux" }, { ...contact("wrong") }, { ...contact("one"), locationId: "other" }]) {
+test("malformed contacts, invalid tag types, wrong identifiers and locations never produce false totals", async () => {
+  for (const invalid of [{}, { ...contact("one"), tags: "ledoux" }, { ...contact("one"), tags: [42] }, { ...contact("one"), tags: [{ id: "tag" }] }, { ...contact("wrong") }, { ...contact("one"), locationId: "other" }]) {
     const fixture = read([opportunity("one")], []);
     const call: GhlReadCall = async (input) => input.path.startsWith("/contacts/") ? { contact: invalid } : fixture(input);
     await assert.rejects(ghlConversionsByPipeline(config, period, call));
@@ -171,4 +171,22 @@ test("year-long periods include contacts at both Brussels boundaries and in olde
     contact("end", ["ledoux", "afspraak"], "2025-12-31T22:59:59Z"), contact("outside", undefined, "2025-12-31T23:00:00Z")];
   assert.deepEqual(counts(await ghlConversionsByPipeline(config, { start: "2025-01-01", end: "2025-12-31" },
     read(contacts.map(({ id }) => opportunity(id)), contacts))), [[2, 1]]);
+});
+
+test("Villa Hippodrome brochure leads remain valid alongside contacts with empty or omitted tags", async () => {
+  for (const untagged of [null, undefined, []]) {
+    const fixture = read([
+      opportunity("brochure", "villa-brochure"), opportunity("meeting", "villa-meeting"), opportunity("untagged")
+    ], [
+      contact("villa-brochure", ["brochure", "ledoux", "villa hippodrome"]),
+      contact("villa-meeting", ["ledoux", "brochure", "afspraak", "villa hippodrome"])
+    ]);
+    const call: GhlReadCall = async (input) => input.path === "/contacts/untagged"
+      ? { contact: { id: "untagged", locationId: "location", ...(untagged === undefined ? {} : { tags: untagged }) } }
+      : fixture(input);
+    const result = await ghlConversionsByPipeline(config, period, call);
+    assert.deepEqual(counts(result), [[1, 1]]);
+    assert.deepEqual(result[0]?.leadContactIds, ["villa-brochure"]);
+    assert.deepEqual(result[0]?.appointmentContactIds, ["villa-meeting"]);
+  }
 });
