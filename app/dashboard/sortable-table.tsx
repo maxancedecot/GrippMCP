@@ -3,13 +3,14 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { nextTableSort, sortTableRows, type TableSort, type TableSortRow } from "../../src/tableSorting.js";
 
-export type Column = { key: string; label: string; text?: boolean; description?: string };
+export type Column = { key: string; label: string; text?: boolean; description?: string; sortable?: boolean };
 export type Row = TableSortRow & { key: string; content: ReactNode };
 
 export function SortableTable({ columns, rows, className }: { columns: Column[]; rows: Row[]; className: string }) {
   const [sort, setSort] = useState<TableSort | null>(null);
   return <table className={className}>
     <thead><tr>{columns.map((column) => {
+      if (column.sortable === false) return <th key={column.key} scope="col">{column.label}</th>;
       const active = sort?.column === column.key;
       const next = nextTableSort(sort, column.key);
       const direction = column.text ? (next.direction === "descending" ? "Z naar A" : "A naar Z")

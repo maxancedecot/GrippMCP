@@ -4373,3 +4373,18 @@ td .inline-bar {
   height: 1rem;
 }
 .accountmanager-refresh-status--failed { color: #eabf6f; }
+
+
+.campaign-project-row-action { display: grid; gap: 6px; }
+.campaign-project-row-action button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.campaign-project-row-action button:disabled { opacity: 0.5; cursor: not-allowed; }
+.campaign-project-row-error { max-width: 220px; color: var(--danger); font-size: 12px; white-space: normal; }
+.campaign-project-deleted { margin-top: 18px; color: var(--muted); }
+.campaign-project-deleted summary { cursor: pointer; font-weight: 740; }
+.campaign-project-deleted ul { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.campaign-project-deleted li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border: 1px solid var(--border); }
+.campaign-project-deleted li > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.campaign-project-deleted strong { display: block; color: var(--ink); }
+.campaign-project-restore-button { min-height: 34px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); padding: 7px 10px; font-size: 13px; font-weight: 740; cursor: pointer; }
+.campaign-project-restore-button:hover { border-color: var(--green); }
+.campaign-project-restore-button:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }

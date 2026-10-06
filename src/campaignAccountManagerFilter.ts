@@ -6,7 +6,8 @@ type AccountManagerAssignments = Record<string, ManagedProjectPage>;
 export function filterCampaignProjectsByManager(
   projects: CampaignProjectRow[],
   assignments: AccountManagerAssignments,
-  requestedManager: string | undefined
+  requestedManager: string | undefined,
+  hiddenKeys: ReadonlySet<string> = new Set()
 ) {
   const assignmentFor = (project: CampaignProjectRow) => assignments[projectPageKey({ siteId: project.siteId, path: project.sourcePath })];
   const managers = [...new Map(projects.flatMap((project) => {
@@ -18,7 +19,7 @@ export function filterCampaignProjectsByManager(
   const selectedManager = requestedManager === "unassigned" || managers.some(([id]) => id === requestedManager)
     ? requestedManager ?? ""
     : "";
-  const filteredProjects = selectedManager
+  const selectedProjects = selectedManager
     ? projects.filter((project) => {
         const assignment = assignmentFor(project);
         return selectedManager === "unassigned"
@@ -26,8 +27,9 @@ export function filterCampaignProjectsByManager(
           : String(assignment?.accountManagerId) === selectedManager;
       })
     : projects;
-
-  return { managers, selectedManager, projects: filteredProjects, totalProjects: projects.length };
+  const hidden = (project: CampaignProjectRow) => hiddenKeys.has(projectPageKey({ siteId: project.siteId, path: project.sourcePath }));
+  return { managers, selectedManager, projects: selectedProjects.filter((project) => !hidden(project)),
+    hiddenProjects: selectedProjects.filter(hidden), totalProjects: projects.filter((project) => !hidden(project)).length };
 }
 
 export function summarizeFilteredCampaignProjects(projects: CampaignProjectRow[]) {

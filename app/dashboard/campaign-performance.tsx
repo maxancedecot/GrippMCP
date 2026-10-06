@@ -7,6 +7,8 @@ import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { Info } from "lucide-react";
 import { hasProjectPage, summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
 import { liveSortValue } from "../../src/tableSorting.js";
+import { CampaignProjectRowButton } from "./campaign-project-row-button.js";
+import { readCampaignProjectVisibility, type CampaignProjectVisibility } from "../../src/campaignProjectVisibility.js";
 import { CampaignProjectTable } from "./campaign-project-table.js";
 import { getProjectPageManagementData, projectPageKey, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 import { filterCampaignProjectsByManager, summarizeFilteredCampaignProjects } from "../../src/campaignAccountManagerFilter.js";
@@ -45,15 +47,16 @@ export async function loadCampaignPerformanceBaseData({ dashboard, discoverySite
 
 export type CampaignPerformanceBaseData = Awaited<ReturnType<typeof loadCampaignPerformanceBaseData>>;
 
-export function filterCampaignPerformanceViewData(base: CampaignPerformanceBaseData, selectedAccountManager?: string, syncHref?: string) {
-  const filtered = filterCampaignProjectsByManager(base.projects.filter(hasProjectPage), base.accountManagers, selectedAccountManager);
+export function filterCampaignPerformanceViewData(base: CampaignPerformanceBaseData, selectedAccountManager?: string, syncHref?: string, visibility?: CampaignProjectVisibility) {
+  const filtered = filterCampaignProjectsByManager(base.projects.filter(hasProjectPage), base.accountManagers, selectedAccountManager, visibility?.hiddenKeys);
   const filteredSiteIds = new Set(filtered.projects.map((project) => project.siteId));
   const filteredRows = filtered.selectedManager ? base.rows.filter((row) => filteredSiteIds.has(row.siteId)) : base.rows;
   const filteredMetaAccountIds = new Set(filtered.projects.flatMap((project) => project.campaigns.map((campaign) => `act_${campaign.accountId}`)));
   const filteredMetaSync = filtered.selectedManager && base.metaSync
     ? { ...base.metaSync, accounts: base.metaSync.accounts.filter((account) => filteredMetaAccountIds.has(account.id)) }
     : base.metaSync;
-  return { ...base, rows: filteredRows,
+  return { ...base, rows: filteredRows, message: [base.message, visibility?.error].filter(Boolean).join(" "),
+    hiddenProjects: visibility?.canSave ? filtered.hiddenProjects : [], canDeleteProjects: visibility?.canSave ?? false,
     facebookLinkCtr: filtered.selectedManager ? filteredProjectLinkCtr(filtered.projects) : base.facebookLinkCtr,
     projects: filtered.projects, unmatchedCampaigns: filtered.selectedManager ? [] : base.unmatchedCampaigns,
     metaSync: filteredMetaSync, syncHref,
@@ -61,7 +64,8 @@ export function filterCampaignPerformanceViewData(base: CampaignPerformanceBaseD
 }
 
 export async function loadCampaignPerformanceViewData({ selectedAccountManager, syncHref, ...props }: CampaignPerformanceProps) {
-  return filterCampaignPerformanceViewData(await loadCampaignPerformanceBaseData(props), selectedAccountManager, syncHref);
+  const base = await loadCampaignPerformanceBaseData(props);
+  return filterCampaignPerformanceViewData(base, selectedAccountManager, syncHref, await readCampaignProjectVisibility(base.projects.filter(hasProjectPage)));
 }
 
 export async function CampaignPerformance(props: CampaignPerformanceProps) {
@@ -69,12 +73,13 @@ export async function CampaignPerformance(props: CampaignPerformanceProps) {
 }
 
 export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projects, unmatchedCampaigns, accountManagers, metaSync, syncHref,
-  selectedManager = "", totalProjects = projects.length }: {
+  selectedManager = "", totalProjects = projects.length, hiddenProjects = [], canDeleteProjects = false }: {
   rows: CampaignPerformanceRow[]; message: string; facebookLinkCtr: LinkCtrSummary;
   projects: CampaignProjectRow[]; unmatchedCampaigns: UnmatchedProjectCampaign[];
   accountManagers: Record<string, ManagedProjectPage>;
   metaSync?: MetaAccountSync; syncHref?: string;
   managers?: [string, string][]; selectedManager?: string; totalProjects?: number;
+  hiddenProjects?: CampaignProjectRow[]; canDeleteProjects?: boolean;
 }) {
   const projectSummary = summarizeFilteredCampaignProjects(projects);
   const cvr = projectSummary.conversionRate;
@@ -118,7 +123,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       </section>
 
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
-        <CampaignProjectTable info={<details className="campaign-project-info">
+        <CampaignProjectTable hiddenProjects={hiddenProjects} canDeleteProjects={canDeleteProjects} info={<details className="campaign-project-info">
           <summary aria-label="Meer informatie over de projectcijfers" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
           <div className="campaign-info-content"><p>Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Leads en afspraken komen uit de gekoppelde GoHighLevel-projectpipeline. Ontbrekende CRM-data wordt met een streepje en een melding getoond. De contacttags bepalen de telling: ledoux + brochure of ledoux + contact is een lead; ledoux + afspraak is een afspraak. Bij meerdere tags heeft afspraak voorrang. De periode gebruikt de aanmaakdatum van het contact. Project-CVR is (leads + afspraken) gedeeld door websitebezoekers.</p></div>
         </details>} columns={[
@@ -130,7 +135,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
           { key: "googleCtr", label: "Google CTR", description: "Gemiddelde CTR, gewogen op vertoningen" },
           { key: "googleSpend", label: "Google spend", description: "Totale spend van de campagnes binnen het project" },
           { key: "visitors", label: "Bezoekers" },
-          { key: "leads", label: "Leads (CRM)" }, { key: "appointments", label: "Afspraken (CRM)" }, { key: "cvr", label: "Project CVR" }
+          { key: "leads", label: "Leads (CRM)" }, { key: "appointments", label: "Afspraken (CRM)" }, { key: "cvr", label: "Project CVR" }, { key: "actions", label: "Acties", sortable: false }
         ]} rows={projects.map((project) => {
           const google = summarizeGoogleProjectCampaigns(project.googleCampaigns);
           const facebook = summarizeFacebookProjectCampaigns(project.campaigns);
@@ -165,6 +170,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               <td><ConversionSourceValue value={project.appointments} source={project.appointmentSource} label="Afspraak" /></td>
               <td><strong className="campaign-project-cvr-value" style={{ color: rateColor(project.cvr, PROJECT_CVR_BENCHMARK_PERCENT) }}>{percentage(project.cvr)}</strong>
                 {!project.hasConversionMapping ? <span className="cell-muted">CRM-meting nog niet beschikbaar</span> : null}</td>
+              <td className="campaign-project-actions-cell"><CampaignProjectRowButton siteId={project.siteId} path={project.sourcePath}
+                title={project.title} disabled={!canDeleteProjects} /></td>
             </tr>
           };
         })} />
