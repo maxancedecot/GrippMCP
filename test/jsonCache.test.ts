@@ -40,11 +40,15 @@ test("batched persistent reads preserve missing entries and reject incomplete re
   let calls = 0;
   globalThis.fetch = async (_url, init) => {
     calls++;
+    assert.equal(init?.cache, "no-store", "Persistent reads must always request the latest stored values");
     assert.deepEqual(JSON.parse(String(init?.body)), ["MGET", "client:1", "client:2"]);
     return new Response(JSON.stringify({ result }));
   };
   assert.deepEqual(await readJsonCaches(["client:1", "client:2"]), [{ managerId: 2 }, null]);
   assert.equal(calls, 1);
+  result = ['{"managerId":3}', null];
+  assert.deepEqual(await readJsonCaches(["client:1", "client:2"]), [{ managerId: 3 }, null]);
+  assert.equal(calls, 2);
   result = [null];
   await assert.rejects(readJsonCaches(["client:1", "client:2"]), /Incomplete cache response/);
 });

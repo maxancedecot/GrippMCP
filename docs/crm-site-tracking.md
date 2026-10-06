@@ -10,7 +10,7 @@ Plak op iedere gepubliceerde CRM-website in **Head tracking code**:
 
 Gebruik dezelfde code op alle pagina’s, ook de bedankpagina’s voor Brochure en Afspraak. Publiceer de website en bezoek een pagina. Na de eerste ontvangen meting verschijnt het domein automatisch in de websitelijst. `www` en het hoofddomein gebruiken dezelfde registratie. Een reeds geregistreerde website behoudt haar ID en paginakoppelingen.
 
-Klik in **Websiteprestaties** op **Gegevens bijwerken** om de nieuwste opgeslagen metingen en de CVR-paginalijst opnieuw op te halen. De gekozen website en meetperiode blijven behouden. Tijdens het ophalen is de knop tijdelijk uitgeschakeld. De sitekeuze bij CVR-koppelingen kan onafhankelijk van de websitefilter worden gewijzigd.
+Klik in **Websiteprestaties** op **Gegevens bijwerken** om de nieuwste opgeslagen metingen en de CVR-paginalijst opnieuw op te halen. De gekozen website en meetperiode blijven behouden. De knop maakt via een serveractie de dashboardcache ongeldig en vernieuwt de huidige weergave. Tijdens het ophalen is de knop tijdelijk uitgeschakeld; daarna verschijnt een bevestiging of foutmelding. **Bijgewerkt** toont het ophaaltijdstip tot op de seconde in de Belgische tijdzone. De tooltip bevat het tijdstip van de laatste ontvangen meting. De sitekeuze bij CVR-koppelingen kan onafhankelijk van de websitefilter worden gewijzigd.
 
 In **Websiteprestaties → CVR-koppelingen** koppel je de projectpagina aan de bijbehorende bedankpagina’s. Dezelfde metingen voeden CVR, Brochure/Leads en Afspraak/Afspraken in beide dashboardtabs. Zonder paginakoppelingen wordt geen CVR verzonnen. De tracker herkent niet zelfstandig welke bronpagina bij welke brochure of afspraak hoort.
 

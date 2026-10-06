@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import {
   deleteSiteAnalyticsCvrLink,
@@ -46,6 +46,10 @@ type DashboardFormValue = FormDataEntryValue | null;
 const periodOptions = DASHBOARD_PERIOD_OPTIONS;
 
 const numberFormatter = new Intl.NumberFormat("nl-BE");
+const refreshedTimeFormatter = new Intl.DateTimeFormat("nl-BE", {
+  timeZone: "Europe/Brussels", day: "2-digit", month: "2-digit", year: "numeric",
+  hour: "2-digit", minute: "2-digit", second: "2-digit"
+});
 const percentFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 0
@@ -54,6 +58,12 @@ const conversionRateFormatter = new Intl.NumberFormat("nl-BE", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1
 });
+
+async function refreshWebsitePerformanceAction() {
+  "use server";
+  revalidatePath("/dashboard");
+  refresh();
+}
 
 async function createCvrLinkAction(formData: FormData) {
   "use server";
@@ -123,6 +133,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }, 0);
   const totalCvrConversionVisitors = dashboard.sites.reduce((sum, site) => sum + site.cvrConversionVisitors, 0) + appointmentAdjustment;
   const overallConversionRatePercent = totalCvrSourceVisitors > 0 ? (totalCvrConversionVisitors / totalCvrSourceVisitors) * 100 : 0;
+  const refreshedAt = refreshedTimeFormatter.format(new Date());
 
   return (
     <DashboardFrame showTopMenu={false} sidebar={<DashboardViewTabs view={view} params={params} days={days}
@@ -139,8 +150,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               {dashboard.source.mode === "live" ? "Website verbonden" : "Website-demo"}
             </span>
             <span>{dashboard.period.label}</span>
-            <span>Bijgewerkt {dashboard.lastUpdated}</span>
-            {view === "website" ? <WebsiteRefreshButton /> : null}
+            <span title={`Laatste ontvangen meting: ${dashboard.lastUpdated}`}>Bijgewerkt {refreshedAt}</span>
+            {view === "website" ? <WebsiteRefreshButton action={refreshWebsitePerformanceAction} /> : null}
           </div>
         </header>
 

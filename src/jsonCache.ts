@@ -139,6 +139,7 @@ async function kvCommand<T>(command: unknown[]): Promise<T> {
 
   const response = await fetch(config.url, {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Authorization": `Bearer ${config.token}`,
       "Content-Type": "application/json"

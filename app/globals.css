@@ -2886,6 +2886,27 @@ td .inline-bar {
   font-weight: 760;
 }
 
+.site-analytics-refresh-control {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.site-analytics-refresh-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 280px;
+}
+
+.site-analytics-refresh-status:empty {
+  display: none;
+}
+
+.site-analytics-refresh-error {
+  color: var(--danger);
+}
+
 .site-analytics-refresh-button {
   display: inline-flex;
   align-items: center;
