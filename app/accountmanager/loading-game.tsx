@@ -10,6 +10,7 @@ const instructions = {
   snake: "Gebruik de pijltjestoetsen of knoppen. Eet de stippen en ontwijk jezelf en de rand.",
   tetris: "Pijltjes links/rechts om te bewegen, omhoog om te draaien en omlaag om te zakken. Vul een rij."
 };
+const BACKGROUND_DELAY_MS = 12_000;
 let nextGameIndex = 0;
 
 export function AccountManagerLoadingGame() {
@@ -21,6 +22,7 @@ export function AccountManagerLoadingGame() {
   const [playing, setPlaying] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [limited, setLimited] = useState(false);
+  const [showBackground, setShowBackground] = useState(false);
   const instructionsId = useId();
 
   function publish(next: LoadingGame) { engine.current = next; setGame(next); }
@@ -44,8 +46,10 @@ export function AccountManagerLoadingGame() {
 
   useEffect(() => {
     if (startedAt === null) return;
-    const timeout = window.setTimeout(() => setLimited(true), Math.max(0, LOADING_GAME_PLAY_MS - (performance.now() - startedAt)));
-    return () => window.clearTimeout(timeout);
+    const elapsed = performance.now() - startedAt;
+    const backgroundTimeout = window.setTimeout(() => setShowBackground(true), Math.max(0, BACKGROUND_DELAY_MS - elapsed));
+    const timeout = window.setTimeout(() => setLimited(true), Math.max(0, LOADING_GAME_PLAY_MS - elapsed));
+    return () => { window.clearTimeout(backgroundTimeout); window.clearTimeout(timeout); };
   }, [startedAt]);
 
   useEffect(() => {
@@ -97,9 +101,10 @@ export function AccountManagerLoadingGame() {
       <strong>stop met spelen en werk door</strong>
       <p>De gegevens worden verder geladen.</p>
     </div> : <>
-      <div ref={surface} className="loading-game-surface" tabIndex={ready ? 0 : -1} role={playing ? "group" : "button"} aria-disabled={!ready}
+      <div ref={surface} className={`loading-game-surface${showBackground ? " loading-game-surface--photo" : ""}`} tabIndex={ready ? 0 : -1} role={playing ? "group" : "button"} aria-disabled={!ready}
         aria-label={`${titles[game.kind]} speelveld`} aria-describedby={instructionsId}
         onClick={() => { if (!ready) return; if (!playing) start(); else if (game.kind === "flappy") control("action"); }}>
+        <img className="loading-game-background" src="/loading-games/after-12-seconds.png" alt="" aria-hidden="true" draggable={false} decoding="async" />
         <GameBoard game={game} />
         {!playing ? <div className="loading-game-board-caption" aria-hidden="true">{!ready ? "Spel wordt klaargezet…" : game.over ? "Game over" : "Klik of tik om te starten"}</div> : null}
       </div>
