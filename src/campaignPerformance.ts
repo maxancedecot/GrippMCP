@@ -173,16 +173,22 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
     return token.access_token;
   })();
   const conversionRows = cvrOverviewRowsFromLinks(dashboard.cvrLinks);
-  const ghlProjects = await getGhlProjectConversions(dashboard, { env, ghlCall: options.ghlCall, mappings,
+  // CRM may wait for rate limits; advertising requests must use their own budget
+  // and start immediately rather than spending it on contact retrieval.
+  const ghlProjectsRequest = getGhlProjectConversions(dashboard, { env, ghlCall: options.ghlCall, mappings,
     crmMatches: options.crmMatches,
-    savedPages: projectMatches.flatMap((match) => match.sourcePaths.map((path) => ({ siteId: match.siteId, path }))) });
-  const rows: CampaignPerformanceRow[] = [];
+    savedPages: projectMatches.flatMap((match) => match.sourcePaths.map((path) => ({ siteId: match.siteId, path }))) })
+    .catch((error: unknown): ProjectCrmConversions => ({
+      counts: new Map(), errors: new Set(sites.map((site) => site.id)), configuredSites: new Set(sites.map((site) => site.id)),
+      errorMessages: new Map(sites.map((site) => [site.id, crmConversionErrorMessage(error)])), unmatchedSites: new Set()
+    }));
+  const advertisingRows: Omit<CampaignPerformanceRow, "leads" | "appointments">[] = [];
   const linkCtrRequests = new Map<string, Promise<CampaignSource<LinkCtrPerformance>>>();
   const destinationRequests = new Map<string, Promise<CampaignSource<CampaignDestinations>>>();
   const facebookRequests = new Map<string, Promise<CampaignSource<AdPerformance>>>();
   // A website can receive campaigns from several accessible Meta accounts.
   for (let offset = 0; offset < sites.length; offset += 3) {
-    rows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
+    advertisingRows.push(...await Promise.all(sites.slice(offset, offset + 3).map(async (site) => {
       const mapping = mappings.find((item) => item.siteId === site.id);
       const scopes = new Map<string, FacebookAccountScope>();
       if (mapping?.facebook) scopes.set(mapping.facebook.adAccountId, { ...mapping.facebook, requiredCampaignIds: mapping.facebook.campaignIds });
@@ -218,12 +224,15 @@ export async function getCampaignPerformance(dashboard: SiteAnalyticsDashboardDa
       } : googleDestinations;
       return {
         siteId: site.id, name: site.name, url: site.url, google, googleCampaignPages, ...facebookAccounts[0], facebookAccounts,
-        leads: loadGhlConversions(site.id, "leads"), appointments: loadGhlConversions(site.id, "appointments"),
         websiteCvr: site.cvrLinkCount > 0 && site.cvrSourceVisitors > 0 ? site.conversionRatePercent : null,
         websiteVisitors: site.cvrSourceVisitors, websiteConversions: site.cvrConversionVisitors
       };
     })));
   }
+  const ghlProjects = await ghlProjectsRequest;
+  const rows: CampaignPerformanceRow[] = advertisingRows.map((row) => ({
+    ...row, leads: loadGhlConversions(row.siteId, "leads"), appointments: loadGhlConversions(row.siteId, "appointments")
+  }));
   // Use the same campaign measurements for website rows and totals. Deduplicate
   // campaign IDs across overlapping website mappings; never request account CTR.
   const facebookLinkCtr = summarizeLinkCtr(rows.flatMap((row) => facebookAccountSources(row).map((account) => account.facebookLinkCtr))

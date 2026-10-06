@@ -1600,3 +1600,71 @@ test("websites sharing a CRM location reuse in-flight pipeline and contact reads
   assert.deepEqual(result.projects.map((project) => [project.siteId, project.leads, project.appointments, project.crmState]),
     [["site-a", 1, 0, "connected"], ["site-b", 1, 0, "connected"]]);
 });
+
+test("slow or unavailable CRM cannot expire Google and Facebook requests before they run", async (t) => {
+  const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+  let adsBudget = new AbortController();
+  t.mock.method(AbortSignal, "timeout", (ms: number) => ms === 45_000 ? adsBudget.signal : originalTimeout(ms));
+  for (const crmFails of [false, true]) {
+    adsBudget = new AbortController();
+    let releaseCrm!: () => void;
+    const crmWait = new Promise<void>((resolve) => { releaseCrm = resolve; });
+    const data = dashboard();
+    data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 99)];
+    const adsRequests: string[] = [];
+    const operation = getCampaignPerformance(data, {
+      requireCrmConversions: true,
+      env: environment([{ siteId: "site-a", google: { customerId: "123", campaignIds: ["1"] }, facebook: { adAccountId: "456", campaignIds: ["2"] },
+        ghl: { locationId: "location", installId: "install", pipelineProjects: [{ pipelineId: "project", sourcePath: "/project" }] } }],
+        { ...googleCredentials, META_ADS_ACCESS_TOKEN: "test-meta-token" }),
+      projectMatches: [
+        { channel: "google", siteId: "site-a", accountId: "123", campaignId: "1", sourcePaths: ["/project"] },
+        { channel: "facebook", siteId: "site-a", accountId: "456", campaignId: "2", sourcePaths: ["/project"] }
+      ],
+      ghlCall: async ({ path }) => {
+        if (path.endsWith("/pipelines")) {
+          await crmWait;
+          if (crmFails) throw new Error("private-crm-failure");
+          return { pipelines: [{ id: "project", name: "Project" }] };
+        }
+        if (path.startsWith("/contacts/")) return { contact: { id: "lead", tags: ["ledoux", "brochure"], dateAdded: "2026-09-10T12:00:00Z" } };
+        return { opportunities: [{ id: "opportunity", contactId: "lead", pipelineId: "project" }] };
+      },
+      fetchImpl: async (input, init) => {
+        init?.signal?.throwIfAborted();
+        const url = new URL(String(input)); adsRequests.push(url.hostname);
+        if (url.hostname === "oauth2.googleapis.com") return response({ access_token: "test-google-access" });
+        if (url.hostname === "googleads.googleapis.com") {
+          const query = JSON.parse(String(init?.body)).query as string;
+          if (query.includes("FROM customer")) return response([{ results: [{ customer: { currencyCode: "EUR" } }] }]);
+          if (query.includes("primary_status")) return response([{ results: [{ campaign: { id: "1", name: "Google project", status: "ENABLED", primaryStatus: "ELIGIBLE" } }] }]);
+          return response([{ results: [{ campaign: { id: "1", name: "Google project" }, metrics: { clicks: "4", impressions: "100", costMicros: "5000000" } }] }]);
+        }
+        assert.equal(url.hostname, "graph.facebook.com");
+        if (isLinkCtrRequest(url)) return response({ data: [{ campaign_id: "2", campaign_name: "Ledoux Facebook", inline_link_click_ctr: "3", impressions: "100" }] });
+        if (url.pathname.endsWith("/campaigns")) return response({ data: [{ id: "2", name: "Ledoux Facebook", effective_status: "ACTIVE" }] });
+        if (url.pathname.endsWith("/insights")) return response({ data: [{ campaign_id: "2", campaign_name: "Ledoux Facebook", clicks: "3", impressions: "100", spend: "10" }] });
+        return response({ currency: "EUR", account_status: 1 });
+      }
+    });
+    try {
+      // Let ads finish while CRM remains blocked, then simulate its 45-second wait.
+      await new Promise((resolve) => setImmediate(resolve));
+      const providersBeforeCrmFinishes = new Set(adsRequests);
+      adsBudget.abort(new DOMException("Advertentieperiode verstreken", "TimeoutError"));
+      releaseCrm();
+      const result = await operation;
+      assert.ok(providersBeforeCrmFinishes.has("googleads.googleapis.com") && providersBeforeCrmFinishes.has("graph.facebook.com"),
+        "Both advertising providers must run while CRM is still waiting");
+      assert.equal(result.rows[0]?.google.state, "connected");
+      assert.equal(result.rows[0]?.facebook.state, "connected");
+      assert.equal(result.rows[0]?.facebookLinkCtr.state, "connected");
+      const project = result.projects.find((project) => project.sourcePath === "/project")!;
+      assert.deepEqual(project.googleCampaigns.map(({ spend, live, ctr }) => [spend, live, ctr]), [[5, true, 4]]);
+      assert.deepEqual(project.campaigns.map(({ spend, live, ctr }) => [spend, live, ctr]), [[10, true, 3]]);
+      assert.equal(project.leads, crmFails ? null : 1);
+      assert.equal(project.crmState, crmFails ? "unavailable" : "connected");
+      assert.doesNotMatch(JSON.stringify(result), /private-crm-failure|test-meta-token|test-google-access/);
+    } finally { releaseCrm(); await operation; }
+  }
+});
