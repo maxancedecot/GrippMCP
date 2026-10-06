@@ -90,6 +90,19 @@ export type CampaignProjectRow = {
   googleState: CampaignSource<unknown>["state"];
   googleCampaigns: GoogleProjectCampaign[];
 };
+function isProjectPagePath(path: string): boolean {
+  return typeof path === "string" && path.trim().startsWith("/") && !path.trim().startsWith("//") && !path.includes("\\") && !isExcludedAnalyticsLink(path);
+}
+
+export function hasProjectPage(project: Pick<CampaignProjectRow, "sourcePath" | "url">): boolean {
+  if (!isProjectPagePath(project.sourcePath) || !project.url?.trim()) return false;
+  try {
+    const url = new URL(project.url);
+    return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password && !isExcludedAnalyticsLink(project.url)
+      && normalizeProjectPath(url.pathname + url.search) === normalizeProjectPath(project.sourcePath);
+  } catch { return false; }
+}
+
 export type UnmatchedProjectCampaign = { channel: "facebook" | "google"; siteId: string; siteName: string; accountId?: string; campaignId: string; campaignName: string };
 
 export type ProjectCrmConversions = {
@@ -110,7 +123,8 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     const groupForPath = (path: string) => dashboardGroups.find((group) => group.sourcePaths.includes(normalizeProjectPath(path)))
       ?? projectPageGroup(site.url, path);
     const projectPath = (path: string) => groupForPath(path)?.sourcePath ?? normalizeProjectPath(path);
-    const ensureProject = (sourcePath: string, title = ""): CampaignProjectRow => {
+    const ensureProject = (sourcePath: string, title = ""): CampaignProjectRow | null => {
+      if (!isProjectPagePath(sourcePath)) return null;
       const group = groupForPath(sourcePath);
       const path = projectPath(sourcePath);
       const key = `${site.siteId}:${path}`;
@@ -148,20 +162,24 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     for (const group of dashboard.projectPageGroups?.filter((group) => group.siteId === site.siteId) ?? []) ensureProject(group.sourcePath);
     for (const project of conversions.filter((row) => row.siteId === site.siteId && !isExcludedAnalyticsLink(row.sourcePath))) ensureProject(project.sourcePath, project.sourceTitle);
     for (const key of crm?.counts.keys() ?? []) {
-      if (key.startsWith(`${site.siteId}:`)) ensureProject(key.slice(site.siteId.length + 1));
+      if (!key.startsWith(`${site.siteId}:`)) continue;
+      const path = key.slice(site.siteId.length + 1);
+      // A pipeline alone must never invent a project page or a fallback homepage.
+      if (isProjectPagePath(path) && dashboard.cvrPageCandidates.some((page) => page.siteId === site.siteId && projectPath(page.path) === projectPath(path))) ensureProject(path);
     }
     // Keep saved matches for stopped campaigns so their period spend and current
     // status remain visible. CTR follows the selected reporting period.
     for (const account of (site.facebookAccounts ?? [site])) {
       for (const campaign of account.facebook.data?.campaigns ?? []) {
         const pages = account.facebookCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
-        const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [projectPath(page.path), page])).values()];
+        const uniquePages = [...new Map(pages.filter((page) => hasProjectPage({ sourcePath: page.path, url: page.url })).map((page) => [projectPath(page.path), page])).values()];
         if (uniquePages.length === 0) {
           if (campaign.live === true || campaign.impressions > 0 || campaign.spend > 0) unmatchedCampaigns.push({ channel: "facebook", accountId: account.facebook.data?.accountId, siteId: site.siteId, siteName: site.name, campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
           continue;
         }
         for (const page of uniquePages) {
           const project = ensureProject(page.path, page.title);
+          if (!project) continue;
           const accountId = account.facebook.data!.accountId;
           if (project.campaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
           const metric = account.facebookLinkCtr.data?.campaigns.find((metric) => metric.id === campaign.id);
@@ -174,7 +192,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     }
     for (const campaign of site.google.data?.campaigns ?? []) {
       const pages = site.googleCampaignPages.data?.find((match) => match.campaignId === campaign.id)?.pages ?? [];
-      const uniquePages = [...new Map(pages.filter((page) => !isExcludedAnalyticsLink(page.url) && !isExcludedAnalyticsLink(page.path)).map((page) => [projectPath(page.path), page])).values()];
+      const uniquePages = [...new Map(pages.filter((page) => hasProjectPage({ sourcePath: page.path, url: page.url })).map((page) => [projectPath(page.path), page])).values()];
       if (uniquePages.length === 0) {
         if (campaign.live === true || campaign.spend > 0) unmatchedCampaigns.push({ channel: "google", siteId: site.siteId, siteName: site.name,
           campaignId: campaign.id, campaignName: campaign.name ?? campaign.id });
@@ -182,6 +200,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
       }
       for (const page of uniquePages) {
         const project = ensureProject(page.path, page.title);
+        if (!project) continue;
         const accountId = site.google.data!.accountId;
         if (project.googleCampaigns.some((item) => item.accountId === accountId && item.id === campaign.id)) continue;
         project.googleCampaigns.push({ id: campaign.id, accountId, name: campaign.name ?? campaign.id,
@@ -211,7 +230,7 @@ export function campaignProjectOverview(dashboard: SiteAnalyticsDashboardData, s
     project.hasConversionMapping = !!counts && project.leads !== null && project.appointments !== null;
   }
   return {
-    projects: [...projects.values()].sort((a, b) => a.siteName.localeCompare(b.siteName) || a.title.localeCompare(b.title)),
+    projects: [...projects.values()].filter(hasProjectPage).sort((a, b) => a.siteName.localeCompare(b.siteName) || a.title.localeCompare(b.title)),
     unmatchedCampaigns
   };
 }

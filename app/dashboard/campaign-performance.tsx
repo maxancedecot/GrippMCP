@@ -5,7 +5,7 @@ import {
 import type { MetaAccountSync } from "../../src/metaAccountDiscovery.js";
 import type { SiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { Info } from "lucide-react";
-import { summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
+import { hasProjectPage, summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type CampaignProjectRow, type UnmatchedProjectCampaign } from "../../src/campaignProjects.js";
 import { liveSortValue } from "../../src/tableSorting.js";
 import { CampaignProjectTable } from "./campaign-project-table.js";
 import { getProjectPageManagementData, projectPageKey, type ManagedProjectPage } from "../../src/projectPageManagement.js";
@@ -46,7 +46,7 @@ export async function loadCampaignPerformanceBaseData({ dashboard, discoverySite
 export type CampaignPerformanceBaseData = Awaited<ReturnType<typeof loadCampaignPerformanceBaseData>>;
 
 export function filterCampaignPerformanceViewData(base: CampaignPerformanceBaseData, selectedAccountManager?: string, syncHref?: string) {
-  const filtered = filterCampaignProjectsByManager(base.projects, base.accountManagers, selectedAccountManager);
+  const filtered = filterCampaignProjectsByManager(base.projects.filter(hasProjectPage), base.accountManagers, selectedAccountManager);
   const filteredSiteIds = new Set(filtered.projects.map((project) => project.siteId));
   const filteredRows = filtered.selectedManager ? base.rows.filter((row) => filteredSiteIds.has(row.siteId)) : base.rows;
   const filteredMetaAccountIds = new Set(filtered.projects.flatMap((project) => project.campaigns.map((campaign) => `act_${campaign.accountId}`)));

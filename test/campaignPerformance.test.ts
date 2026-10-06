@@ -5,7 +5,7 @@ import {
   type AdPerformance, type CampaignSiteMapping, type CampaignSource
 } from "../src/campaignPerformance.js";
 import { cvrOverviewRowsFromLinks } from "../src/siteAnalyticsConversions.js";
-import { campaignProjectOverview, parseCampaignProjectMatches, summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type ProjectCampaign, type GoogleProjectCampaign } from "../src/campaignProjects.js";
+import { campaignProjectOverview, hasProjectPage, parseCampaignProjectMatches, summarizeFacebookProjectCampaigns, summarizeGoogleProjectCampaigns, type ProjectCampaign, type GoogleProjectCampaign } from "../src/campaignProjects.js";
 import type { SiteAnalyticsCvrLinkRow, SiteAnalyticsDashboardData } from "../src/siteAnalytics.js";
 import type { CrmPipelineMatch } from "../src/crmPipelineManagement.js";
 
@@ -1484,4 +1484,38 @@ test("a manual Facebook assignment overrides a creative's other website without 
   assert.equal(result.facebookLinkCtr.ctr, 2);
   assert.deepEqual(summarizeAds(result.rows.flatMap((row) => row.facebookAccounts!.map((account) => account.facebook))).spend,
     [{ currency: "EUR", amount: 5 }]);
+});
+
+
+test("project performance rejects rows without a concrete project path and corresponding URL", () => {
+  assert.equal(hasProjectPage({ sourcePath: "/", url: "https://example.test/" }), true);
+  assert.equal(hasProjectPage({ sourcePath: "/project/alpha/", url: "https://example.test/project/alpha?utm_source=google" }), true);
+  for (const project of [
+    { sourcePath: "", url: "https://example.test/" },
+    { sourcePath: " ", url: "https://example.test/" },
+    { sourcePath: "/alpha", url: "" },
+    { sourcePath: "/alpha", url: "/alpha" },
+    { sourcePath: "/alpha", url: "https://example.test/beta" },
+    { sourcePath: "//example.test/alpha", url: "https://example.test/alpha" },
+    { sourcePath: "https://example.test/alpha", url: "https://example.test/alpha" },
+    { sourcePath: "/alpha", url: "javascript:alert(1)" },
+    { sourcePath: "/?preview=1", url: "https://example.test/?preview=1" }
+  ]) assert.equal(hasProjectPage(project), false, JSON.stringify(project));
+});
+
+test("CRM results cannot invent project rows while known pages with zero visitors remain visible", async () => {
+  const data = dashboard();
+  data.cvrPageCandidates = [{ siteId: "site-a", siteName: "site-a", path: "/project/alpha", title: "Alpha", uniqueVisitors: 0, pageViews: 0 }];
+  const base = await getCampaignPerformance(data, { env: environment([]) });
+  const crm = {
+    counts: new Map([
+      ["site-a:", { leads: 20, appointments: 10 }],
+      ["site-a:/missing-project", { leads: 30, appointments: 15 }],
+      ["site-a:/project/alpha", { leads: 2, appointments: 1 }]
+    ]), errors: new Set<string>(), configuredSites: new Set(["site-a"]), unmatchedSites: new Set<string>()
+  };
+  const result = campaignProjectOverview(data, base.rows, crm, true);
+  assert.deepEqual(result.projects.map((project) => [project.sourcePath, project.visitors, project.leads, project.appointments]), [["/project/alpha", 0, 2, 1]]);
+  const empty = campaignProjectOverview(dashboard(), base.rows, crm, true);
+  assert.deepEqual(empty.projects, []);
 });
