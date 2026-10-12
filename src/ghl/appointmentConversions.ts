@@ -76,7 +76,7 @@ export function classifyGhlContactTags(tags: readonly string[]): "lead" | "appoi
   const words = new Set(tags.flatMap((tag) => tag.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)));
   if (!words.has("ledoux")) return null;
-  if (words.has("afspraak")) return "appointment";
+  if (words.has("afspraak") || words.has("appointment")) return "appointment";
   return words.has("brochure") || words.has("contact") ? "lead" : null;
 }
 

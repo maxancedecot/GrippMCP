@@ -20,12 +20,30 @@ test("contact tags require Ledoux, recognize brochure and contact leads, and giv
   for (const tags of [["ledoux", "brochure"], [" Ledoux ", "CONTACT"], ["ledoux_brochure"], ["LÉDOUX - contact"], ["ledoux", "brochure", "contact"]]) {
     assert.equal(classifyGhlContactTags(tags), "lead");
   }
-  for (const tags of [["ledoux", "afspraak"], ["ledoux-afspraak"], ["ledoux", "afspraak", "brochure", "contact"]]) {
+  for (const tags of [
+    ["ledoux", "afspraak"], ["ledoux-afspraak"], ["ledoux", "afspraak", "brochure", "contact"],
+    ["ledoux", "appointment"], ["LEDOUX_APPOINTMENT"], ["ledoux", "APPOINTMENT", "brochure", "contact"],
+    ["ledoux", "afspraak aangevraagd"], ["ledoux-afspraak-aangevraagd"], ["ledoux", "afspraak aangevraagd", "brochure", "contact"]
+  ]) {
     assert.equal(classifyGhlContactTags(tags), "appointment");
   }
-  for (const tags of [[], ["ledoux"], ["brochure"], ["afspraak"], ["contact"], ["notledoux", "contact"], ["ledoux", "contactpersoon"], ["ledoux", "brochures"]]) {
+  for (const tags of [[], ["ledoux"], ["brochure"], ["afspraak"], ["appointment"], ["afspraak aangevraagd"], ["contact"], ["notledoux", "contact"], ["ledoux", "contactpersoon"], ["ledoux", "brochures"], ["ledoux", "appointments"]]) {
     assert.equal(classifyGhlContactTags(tags), null);
   }
+});
+
+test("appointment and requested appointment tags count unique contacts as appointments with priority over leads", async () => {
+  const contacts = [
+    contact("english", ["ledoux", "appointment", "brochure"]),
+    contact("requested", ["ledoux", "afspraak aangevraagd", "contact"]),
+    contact("both", ["ledoux", "appointment", "afspraak aangevraagd", "afspraak"]),
+    contact("unrelated", ["appointment", "afspraak aangevraagd"])
+  ];
+  const result = await ghlConversionsByPipeline(config, period, read([
+    ...contacts.map(({ id }) => opportunity(id)), opportunity("duplicate", "both")
+  ], contacts));
+  assert.deepEqual(counts(result), [[0, 3]]);
+  assert.deepEqual(result[0]?.appointmentContactIds, ["english", "requested", "both"]);
 });
 
 test("contact details override embedded tags and pipeline stage; each contact counts once", async () => {
