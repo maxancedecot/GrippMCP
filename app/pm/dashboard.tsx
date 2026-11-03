@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import type { GrippClient } from "../../src/grippClient.js";
-import { signedGrippAgencyInvoiceRevenueAmount, signedGrippInvoiceRevenueAmount } from "../../src/grippInvoiceRevenue.js";
+import { signedGrippAgencyInvoiceRevenueAmount, signedGrippInvoiceLineRevenueAmount, signedGrippInvoiceRevenueAmount } from "../../src/grippInvoiceRevenue.js";
 import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
 import { demoStripeCrmRevenue, fetchStripeCrmRevenueForPeriod, unavailableStripeCrmRevenue, type StripeCrmRevenue } from "../../src/stripeRevenue.js";
 import type { JsonValue } from "../../src/types.js";
@@ -165,7 +165,7 @@ type PmDashboardData = {
   employeeBillabilitySummary: BillabilitySummary;
   source: DashboardSource;
   revenue: number;
-  agencyRevenueExcludingOfficeCenter: number | null;
+  agencyRevenueExcludingExternalCosts: number | null;
   crmRevenue: StripeCrmRevenue;
   loggedHours: number;
   billableHours: number;
@@ -215,9 +215,9 @@ const MAX_HOUR_PAGES = 160;
 const MAX_EMPLOYEE_PAGES = 20;
 const MAX_ABSENCE_LINE_PAGES = 80;
 const MAX_CALENDAR_ITEM_PAGES = 160;
-const INVOICE_REVENUE_SERIES_LABEL = "Agency Omzet";
+const INVOICE_REVENUE_SERIES_LABEL = "Gefactureerde omzet";
 const CRM_REVENUE_SERIES_LABEL = "CRM omzet";
-const AGENCY_REVENUE_WITH_CRM_SERIES_LABEL = "Agency Omzet incl. CRM";
+const AGENCY_REVENUE_WITH_CRM_SERIES_LABEL = "Gefactureerde omzet incl. CRM";
 const REVENUE_PER_BILLABLE_HOUR_GOAL = 135;
 const TAGGED_REVENUE_CATEGORIES = [
   { key: "project", label: "Project" },
@@ -362,10 +362,11 @@ export default async function PmDashboard({ searchParams, lite = false }: {
   const agencyCostProfitTotals = buildRevenueCostProfitTotals(dashboard.agencyCostProfitByMonth);
   // The dashboard-period employee cost already excludes overhead employees.
   const employeeCostExcludingOverhead = dashboard.employeeCost;
-  const agencyResult = dashboard.agencyRevenueExcludingOfficeCenter === null
+  const agencyRevenue = dashboard.agencyRevenueExcludingExternalCosts;
+  const agencyRevenueCostRatio = agencyRevenue === null || employeeCostExcludingOverhead === 0
     ? null
-    : (dashboard.agencyRevenueExcludingOfficeCenter + dashboard.crmRevenue.amount - employeeCostExcludingOverhead) * 3;
-  const agencyResultLabel = agencyResult === null ? "—" : formatCurrency(agencyResult);
+    : agencyRevenue / employeeCostExcludingOverhead;
+  const agencyRevenueCostRatioLabel = agencyRevenueCostRatio === null ? "—" : `${formatPercent(agencyRevenueCostRatio)}×`;
 
   return (
     <DashboardFrame showTopMenu={!lite}>
@@ -387,18 +388,18 @@ export default async function PmDashboard({ searchParams, lite = false }: {
       {dashboard.source.message ? <p className={dataNoticeClassName(dashboard.source)}>{dashboard.source.message}</p> : null}
 
       <section className={`metric-grid pm-metric-grid${lite ? " pm-metric-grid--lite" : ""}`} aria-label="Kerncijfers management">
-        <MetricCard href="#pm-revenue-detail" label="Agency Omzet" value={formatCurrency(dashboard.revenue)} detail="Verkoopfacturen min creditnota's, excl. btw netto" tone="good" />
+        <MetricCard href="#pm-revenue-detail" label="Agency Omzet" value={agencyRevenue === null ? "—" : formatCurrency(agencyRevenue)} detail="Na creditfacturen; excl. CRM, Office Center, budgetten, hosting, drukwerk en doorfacturatie" tone={agencyRevenue === null ? "neutral" : "good"} />
         <MetricCard href="#pm-revenue-detail" label="CRM omzet" value={formatCurrency(dashboard.crmRevenue.amount)} detail={crmRevenueMetricDetail(dashboard.crmRevenue)} tone="neutral" />
         {!lite ? <MetricCard
           href={pmRevenueTabHref(params, "profit", basePath)}
-          label="Agency resultaat"
-          value={agencyResultLabel}
-          detail={agencyResult === null ? "Klik op Bijwerken om Office Center-diensten uit te sluiten" : "(Agency omzet excl. Office Center-diensten + CRM omzet − (medewerkerskost − overhead)) × 3"}
-          tone={agencyResult === null ? "neutral" : agencyResult < 0 ? "warning" : "good"}
+          label="Agency omzet / medewerkerskost"
+          value={agencyRevenueCostRatioLabel}
+          detail={agencyRevenue === null ? "Klik op Bijwerken om de agencyomzet te berekenen" : employeeCostExcludingOverhead === 0 ? "Niet berekenbaar zonder medewerkerskost" : "Agency omzet / medewerkerskost zonder overhead"}
+          tone={agencyRevenueCostRatio === null ? "neutral" : agencyRevenueCostRatio < 1 ? "warning" : "good"}
         /> : null}
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
-        {!lite ? <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Agency Omzet gedeeld door agenda-uren zonder overhead" tone="neutral" /> : null}
-        <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Agency Omzet gedeeld door billable uren" tone="warning" />
+        {!lite ? <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Gefactureerde omzet gedeeld door agenda-uren zonder overhead" tone="neutral" /> : null}
+        <MetricCard href="#pm-revenue-per-billable-hour-detail" label="Omzet / billable uur" value={formatCurrencyPerHour(dashboard.revenuePerBillableHour)} detail="Gefactureerde omzet gedeeld door billable uren" tone="warning" />
       </section>
 
       <section className="panel pm-detail-panel" id="pm-billability-detail" tabIndex={-1}>
@@ -566,8 +567,8 @@ export default async function PmDashboard({ searchParams, lite = false }: {
                 <span className={`panel-total ${agencyCostProfitTotals.profit < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
                   Winst {formatCurrency(agencyCostProfitTotals.profit)}
                 </span>
-                <span className={`panel-total ${agencyResult === null ? "" : agencyResult < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
-                  Agency resultaat {agencyResultLabel}
+                <span className={`panel-total ${agencyRevenueCostRatio === null ? "" : agencyRevenueCostRatio < 1 ? "panel-total--warning" : "panel-total--profit"}`}>
+                  Agency omzet / medewerkerskost {agencyRevenueCostRatioLabel}
                 </span>
               </>
             ) : (
@@ -1466,7 +1467,8 @@ async function loadFreshPmDashboardData(
     fetchAbsenceRequestsById(client, absenceRequestLines)
   );
   const scopedAbsenceRequestLines = absenceRequestLinesForEmployeeScope(absenceRequestLines, absenceRequestsById, employeeScope);
-  const invoiceLines = await optionalData(issues, "factuurregels", [], () => fetchInvoiceLinesForInvoices(client, invoices, period));
+  const loadedInvoiceLines = await optionalData<JsonRecord[] | null>(issues, "factuurregels", null, () => fetchInvoiceLinesForInvoices(client, invoices, period));
+  const invoiceLines = loadedInvoiceLines ?? [];
   const billabilitySources = await fetchBillabilitySources(client, scopedHours, issues, offerProjectLineIdsFromInvoiceLines(invoiceLines));
   billabilitySources.projectTagCategories = await optionalData(issues, "opdrachttags", new Map<number, TaggedRevenueCategory>(), () =>
     fetchProjectTagCategories(
@@ -1543,7 +1545,7 @@ async function loadFreshPmDashboardData(
     },
     employeePeriodCalendarItems,
     employeeBillabilityOverheadSources,
-    invoiceLines
+    loadedInvoiceLines
   );
 
   return { dashboard, issues };
@@ -1683,7 +1685,7 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData, cacheVers
 
   return {
     ...dashboard,
-    agencyRevenueExcludingOfficeCenter: numberFrom((dashboard as JsonRecord).agencyRevenueExcludingOfficeCenter),
+    agencyRevenueExcludingExternalCosts: numberFrom((dashboard as JsonRecord).agencyRevenueExcludingExternalCosts),
     employeeCost,
     employeeBillability: rows,
     employeeBillabilityOverhead,
@@ -2594,7 +2596,13 @@ async function fetchInvoiceLinesForInvoices(client: GrippClient, invoices: JsonR
     );
   }
 
-  return mergeInvoiceLines(embedded.lines, fetchedLines);
+  const lines = mergeInvoiceLines(embedded.lines, fetchedLines);
+  const products = await fetchRecordsByIds(client, "product", uniqueRelationIds(lines, "product"));
+  const productsById = new Map(products.map((product) => [idFrom(readField(product, "id")), product]));
+  return lines.map((line) => {
+    const product = productsById.get(relationId(line, "product"));
+    return product ? { ...line, product } : line;
+  });
 }
 
 async function fetchProjectTagCategories(client: GrippClient, projectIds: number[], seedProjectRecords: JsonRecord[] = []) {
@@ -3195,16 +3203,26 @@ function buildPmDashboardData(
   employeeBillabilityCapacitySources: CapacitySources = capacitySources,
   employeeBillabilityCalendarItems: JsonRecord[] = calendarItems,
   employeeBillabilityOverheadSources: EmployeeBillabilityOverheadSources | null = null,
-  invoiceLines: JsonRecord[] = []
+  invoiceLines: JsonRecord[] | null = []
 ): PmDashboardData {
   let revenue = 0;
-  let agencyRevenueExcludingOfficeCenter = 0;
+  let agencyRevenueExcludingExternalCosts: number | null = 0;
   let invoiceCount = 0;
   let loggedHours = 0;
   let billableHours = 0;
   let hourCount = 0;
   const revenueByMonth = new Map<string, number>();
   const billableHoursByMonth = new Map<string, number>();
+  const invoiceLineRows = invoiceLines ?? [];
+  const linesByInvoiceId = new Map<number, JsonRecord[]>();
+  for (const line of invoiceLineRows) {
+    const invoiceId = relationId(line, "invoice");
+    if (invoiceId !== null) {
+      const lines = linesByInvoiceId.get(invoiceId) ?? [];
+      lines.push(line);
+      linesByInvoiceId.set(invoiceId, lines);
+    }
+  }
 
   for (const invoice of invoices) {
     const revenueEntry = invoiceRevenueEntry(invoice, period);
@@ -3213,7 +3231,15 @@ function buildPmDashboardData(
     }
 
     revenue += revenueEntry.amount;
-    agencyRevenueExcludingOfficeCenter += signedGrippAgencyInvoiceRevenueAmount(invoice, revenueEntry.amount);
+    const invoiceId = idFrom(readField(invoice, "id"));
+    const agencyRevenue = signedGrippAgencyInvoiceRevenueAmount(
+      invoice,
+      revenueEntry.amount,
+      invoiceId === null ? null : linesByInvoiceId.get(invoiceId) ?? null
+    );
+    agencyRevenueExcludingExternalCosts = agencyRevenueExcludingExternalCosts === null || agencyRevenue === null
+      ? null
+      : agencyRevenueExcludingExternalCosts + agencyRevenue;
     invoiceCount += 1;
     revenueByMonth.set(revenueEntry.monthKey, (revenueByMonth.get(revenueEntry.monthKey) ?? 0) + revenueEntry.amount);
   }
@@ -3308,7 +3334,7 @@ function buildPmDashboardData(
   });
   const taggedRevenuePerBillableHourByMonth = buildTaggedRevenuePerBillableHourByMonth(
     invoices,
-    invoiceLines,
+    invoiceLineRows,
     hours,
     billabilitySources,
     period,
@@ -3321,7 +3347,7 @@ function buildPmDashboardData(
     employeeBillabilitySummary,
     source,
     revenue,
-    agencyRevenueExcludingOfficeCenter,
+    agencyRevenueExcludingExternalCosts,
     crmRevenue,
     loggedHours,
     billableHours,
@@ -3420,7 +3446,7 @@ function buildTaggedRevenuePerBillableHourByMonth(
     const reportDate = dateKeyFromValue(readField(invoice, "reportdate"));
     const monthKey = monthKeyForDateInPeriod(reportDate, period);
     const category = taggedRevenueCategoryForInvoiceLine(invoiceLine, billabilitySources);
-    const amount = invoiceLineRevenueAmount(invoiceLine, invoice);
+    const amount = signedGrippInvoiceLineRevenueAmount(invoiceLine, invoice);
     if (!monthKey || !category || amount === null) {
       continue;
     }
@@ -3500,37 +3526,6 @@ function invoiceRecordsById(invoices: JsonRecord[]) {
 function invoiceForInvoiceLine(invoiceLine: JsonRecord, invoicesById: Map<number, JsonRecord>) {
   const invoiceId = relationId(invoiceLine, "invoice");
   return invoiceId === null ? null : invoicesById.get(invoiceId) ?? null;
-}
-
-function invoiceLineRevenueAmount(invoiceLine: JsonRecord, invoice: JsonRecord) {
-  const directTotal = firstNumberFromFields(invoiceLine, ["totalincldiscountexclvat", "totalexclvat", "linetotalexclvat"]);
-  if (directTotal !== null) {
-    return signedGrippInvoiceRevenueAmount(invoice, directTotal);
-  }
-
-  const amount = numberFrom(readField(invoiceLine, "amount"));
-  const sellingPrice = numberFrom(readField(invoiceLine, "sellingprice"));
-  if (amount === null || sellingPrice === null) {
-    return null;
-  }
-
-  return signedGrippInvoiceRevenueAmount(invoice, amount * sellingPrice * invoiceLineDiscountMultiplier(invoiceLine));
-}
-
-function invoiceLineDiscountMultiplier(invoiceLine: JsonRecord) {
-  const discount = Math.max(0, numberFrom(readField(invoiceLine, "discount")) ?? 0);
-  return Math.max(0, 1 - discount / 100);
-}
-
-function firstNumberFromFields(record: JsonRecord, fields: string[]) {
-  for (const field of fields) {
-    const value = numberFrom(readField(record, field));
-    if (value !== null) {
-      return value;
-    }
-  }
-
-  return null;
 }
 
 function taggedRevenueCategoryForInvoiceLine(invoiceLine: JsonRecord, billabilitySources: BillabilitySources) {
@@ -5454,7 +5449,7 @@ function createDemoInvoiceLines(period: Period): JsonRecord[] {
     return [
       { id: index * 3 + 9200, invoice: invoiceId, project: 101, amount: 1, sellingprice: 8600 + (index % 3) * 400, discount: 0 },
       { id: index * 3 + 9201, invoice: invoiceId, project: 102, amount: 1, sellingprice: 6200 + (index % 4) * 350, discount: 0 },
-      { id: index * 3 + 9202, invoice: invoiceId, project: 103, amount: 1, sellingprice: 4200 + (index % 2) * 250, discount: 0 }
+      { id: index * 3 + 9202, invoice: invoiceId, project: 103, product: { name: index === 1 ? "Hosting & Domeinnaam" : "Agency diensten" }, amount: 1, sellingprice: 4200 + (index % 2) * 250, discount: 0 }
     ];
   });
 }

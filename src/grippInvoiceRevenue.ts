@@ -4,6 +4,11 @@ const CREDIT_INVOICE_FLAG_FIELDS = ["iscreditnote", "iscreditnota", "iscreditinv
 const CREDIT_INVOICE_TEXT_FIELDS = ["searchname", "subject", "description", "type", "kind", "invoicetype", "invoicekind", "factuurtype", "factuursoort", "phase", "fase"];
 const CREDIT_INVOICE_NEGATIVE_TOTAL_FIELDS = ["totalincldiscountexclvat", "totalincldiscountinclvat", "totalinclvat"];
 const CREDIT_INVOICE_TEXT_MARKERS = ["creditnota", "creditfactuur", "creditnote", "creditinvoice", "creditmemo", "creditering"];
+const AGENCY_EXTERNAL_COST_MARKERS = [
+  "advertentiebudget", "adbudget", "adsbudget", "mediabudget", "hosting", "domeinnaam",
+  "drukwerk", "drukkosten", "printkosten", "dibond", "doorfacturatie",
+  "ledouxcrmlicentie", "creditsledouxcrm"
+];
 
 export function signedGrippInvoiceRevenueAmount(invoice: GrippInvoiceRecord, amount: number) {
   if (amount < 0) {
@@ -13,11 +18,65 @@ export function signedGrippInvoiceRevenueAmount(invoice: GrippInvoiceRecord, amo
   return isGrippCreditInvoice(invoice) ? -Math.abs(amount) : amount;
 }
 
-export function signedGrippAgencyInvoiceRevenueAmount(invoice: GrippInvoiceRecord, amount: number) {
+export function signedGrippAgencyInvoiceRevenueAmount(
+  invoice: GrippInvoiceRecord,
+  amount: number,
+  invoiceLines: GrippInvoiceRecord[] | null = []
+): number | null {
   const isOfficeCenter = textValuesFrom(readField(invoice, "subject"))
     .some((subject) => normalizeComparisonValue(subject).includes("officecenter"));
+  if (isOfficeCenter) {
+    return 0;
+  }
+  if (invoiceLines === null) {
+    return null;
+  }
 
-  return isOfficeCenter ? 0 : signedGrippInvoiceRevenueAmount(invoice, amount);
+  let revenue = signedGrippInvoiceRevenueAmount(invoice, amount);
+  for (const line of invoiceLines) {
+    if (stringFrom(readField(line, "rowtype"))?.toUpperCase() === "GROUP") {
+      continue;
+    }
+
+    const productNames = textValuesFrom(readField(line, "product")).filter((value) => !/^\d+$/.test(value));
+    if (productNames.length === 0 && numberFrom(readField(line, "product")) !== null) {
+      return null;
+    }
+    const labels = [...productNames, ...textValuesFrom(readField(line, "searchname")), ...textValuesFrom(readField(line, "additionalsubject"))]
+      .map(normalizeComparisonValue);
+    if (labels.some((label) => /^(grafisch|graphisch)?ontwerp/.test(label))) {
+      continue;
+    }
+    const hasSpecificLabel = labels.some((label) => !["overig", "overige", "kosten"].includes(label));
+    const texts = hasSpecificLabel ? labels : [...labels, ...textValuesFrom(readField(line, "description")).map(normalizeComparisonValue)];
+    if (!texts.some((text) => AGENCY_EXTERNAL_COST_MARKERS.some((marker) => text.includes(marker)))) {
+      continue;
+    }
+
+    const excludedAmount = signedGrippInvoiceLineRevenueAmount(line, invoice);
+    if (excludedAmount === null) {
+      return null;
+    }
+    revenue -= excludedAmount;
+  }
+
+  return revenue;
+}
+
+export function signedGrippInvoiceLineRevenueAmount(line: GrippInvoiceRecord, invoice: GrippInvoiceRecord): number | null {
+  for (const field of ["totalincldiscountexclvat", "totalexclvat", "linetotalexclvat"]) {
+    const total = numberFrom(readField(line, field));
+    if (total !== null) {
+      return signedGrippInvoiceRevenueAmount(invoice, total);
+    }
+  }
+  const amount = numberFrom(readField(line, "amount"));
+  const sellingPrice = numberFrom(readField(line, "sellingprice"));
+  if (amount === null || sellingPrice === null) {
+    return null;
+  }
+  const discount = Math.max(0, numberFrom(readField(line, "discount")) ?? 0);
+  return signedGrippInvoiceRevenueAmount(invoice, amount * sellingPrice * Math.max(0, 1 - discount / 100));
 }
 
 export function isGrippCreditInvoice(invoice: GrippInvoiceRecord) {
@@ -90,7 +149,7 @@ function textValuesFrom(value: unknown): string[] {
   }
 
   return ["value", "rawValue", "rawvalue", "displayvalue", "displayValue", "label", "name", "searchname", "screenname"]
-    .map((key) => stringFrom(record[key]))
+    .map((key) => stringFrom(readField(record, key)))
     .filter((entry): entry is string => Boolean(entry));
 }
 
