@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation.js";
 import type { GrippClient } from "../../src/grippClient.js";
-import { signedGrippInvoiceRevenueAmount } from "../../src/grippInvoiceRevenue.js";
+import { signedGrippAgencyInvoiceRevenueAmount, signedGrippInvoiceRevenueAmount } from "../../src/grippInvoiceRevenue.js";
 import { readJsonCache, writeJsonCache } from "../../src/jsonCache.js";
 import { demoStripeCrmRevenue, fetchStripeCrmRevenueForPeriod, unavailableStripeCrmRevenue, type StripeCrmRevenue } from "../../src/stripeRevenue.js";
 import type { JsonValue } from "../../src/types.js";
@@ -165,6 +165,7 @@ type PmDashboardData = {
   employeeBillabilitySummary: BillabilitySummary;
   source: DashboardSource;
   revenue: number;
+  agencyRevenueExcludingOfficeCenter: number | null;
   crmRevenue: StripeCrmRevenue;
   loggedHours: number;
   billableHours: number;
@@ -359,14 +360,12 @@ export default async function PmDashboard({ searchParams, lite = false }: {
   const employeeBillabilityTotals = buildEmployeeBillabilityTableTotals(dashboard.employeeBillability, employeeBillabilityOverhead);
   const employeeBillabilityDisplayCount = dashboard.employeeBillability.length + (employeeBillabilityOverhead?.employeeCount ?? 0);
   const agencyCostProfitTotals = buildRevenueCostProfitTotals(dashboard.agencyCostProfitByMonth);
-  const revenueIncludingCrm = dashboard.revenue + dashboard.crmRevenue.amount;
   // The dashboard-period employee cost already excludes overhead employees.
   const employeeCostExcludingOverhead = dashboard.employeeCost;
-  const agencyCost = employeeCostExcludingOverhead * 3;
-  const profitPercentage = revenueIncludingCrm === 0
+  const agencyResult = dashboard.agencyRevenueExcludingOfficeCenter === null
     ? null
-    : ((revenueIncludingCrm - agencyCost) / revenueIncludingCrm) * 100;
-  const profitPercentageLabel = profitPercentage === null ? "—" : `${formatPercent(profitPercentage)}%`;
+    : (dashboard.agencyRevenueExcludingOfficeCenter - employeeCostExcludingOverhead) * 3;
+  const agencyResultLabel = agencyResult === null ? "—" : formatCurrency(agencyResult);
 
   return (
     <DashboardFrame showTopMenu={!lite}>
@@ -392,10 +391,10 @@ export default async function PmDashboard({ searchParams, lite = false }: {
         <MetricCard href="#pm-revenue-detail" label="CRM omzet" value={formatCurrency(dashboard.crmRevenue.amount)} detail={crmRevenueMetricDetail(dashboard.crmRevenue)} tone="neutral" />
         {!lite ? <MetricCard
           href={pmRevenueTabHref(params, "profit", basePath)}
-          label="Winstpercentage"
-          value={profitPercentageLabel}
-          detail={profitPercentage === null ? "Niet berekenbaar zonder omzet" : "(Omzet agency + CRM − agencykost) / omzet × 100. Agencykost = (kost medewerkers − overhead) × 3"}
-          tone={profitPercentage === null ? "neutral" : profitPercentage < 0 ? "warning" : "good"}
+          label="Agency resultaat"
+          value={agencyResultLabel}
+          detail={agencyResult === null ? "Klik op Bijwerken om Office Center-diensten uit te sluiten" : "(Agency omzet excl. Office Center-diensten − (medewerkerskost − overhead)) × 3"}
+          tone={agencyResult === null ? "neutral" : agencyResult < 0 ? "warning" : "good"}
         /> : null}
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
         {!lite ? <MetricCard label="Omzet / agenda-uur" value={formatCurrencyPerHour(dashboard.revenuePerCalendarItemHour)} detail="Agency Omzet gedeeld door agenda-uren zonder overhead" tone="neutral" /> : null}
@@ -567,8 +566,8 @@ export default async function PmDashboard({ searchParams, lite = false }: {
                 <span className={`panel-total ${agencyCostProfitTotals.profit < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
                   Winst {formatCurrency(agencyCostProfitTotals.profit)}
                 </span>
-                <span className={`panel-total ${profitPercentage === null ? "" : profitPercentage < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
-                  Winstpercentage {profitPercentageLabel}
+                <span className={`panel-total ${agencyResult === null ? "" : agencyResult < 0 ? "panel-total--warning" : "panel-total--profit"}`}>
+                  Agency resultaat {agencyResultLabel}
                 </span>
               </>
             ) : (
@@ -1684,6 +1683,7 @@ function dashboardWithEmployeeCostDefaults(dashboard: PmDashboardData, cacheVers
 
   return {
     ...dashboard,
+    agencyRevenueExcludingOfficeCenter: numberFrom((dashboard as JsonRecord).agencyRevenueExcludingOfficeCenter),
     employeeCost,
     employeeBillability: rows,
     employeeBillabilityOverhead,
@@ -3198,6 +3198,7 @@ function buildPmDashboardData(
   invoiceLines: JsonRecord[] = []
 ): PmDashboardData {
   let revenue = 0;
+  let agencyRevenueExcludingOfficeCenter = 0;
   let invoiceCount = 0;
   let loggedHours = 0;
   let billableHours = 0;
@@ -3212,6 +3213,7 @@ function buildPmDashboardData(
     }
 
     revenue += revenueEntry.amount;
+    agencyRevenueExcludingOfficeCenter += signedGrippAgencyInvoiceRevenueAmount(invoice, revenueEntry.amount);
     invoiceCount += 1;
     revenueByMonth.set(revenueEntry.monthKey, (revenueByMonth.get(revenueEntry.monthKey) ?? 0) + revenueEntry.amount);
   }
@@ -3319,6 +3321,7 @@ function buildPmDashboardData(
     employeeBillabilitySummary,
     source,
     revenue,
+    agencyRevenueExcludingOfficeCenter,
     crmRevenue,
     loggedHours,
     billableHours,
@@ -5440,6 +5443,7 @@ function createDemoInvoices(period: Period): JsonRecord[] {
     id: 9000 + index,
     reportdate: `${bucket.key}-15`,
     status: "SENT",
+    subject: index === 0 ? "Office Center diensten" : "Agency diensten",
     totalincldiscountexclvat: [18500, 22400, 26350, 19800, 28900, 24400][index % 6]
   }));
 }

@@ -1,6 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isGrippCreditInvoice, signedGrippInvoiceRevenueAmount } from "../src/grippInvoiceRevenue.js";
+import { isGrippCreditInvoice, signedGrippAgencyInvoiceRevenueAmount, signedGrippInvoiceRevenueAmount } from "../src/grippInvoiceRevenue.js";
+
+test("agency revenue excludes Office Center invoice subjects regardless of case or separators", () => {
+  for (const subject of ["Office Center diensten", "Maandelijkse OFFICE CENTER diensten", "Office-Center diensten", "OfficeCenter diensten"]) {
+    assert.equal(signedGrippAgencyInvoiceRevenueAmount({ subject }, 1000), 0);
+    assert.equal(signedGrippAgencyInvoiceRevenueAmount({ subject, iscreditnote: true }, 250), 0);
+    assert.equal(signedGrippAgencyInvoiceRevenueAmount({ subject }, -250), 0);
+  }
+  assert.equal(signedGrippAgencyInvoiceRevenueAmount({ "invoice.subject": { value: "Office Center diensten" } }, 1000), 0);
+});
+
+test("agency revenue keeps other invoice subjects and subtracts agency credit notes", () => {
+  assert.equal(signedGrippAgencyInvoiceRevenueAmount({ subject: "Website", description: "Office Center diensten" }, 1000), 1000);
+  assert.equal(signedGrippAgencyInvoiceRevenueAmount({ subject: "Creditnota website" }, 250), -250);
+  assert.equal(signedGrippAgencyInvoiceRevenueAmount({ subject: "Website" }, -250), -250);
+  assert.equal(signedGrippAgencyInvoiceRevenueAmount({}, 1000), 1000);
+});
 
 test("signedGrippInvoiceRevenueAmount keeps regular invoices positive", () => {
   const invoice = {

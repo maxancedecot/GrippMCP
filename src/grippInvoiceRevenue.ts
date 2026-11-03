@@ -13,6 +13,13 @@ export function signedGrippInvoiceRevenueAmount(invoice: GrippInvoiceRecord, amo
   return isGrippCreditInvoice(invoice) ? -Math.abs(amount) : amount;
 }
 
+export function signedGrippAgencyInvoiceRevenueAmount(invoice: GrippInvoiceRecord, amount: number) {
+  const isOfficeCenter = textValuesFrom(readField(invoice, "subject"))
+    .some((subject) => normalizeComparisonValue(subject).includes("officecenter"));
+
+  return isOfficeCenter ? 0 : signedGrippInvoiceRevenueAmount(invoice, amount);
+}
+
 export function isGrippCreditInvoice(invoice: GrippInvoiceRecord) {
   if (hasNegativeInvoiceTotal(invoice)) {
     return true;
