@@ -364,7 +364,7 @@ export default async function PmDashboard({ searchParams, lite = false }: {
   const employeeCostExcludingOverhead = dashboard.employeeCost;
   const agencyResult = dashboard.agencyRevenueExcludingOfficeCenter === null
     ? null
-    : (dashboard.agencyRevenueExcludingOfficeCenter - employeeCostExcludingOverhead) * 3;
+    : (dashboard.agencyRevenueExcludingOfficeCenter + dashboard.crmRevenue.amount - employeeCostExcludingOverhead) * 3;
   const agencyResultLabel = agencyResult === null ? "—" : formatCurrency(agencyResult);
 
   return (
@@ -393,7 +393,7 @@ export default async function PmDashboard({ searchParams, lite = false }: {
           href={pmRevenueTabHref(params, "profit", basePath)}
           label="Agency resultaat"
           value={agencyResultLabel}
-          detail={agencyResult === null ? "Klik op Bijwerken om Office Center-diensten uit te sluiten" : "(Agency omzet excl. Office Center-diensten − (medewerkerskost − overhead)) × 3"}
+          detail={agencyResult === null ? "Klik op Bijwerken om Office Center-diensten uit te sluiten" : "(Agency omzet excl. Office Center-diensten + CRM omzet − (medewerkerskost − overhead)) × 3"}
           tone={agencyResult === null ? "neutral" : agencyResult < 0 ? "warning" : "good"}
         /> : null}
         <MetricCard href="#pm-billability-detail" label="Billableheid" value={`${formatPercent(dashboard.billability)}%`} detail={`${formatHours(dashboard.billableHours)} / ${formatHours(dashboard.availableHours)} beschikbare uren`} tone="blue" />
