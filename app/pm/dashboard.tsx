@@ -9,6 +9,8 @@ import type { JsonValue } from "../../src/types.js";
 import { smoothAreaPath, smoothLinePath, type ChartPoint } from "../chart-paths.js";
 import { createDashboardGrippClient, DASHBOARD_GRIPP_API_TOKEN_ENV, hasDashboardGrippApiToken } from "../dashboard-gripp.js";
 import { DashboardFrame } from "../dashboard-frame.js";
+import { requirePmDashboardAccess } from "./auth.js";
+import { logoutPmDashboard } from "./login/actions.js";
 
 type JsonRecord = Record<string, unknown>;
 type PmSearchParams = Record<string, string | string[] | undefined>;
@@ -344,6 +346,7 @@ export default async function PmDashboard({ searchParams, lite = false }: {
   lite?: boolean;
 }) {
   const basePath: PmDashboardPath = lite ? "/pm/lite" : "/pm";
+  await requirePmDashboardAccess(basePath);
   const params = (await searchParams) ?? {};
   const billabilityView = getPmBillabilityView(params);
   const revenueView = lite ? "revenue" : getPmRevenueView(params);
@@ -382,6 +385,9 @@ export default async function PmDashboard({ searchParams, lite = false }: {
             <span>{dashboard.period.label}</span>
             <span>Bijgewerkt {dashboard.lastUpdated}</span>
             {canRefresh ? <PmDashboardRefreshForm params={params} basePath={basePath} /> : null}
+            <form action={logoutPmDashboard}>
+              <button className="pm-refresh-button" type="submit">Uitloggen</button>
+            </form>
           </div>
         </header>
 
@@ -715,6 +721,7 @@ function PmDashboardRefreshForm({ params, basePath }: { params: PmSearchParams; 
 async function refreshPmDashboardAction(basePath: PmDashboardPath, formData: FormData) {
   "use server";
 
+  await requirePmDashboardAccess(basePath);
   const params = pmSearchParamsFromFormData(formData);
   const employeeBillabilityPeriod = getEmployeeBillabilityPeriodFromParams(params);
   let notice: PmCacheNotice = "refreshed";
