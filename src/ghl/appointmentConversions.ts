@@ -16,6 +16,7 @@ const opportunityResponse = z.object({
   opportunities: z.array(z.object({
     id: z.string().min(1),
     pipelineId: z.string().nullish(),
+    createdAt: z.union([z.string(), z.number()]).nullish(),
     contactId: z.string().min(1).nullish(),
     contact: z.object({ id: z.string().min(1).nullish() }).nullish()
   })),
@@ -159,7 +160,12 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
   }
   const counts: GhlPipelineConversionCount[] = [];
   for (const { pipeline, opportunities } of pipelineOpportunities) {
-    const contactIds = [...new Set([...opportunities.values()].map((opportunity) => opportunity.contactId ?? opportunity.contact?.id).filter((id): id is string => Boolean(id)))];
+    const opportunityCreated = new Map<string, (string | number | null | undefined)[]>();
+    for (const opportunity of opportunities.values()) {
+      const id = opportunity.contactId ?? opportunity.contact?.id;
+      if (id) opportunityCreated.set(id, [...opportunityCreated.get(id) ?? [], opportunity.createdAt]);
+    }
+    const contactIds = [...opportunityCreated.keys()];
     const leads = new Set<string>(), appointments = new Set<string>();
     let completeLeads = [...opportunities.values()].every((opportunity) => opportunity.contactId || opportunity.contact?.id);
     let completeAppointments = completeLeads;
@@ -167,12 +173,14 @@ export async function ghlConversionsByPipeline(config: GhlAppointmentConfig, per
       const contact = contacts.get(id)!;
       const classification = classifyGhlContactTags(contact.tags);
       if (!classification) continue;
-      const created = dateKey(contact.dateAdded);
-      if (!created) {
+      // The opportunity in this pipeline marks when the contact became a lead for this project,
+      // so an existing contact who requests another project's brochure counts as a new lead there.
+      const created = opportunityCreated.get(id)!.map((value) => dateKey(value ?? contact.dateAdded));
+      if (created.some((date) => date && date >= period.start && date <= period.end)) {
+        (classification === "lead" ? leads : appointments).add(id);
+      } else if (created.some((date) => !date)) {
         if (classification === "lead") completeLeads = false;
         else completeAppointments = false;
-      } else if (created >= period.start && created <= period.end) {
-        (classification === "lead" ? leads : appointments).add(id);
       }
     }
     counts.push({ pipelineId: pipeline.id, pipelineName: pipeline.name,

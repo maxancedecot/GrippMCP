@@ -63,15 +63,43 @@ test("contact details override embedded tags and pipeline stage; each contact co
   assert.equal(visits.filter((path) => path === "/contacts/lead").length, 1);
 });
 
-test("period uses contact creation dates, inclusive Brussels boundaries, independently of opportunity dates", async () => {
+test("period uses opportunity creation dates with inclusive Brussels boundaries, independently of contact and stage dates", async () => {
+  const created = { start: "2026-09-07T22:00:00Z", end: "2026-09-14T21:59:59Z", before: "2026-09-07T21:59:59Z", after: "2026-09-14T22:00:00Z" };
   const contacts = [
-    contact("start", ["ledoux", "brochure"], "2026-09-07T22:00:00Z"),
-    contact("end", ["ledoux", "afspraak"], "2026-09-14T21:59:59Z"),
-    contact("before", ["ledoux", "contact"], "2026-09-07T21:59:59Z"),
-    contact("after", ["ledoux", "afspraak"], "2026-09-14T22:00:00Z")
+    contact("start", ["ledoux", "brochure"], "2026-09-20T12:00:00Z"),
+    contact("end", ["ledoux", "afspraak"], "2000-01-01T12:00:00Z"),
+    contact("before", ["ledoux", "contact"]),
+    contact("after", ["ledoux", "afspraak"])
   ];
-  const call = read(contacts.map(({ id }) => ({ ...opportunity(id), createdAt: "2000-01-01", lastStageChangeAt: "2000-01-01" })), contacts);
-  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, call)), [[1, 1]]);
+  const call = read(contacts.map(({ id }) => ({ ...opportunity(id), createdAt: created[id as keyof typeof created], lastStageChangeAt: "2026-09-10T12:00:00Z" })), contacts);
+  const result = await ghlConversionsByPipeline(config, period, call);
+  assert.deepEqual(counts(result), [[1, 1]]);
+  assert.deepEqual([result[0]?.leadContactIds, result[0]?.appointmentContactIds], [["start"], ["end"]]);
+});
+
+test("an existing contact counts as a new lead when it gets an opportunity in the project pipeline during the period", async () => {
+  const contacts = [
+    contact("new", ["ledoux", "salt water", "brochure"], "2026-09-10T12:00:00Z"),
+    contact("returning", ["ledoux", "kievit", "salt water", "brochure"], "2025-04-30T07:49:27Z"),
+    contact("old", ["ledoux", "salt water", "brochure"], "2026-08-01T12:00:00Z")
+  ];
+  const result = await ghlConversionsByPipeline(config, period, read([
+    { ...opportunity("new"), createdAt: "2026-09-10T12:00:04Z" },
+    { ...opportunity("returning"), createdAt: "2026-09-12T10:35:26Z" },
+    { ...opportunity("old"), createdAt: "2026-08-01T12:00:04Z" },
+    { ...opportunity("old-again", "old"), createdAt: "2026-09-13T09:00:00Z" }
+  ], contacts));
+  assert.deepEqual(counts(result), [[3, 0]]);
+  assert.deepEqual(result[0]?.leadContactIds, ["new", "returning", "old"]);
+});
+
+test("opportunities without a creation date fall back to the contact creation date", async () => {
+  const contacts = [contact("inside"), contact("outside", undefined, "2026-08-01T12:00:00Z"), contact("unknown", undefined, null)];
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, read([
+    { ...opportunity("inside"), createdAt: null }, opportunity("outside"), opportunity("unknown"),
+    { ...opportunity("unknown-in-period", "unknown"), createdAt: "2026-09-11T12:00:00Z" }
+  ], contacts))), [[2, 0]]);
+  assert.deepEqual(counts(await ghlConversionsByPipeline(config, period, read([opportunity("unknown"), opportunity("inside")], contacts))), [[null, 0]]);
 });
 
 test("missing contact date invalidates only the matching bucket and unrelated contacts need no date", async () => {
