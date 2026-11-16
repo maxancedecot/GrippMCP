@@ -1,4 +1,5 @@
 export const CAMPAIGN_CTR_BENCHMARK_PERCENT = 1;
+export const GOOGLE_CTR_BENCHMARK_PERCENT = 10;
 export const PROJECT_CVR_BENCHMARK_PERCENT = 2;
 
 export type CampaignBenchmarkComparison = {

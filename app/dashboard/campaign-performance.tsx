@@ -14,6 +14,7 @@ import { getProjectPageManagementData, projectPageKey, type ManagedProjectPage }
 import { filterCampaignProjectsByManager, summarizeFilteredCampaignProjects } from "../../src/campaignAccountManagerFilter.js";
 import {
   CAMPAIGN_CTR_BENCHMARK_PERCENT,
+  GOOGLE_CTR_BENCHMARK_PERCENT,
   PROJECT_CVR_BENCHMARK_PERCENT,
   campaignBenchmarkComparison,
   type CampaignBenchmarkComparison
@@ -86,7 +87,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
   const facebookAccounts = rows.flatMap(facebookAccountSources);
   const googleSources = selectedManager ? projectAdSources(projects, "google") : rows.map((row) => row.google);
   const facebookSources = selectedManager ? projectAdSources(projects, "facebook") : facebookAccounts.map((account) => account.facebook);
-  const googleComparison = campaignBenchmarkComparison(projectCtrValues(projects, "google"), CAMPAIGN_CTR_BENCHMARK_PERCENT);
+  const googleComparison = campaignBenchmarkComparison(projectCtrValues(projects, "google"), GOOGLE_CTR_BENCHMARK_PERCENT);
   const facebookComparison = campaignBenchmarkComparison(projectCtrValues(projects, "facebook"), CAMPAIGN_CTR_BENCHMARK_PERCENT);
   const websiteComparison = campaignBenchmarkComparison(projects.map((project) => project.cvr)
     .filter((value): value is number => value !== null), PROJECT_CVR_BENCHMARK_PERCENT);
@@ -125,7 +126,7 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
       <section className="panel campaign-overview" aria-labelledby="campaign-projects-title">
         <CampaignProjectTable hiddenProjects={hiddenProjects} canDeleteProjects={canDeleteProjects} info={<details className="campaign-project-info">
           <summary aria-label="Meer informatie over de projectcijfers" title="Toelichting tonen of verbergen"><Info size={20} aria-hidden="true" /></summary>
-          <div className="campaign-info-content"><p>Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. CTR onder 1% en project-CVR onder 2% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Leads en afspraken komen uit de gekoppelde GoHighLevel-projectpipeline. Ontbrekende CRM-data wordt met een streepje en een melding getoond. De contacttags bepalen de telling: ledoux + brochure of ledoux + contact is een lead; ledoux met afspraak, appointment of afspraak aangevraagd is een afspraak. Bij meerdere tags heeft afspraak voorrang. De periode gebruikt de aanmaakdatum van het contact. Project-CVR is (leads + afspraken) gedeeld door websitebezoekers.</p></div>
+          <div className="campaign-info-content"><p>Facebook en Google tonen per project één gewogen gemiddelde CTR, de totale spend en Live zodra minstens één campagne live is. Beweeg over een cijfer of status voor de afzonderlijke campagnes. Google CTR onder {GOOGLE_CTR_BENCHMARK_PERCENT}%, Facebook CTR onder {CAMPAIGN_CTR_BENCHMARK_PERCENT}% en project-CVR onder {PROJECT_CVR_BENCHMARK_PERCENT}% zijn rood, vanaf die grenzen groen; de kleur wordt sterker verder van de grens. CTR en spend gelden voor de gekozen periode; Live is de huidige status. Bij een campagne voor meerdere projectpagina’s gelden CTR en spend voor die pagina’s samen. Leads en afspraken komen uit de gekoppelde GoHighLevel-projectpipeline. Ontbrekende CRM-data wordt met een streepje en een melding getoond. De contacttags bepalen de telling: ledoux + brochure of ledoux + contact is een lead; ledoux met afspraak, appointment of afspraak aangevraagd is een afspraak. Bij meerdere tags heeft afspraak voorrang. De periode gebruikt de aanmaakdatum van het contact. Project-CVR is (leads + afspraken) gedeeld door websitebezoekers.</p></div>
         </details>} columns={[
           { key: "title", label: "Projectpagina", text: true },
           { key: "live", label: "Facebook live" },
@@ -248,7 +249,7 @@ function ProjectCampaignMetric({ project, summary, metric, channel }: {
   return <span className="campaign-project-summary campaign-ctr-trigger" tabIndex={0} title={title} aria-label={`${value}. ${title}`}>
     {metric === "status" ? <span className={`campaign-status campaign-status--${summary.live === true ? "live" : summary.live === false ? "offline" : "unknown"}`}>
       <i aria-hidden="true" />{value}
-    </span> : <strong style={metric === "ctr" ? { color: rateColor(summary.ctr, CAMPAIGN_CTR_BENCHMARK_PERCENT) } : undefined}>{value}</strong>}
+    </span> : <strong style={metric === "ctr" ? { color: rateColor(summary.ctr, channel === "google" ? GOOGLE_CTR_BENCHMARK_PERCENT : CAMPAIGN_CTR_BENCHMARK_PERCENT) } : undefined}>{value}</strong>}
   </span>;
 }
 
@@ -338,7 +339,7 @@ function ChannelPanel({ name, sources, linkCtr, comparison }: {
     </div>
     <dl className="campaign-channel-metrics">
       <div><dt>{linkCtr ? `Facebook link-CTR${linkCtr.campaigns > 1 ? " (gewogen)" : ""}` : `${name} CTR`}</dt>
-        <dd style={{ color: rateColor(linkCtr ? linkCtr.ctr : summary.ctr, CAMPAIGN_CTR_BENCHMARK_PERCENT) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
+        <dd style={{ color: rateColor(linkCtr ? linkCtr.ctr : summary.ctr, comparison.benchmark) }}>{percentage(linkCtr ? linkCtr.ctr : summary.ctr)}</dd></div>
       <div><dt>{name} spend</dt><dd>{formatSpend(summary.spend)}</dd></div>
     </dl>
     <p className="campaign-benchmark">{formatBelowAverage(comparison, "project", "projecten", "CTR")}</p>
