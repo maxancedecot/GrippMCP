@@ -420,7 +420,7 @@ test("configured GoHighLevel pipelines replace both website conversion counts", 
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 4);
 });
 
-test("CRM project CVR stays unavailable when tagged appointment contacts have no creation date", async () => {
+test("CRM project CVR stays unavailable when a tagged appointment has no opportunity or contact creation date", async () => {
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 40), conversionLink("site-a", "/bedankt-afspraak", 20)];
   const result = await getCampaignPerformance(data, {
@@ -436,7 +436,7 @@ test("CRM project CVR stays unavailable when tagged appointment contacts have no
       ] }] }
       : { opportunities: [
         { id: "lead", contactId: "lead", pipelineStageId: "new", createdAt: "2026-09-08T10:00:00Z" },
-        { id: "appointment", contactId: "appointment", pipelineStageId: "appointment", createdAt: "2026-09-08T10:00:00Z" }
+        { id: "appointment", contactId: "appointment", pipelineStageId: "appointment", createdAt: null }
       ] }
   });
   const project = result.projects.find((project) => project.sourcePath === "/project")!;

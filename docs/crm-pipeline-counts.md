@@ -2,7 +2,7 @@
 
 De tags in de contactdetails bepalen de kolom. **Afspraken (CRM)** telt contacten met `ledoux` en `afspraak`, `appointment` of `afspraak aangevraagd`. **Leads (CRM)** telt contacten met `ledoux` en `brochure` of `contact`. Afspraak heeft voorrang wanneer beide combinaties aanwezig zijn. De pipeline bepaalt het project; de pipelinefase bepaalt de telling niet.
 
-Het periodefilter gebruikt de aanmaakdatum van het contact (`dateAdded`), met inclusieve kalenderdagen in Europe/Brussels. Elk contact telt binnen een project eenmaal mee, ook in meerdere gekoppelde pipelines. Verschillende CRM-subaccounts houden hun eigen contacten.
+Het periodefilter gebruikt de aanmaakdatum van de opportunity in de gekoppelde pipeline (`createdAt`), met inclusieve kalenderdagen in Europe/Brussels. Een bestaand contact dat in de periode een opportunity in de projectpipeline krijgt, bijvoorbeeld door de brochure van een tweede project aan te vragen, telt dus als nieuwe lead voor dat project. Ontbreekt `createdAt`, dan geldt de aanmaakdatum van het contact (`dateAdded`). De tags blijven die van het contact: een contact dat voor een ander project al `afspraak` kreeg, telt ook in de nieuwe pipeline als afspraak. Elk contact telt binnen een project eenmaal mee, ook in meerdere gekoppelde pipelines. Verschillende CRM-subaccounts houden hun eigen contacten.
 
 Project-CVR en de CVR bij een accountmanagerfilter gebruiken `(leads + afspraken) / websitebezoekers × 100`. Ontbrekende contactgegevens of relevante datums geven een onbeschikbare telling; CVR blijft onbeschikbaar zolang een van de twee tellingen ontbreekt.
 
