@@ -1,3 +1,4 @@
+// site-analytics.js (aangepast voor de cookiebanner).
 (function () {
   "use strict";
   var script = document.currentScript;
@@ -7,13 +8,22 @@
   window.__grippBrowserAnalyticsQueued = true;
   var endpoint = new URL("/api/site-analytics/browser", script.src).href;
   var project = script.getAttribute("data-project") || "ledoux";
+  var VISITOR_KEY = "gripp_site_analytics_visitor_id";
+  var SESSION_KEY = "gripp_site_analytics_session";
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
   else start();
+
+  function magOpslaan() {
+    try {
+      var match = document.cookie.match(/(?:^|;\s*)cc_toestemming=([^;]*)/);
+      return !!match && JSON.parse(decodeURIComponent(match[1])).keuzes.statistieken === true;
+    } catch (error) { return false; }
+  }
 
   function start() {
     if (window.__grippSiteAnalyticsLoaded || (window.grippSiteAnalytics && window.grippSiteAnalytics.restUrl)) return;
     window.__grippSiteAnalyticsLoaded = true;
-    var visitorId = storedId("gripp_site_analytics_visitor_id");
+    var visitorId = storedId(VISITOR_KEY);
     var sessionId;
     var pageViewId;
     var pageUrl;
@@ -110,19 +120,29 @@
     }
     function storedId(key) {
       try {
+        if (!magOpslaan()) {
+          window.localStorage.removeItem(key);
+          window.localStorage.removeItem(SESSION_KEY);
+          return createId();
+        }
         var value = window.localStorage.getItem(key) || createId();
         window.localStorage.setItem(key, value); return value;
       } catch (error) { return createId(); }
     }
     function currentSession() {
+      if (!magOpslaan()) return sessionId || createId();
       try {
-        var previous = JSON.parse(window.localStorage.getItem("gripp_site_analytics_session") || "null");
+        var previous = JSON.parse(window.localStorage.getItem(SESSION_KEY) || "null");
         if (previous && previous.id && Date.now() - previous.updated_at < 30 * 60 * 1000) return previous.id;
       } catch (error) {}
       return createId();
     }
     function touchSession() {
-      try { window.localStorage.setItem("gripp_site_analytics_session", JSON.stringify({ id: sessionId, updated_at: Date.now() })); } catch (error) {}
+      if (!magOpslaan()) return;
+      try {
+        if (!window.localStorage.getItem(VISITOR_KEY)) window.localStorage.setItem(VISITOR_KEY, visitorId);
+        window.localStorage.setItem(SESSION_KEY, JSON.stringify({ id: sessionId, updated_at: Date.now() }));
+      } catch (error) {}
     }
     function createId() {
       return window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
