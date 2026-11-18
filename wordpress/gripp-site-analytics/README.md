@@ -32,3 +32,26 @@ Optionnel: si `SITE_ANALYTICS_REGISTRATION_TOKEN` est configure dans Vercel, le 
 - Temps actif par page et profondeur de scroll
 
 Le plugin ne transmet pas l'adresse IP et ne stocke pas le token site dans le navigateur.
+
+## Consentement aux statistiques (version 0.2.5)
+
+La banniere du site doit enregistrer le cookie first-party `cc_toestemming`, lisible
+par JavaScript, contenant du JSON encode pour une URL. Seul le booleen
+`keuzes.statistieken: true` autorise la lecture et l'ecriture des identifiants dans
+`localStorage`. La chaine `"true"`, un cookie absent ou invalide ne vaut pas consentement.
+
+Sans consentement, le tracker supprime ses deux anciennes cles au demarrage, sans
+en lire les valeurs: `gripp_site_analytics_visitor_id` et `gripp_site_analytics_session`.
+Il continue a envoyer les evenements avec des identifiants temporaires en memoire.
+Les visiteurs uniques, sessions et taux de conversion bases sur ces identifiants
+peuvent donc etre moins fiables. Le format des evenements reste inchange.
+
+Quand le visiteur accepte les statistiques, le prochain evenement conserve les
+identifiants de la page dans `localStorage` (ping toutes les 15 secondes si visible).
+En cas de retrait du consentement, la banniere doit recharger la page pour supprimer
+les anciennes cles et utiliser de nouveaux identifiants temporaires.
+
+Pour mettre a jour une installation existante, uploader le nouveau ZIP puis choisir
+de remplacer la version installee. Les reglages de connexion restent en base WordPress.
+Vider ensuite les caches du site et verifier que `assets/tracker.js?ver=0.2.5` est charge.
+La banniere et le headcode ne sont pas installes ni modifies par cette mise a jour.

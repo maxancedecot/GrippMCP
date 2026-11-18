@@ -23,9 +23,10 @@ sessies en daarvan afgeleide conversiepercentages blijven daardoor ook tijdelijk
 meetellen. Het correct scheiden van deze statistieken vereist een aparte wijziging aan
 de backend en het dashboard.
 
-Deze wijziging betreft de gedeelde browsertracker. De afzonderlijke WordPress-tracker
-en de cookiebanners worden hiermee niet aangepast. Sites zonder `cc_toestemming`
-gebruiken voortaan ook tijdelijke ID's.
+Deze toestemming geldt ook voor de afzonderlijke WordPress-tracker vanaf pluginversie
+`0.2.5`. Bestaande WordPress-installaties moeten de nieuwe plugin-ZIP installeren en
+de sitecache legen. De cookiebanners worden hiermee niet aangepast. Sites zonder
+`cc_toestemming` gebruiken voortaan ook tijdelijke ID's.
 
 ## Controle en uitrol
 
@@ -33,7 +34,8 @@ Automatische checks:
 
 ```sh
 node --check public/site-analytics.js
-node --import tsx --test test/browserTracker.test.ts test/browserAnalytics.test.ts
+node --check wordpress/gripp-site-analytics/assets/tracker.js
+node --import tsx --test test/browserTracker.test.ts test/browserAnalytics.test.ts test/wordpressTracker.test.ts
 npm test
 ```
 
@@ -50,3 +52,8 @@ een schoon browserprofiel met DevTools open:
    en meetevents gebruiken nieuwe tijdelijke ID's.
 
 Een lokale test bevestigt niet de werking van de live banner, deployment of caches.
+Voor WordPress: upload `wordpress/gripp-site-analytics.zip`, vervang de bestaande
+plugin en leeg de sitecache. Controleer versie `0.2.5` en voer dezelfde bannertests uit.
+De download via `/api/site-analytics/plugin` bevat na deployment dezelfde tracker en
+configureert automatisch de dashboard-URL. De lokale ZIP bevat geen vooraf ingevulde
+dashboard-URL; bij een update blijven bestaande verbindingsinstellingen behouden.

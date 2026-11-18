@@ -10,7 +10,9 @@
   }
   window.__grippSiteAnalyticsLoaded = true;
 
-  var visitorId = storedId("localStorage", "gripp_site_analytics_visitor_id");
+  var VISITOR_KEY = "gripp_site_analytics_visitor_id";
+  var SESSION_KEY = "gripp_site_analytics_session";
+  var visitorId = storedId("localStorage", VISITOR_KEY);
   var sessionId = currentSessionId();
   var pageViewId = createId();
   var lastEngagementSentAt = Date.now();
@@ -170,9 +172,23 @@
     return Math.max(0, Math.min(100, Math.round((scrollTop / scrollable) * 100)));
   }
 
+  function magOpslaan() {
+    try {
+      var match = document.cookie.match(/(?:^|;\s*)cc_toestemming=([^;]*)/);
+      return !!match && JSON.parse(decodeURIComponent(match[1])).keuzes.statistieken === true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   function storedId(storageName, key) {
     try {
       var storage = window[storageName];
+      if (!magOpslaan()) {
+        storage.removeItem(key);
+        storage.removeItem(SESSION_KEY);
+        return createId();
+      }
       var existing = storage.getItem(key);
       if (existing) {
         return existing;
@@ -187,7 +203,10 @@
   }
 
   function currentSessionId() {
-    var key = "gripp_site_analytics_session";
+    if (!magOpslaan()) {
+      return sessionId || createId();
+    }
+    var key = SESSION_KEY;
     var now = Date.now();
 
     try {
@@ -206,8 +225,14 @@
   }
 
   function touchSession() {
+    if (!magOpslaan()) {
+      return;
+    }
     try {
-      window.localStorage.setItem("gripp_site_analytics_session", JSON.stringify({ id: sessionId, updated_at: Date.now() }));
+      if (!window.localStorage.getItem(VISITOR_KEY)) {
+        window.localStorage.setItem(VISITOR_KEY, visitorId);
+      }
+      window.localStorage.setItem(SESSION_KEY, JSON.stringify({ id: sessionId, updated_at: Date.now() }));
     } catch (error) {}
   }
 
