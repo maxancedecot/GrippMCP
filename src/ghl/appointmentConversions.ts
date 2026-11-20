@@ -78,7 +78,7 @@ export function classifyGhlContactTags(tags: readonly string[]): "lead" | "appoi
     .toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)));
   if (!words.has("ledoux")) return null;
   if (words.has("afspraak") || words.has("appointment")) return "appointment";
-  return words.has("brochure") || words.has("contact") ? "lead" : null;
+  return words.has("brochure") || words.has("contact") || words.has("teaser") ? "lead" : null;
 }
 
 export async function countGhlAppointments(config: GhlAppointmentConfig, period: { start: string; end: string }, call?: GhlReadCall) {

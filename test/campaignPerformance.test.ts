@@ -420,6 +420,36 @@ test("configured GoHighLevel pipelines replace both website conversion counts", 
   assert.equal(result.projects.find((project) => project.sourcePath === "/project")?.cvr, 4);
 });
 
+test("Ledoux teaser contacts join dashboard lead totals and project CVR without double counting or overriding appointments", async () => {
+  const data = dashboard();
+  data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 99)];
+  const tags: Record<string, string[]> = {
+    brochure: ["ledoux", "brochure"], contact: ["ledoux", "contact"],
+    teaser: ["ledoux", "teaser", "brochure", "contact"],
+    teaserOnly: ["ledoux", "teaser"], meeting: ["ledoux", "teaser", "afspraak"],
+    unrelated: ["teaser"], outside: ["ledoux", "teaser"]
+  };
+  const result = await getCampaignPerformance(data, {
+    env: environment([{ siteId: "site-a", ghl: { locationId: "location", installId: "install", pipelineIds: ["project"],
+      pipelineProjects: [{ pipelineId: "project", sourcePath: "/project" }] } }]),
+    ghlCall: async ({ path }) => path.startsWith("/contacts/")
+      ? { contact: { id: path.slice(10), tags: tags[path.slice(10)], dateAdded: "2025-01-01T10:00:00Z" } }
+      : path.endsWith("/pipelines") ? { pipelines: [{ id: "project", name: "Project" }] }
+      : { opportunities: [
+        ...Object.keys(tags).map((id) => ({ id, contactId: id, pipelineId: "project",
+          createdAt: id === "outside" ? "2026-08-08T10:00:00Z" : "2026-09-08T10:00:00Z" })),
+        { id: "duplicate", contactId: "teaserOnly", pipelineId: "project", createdAt: "2026-09-09T10:00:00Z" }
+      ], meta: {} }
+  });
+  assert.equal(result.rows[0].leads.data?.count, 4);
+  assert.equal(summarizeWebsiteConversions(result.rows.map((row) => row.leads)).count, 4);
+  assert.equal(result.rows[0].appointments.data?.count, 1);
+  const project = result.projects.find((item) => item.sourcePath === "/project")!;
+  assert.equal(project.leads, 4);
+  assert.equal(project.appointments, 1);
+  assert.equal(project.cvr, 10);
+});
+
 test("CRM project CVR stays unavailable when a tagged appointment has no opportunity or contact creation date", async () => {
   const data = dashboard();
   data.cvrLinks = [conversionLink("site-a", "/bedankt-brochure", 40), conversionLink("site-a", "/bedankt-afspraak", 20)];

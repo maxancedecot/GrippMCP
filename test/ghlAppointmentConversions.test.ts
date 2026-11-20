@@ -16,18 +16,21 @@ function read(opportunities: unknown[], contacts: ReturnType<typeof contact>[], 
 }
 const counts = (result: Awaited<ReturnType<typeof ghlConversionsByPipeline>>) => result.map(({ leads, appointments }) => [leads, appointments]);
 
-test("contact tags require Ledoux, recognize brochure and contact leads, and give appointment priority", () => {
-  for (const tags of [["ledoux", "brochure"], [" Ledoux ", "CONTACT"], ["ledoux_brochure"], ["LÉDOUX - contact"], ["ledoux", "brochure", "contact"]]) {
+test("contact tags require Ledoux, recognize brochure, contact and teaser leads, and give appointment priority", () => {
+  for (const tags of [["ledoux", "brochure"], [" Ledoux ", "CONTACT"], ["ledoux_brochure"], ["LÉDOUX - contact"], ["ledoux", "brochure", "contact"],
+    ["ledoux", "teaser"], [" Ledoux ", "TEASER"], ["LÉDOUX_teaser"], ["ledoux", "teaser", "brochure", "contact"]]) {
     assert.equal(classifyGhlContactTags(tags), "lead");
   }
   for (const tags of [
     ["ledoux", "afspraak"], ["ledoux-afspraak"], ["ledoux", "afspraak", "brochure", "contact"],
     ["ledoux", "appointment"], ["LEDOUX_APPOINTMENT"], ["ledoux", "APPOINTMENT", "brochure", "contact"],
-    ["ledoux", "afspraak aangevraagd"], ["ledoux-afspraak-aangevraagd"], ["ledoux", "afspraak aangevraagd", "brochure", "contact"]
+    ["ledoux", "afspraak aangevraagd"], ["ledoux-afspraak-aangevraagd"], ["ledoux", "afspraak aangevraagd", "brochure", "contact"],
+    ["ledoux", "teaser", "afspraak"], ["ledoux", "teaser", "appointment"], ["ledoux", "teaser", "afspraak aangevraagd"]
   ]) {
     assert.equal(classifyGhlContactTags(tags), "appointment");
   }
-  for (const tags of [[], ["ledoux"], ["brochure"], ["afspraak"], ["appointment"], ["afspraak aangevraagd"], ["contact"], ["notledoux", "contact"], ["ledoux", "contactpersoon"], ["ledoux", "brochures"], ["ledoux", "appointments"]]) {
+  for (const tags of [[], ["ledoux"], ["brochure"], ["afspraak"], ["appointment"], ["afspraak aangevraagd"], ["contact"], ["notledoux", "contact"], ["ledoux", "contactpersoon"], ["ledoux", "brochures"], ["ledoux", "appointments"],
+    ["teaser"], ["notledoux", "teaser"], ["ledoux", "teasers"], ["ledoux", "preteaser"]]) {
     assert.equal(classifyGhlContactTags(tags), null);
   }
 });
