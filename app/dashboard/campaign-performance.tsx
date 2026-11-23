@@ -9,6 +9,8 @@ import { hasProjectPage, summarizeFacebookProjectCampaigns, summarizeGoogleProje
 import { liveSortValue } from "../../src/tableSorting.js";
 import { CampaignProjectRowButton } from "./campaign-project-row-button.js";
 import { readCampaignProjectVisibility, type CampaignProjectVisibility } from "../../src/campaignProjectVisibility.js";
+import { applyCampaignProjectTitles, readCampaignProjectTitles, type CampaignProjectTitles } from "../../src/campaignProjectTitles.js";
+import { CampaignProjectTitle } from "./campaign-project-title.js";
 import { CampaignProjectTable } from "./campaign-project-table.js";
 import { getProjectPageManagementData, projectPageKey, type ManagedProjectPage } from "../../src/projectPageManagement.js";
 import { filterCampaignProjectsByManager, summarizeFilteredCampaignProjects } from "../../src/campaignAccountManagerFilter.js";
@@ -48,15 +50,17 @@ export async function loadCampaignPerformanceBaseData({ dashboard, discoverySite
 
 export type CampaignPerformanceBaseData = Awaited<ReturnType<typeof loadCampaignPerformanceBaseData>>;
 
-export function filterCampaignPerformanceViewData(base: CampaignPerformanceBaseData, selectedAccountManager?: string, syncHref?: string, visibility?: CampaignProjectVisibility) {
-  const filtered = filterCampaignProjectsByManager(base.projects.filter(hasProjectPage), base.accountManagers, selectedAccountManager, visibility?.hiddenKeys);
+export function filterCampaignPerformanceViewData(base: CampaignPerformanceBaseData, selectedAccountManager?: string, syncHref?: string, visibility?: CampaignProjectVisibility, titles?: CampaignProjectTitles) {
+  const projects = applyCampaignProjectTitles(base.projects.filter(hasProjectPage), titles);
+  const filtered = filterCampaignProjectsByManager(projects, base.accountManagers, selectedAccountManager, visibility?.hiddenKeys);
   const filteredSiteIds = new Set(filtered.projects.map((project) => project.siteId));
   const filteredRows = filtered.selectedManager ? base.rows.filter((row) => filteredSiteIds.has(row.siteId)) : base.rows;
   const filteredMetaAccountIds = new Set(filtered.projects.flatMap((project) => project.campaigns.map((campaign) => `act_${campaign.accountId}`)));
   const filteredMetaSync = filtered.selectedManager && base.metaSync
     ? { ...base.metaSync, accounts: base.metaSync.accounts.filter((account) => filteredMetaAccountIds.has(account.id)) }
     : base.metaSync;
-  return { ...base, rows: filteredRows, message: [base.message, visibility?.error].filter(Boolean).join(" "),
+  return { ...base, rows: filteredRows, message: [base.message, visibility?.error, titles?.error].filter(Boolean).join(" "),
+    canRenameProjects: titles?.canSave ?? false,
     hiddenProjects: visibility?.canSave ? filtered.hiddenProjects : [], canDeleteProjects: visibility?.canSave ?? false,
     facebookLinkCtr: filtered.selectedManager ? filteredProjectLinkCtr(filtered.projects) : base.facebookLinkCtr,
     projects: filtered.projects, unmatchedCampaigns: filtered.selectedManager ? [] : base.unmatchedCampaigns,
@@ -66,7 +70,9 @@ export function filterCampaignPerformanceViewData(base: CampaignPerformanceBaseD
 
 export async function loadCampaignPerformanceViewData({ selectedAccountManager, syncHref, ...props }: CampaignPerformanceProps) {
   const base = await loadCampaignPerformanceBaseData(props);
-  return filterCampaignPerformanceViewData(base, selectedAccountManager, syncHref, await readCampaignProjectVisibility(base.projects.filter(hasProjectPage)));
+  const projects = base.projects.filter(hasProjectPage);
+  const [visibility, titles] = await Promise.all([readCampaignProjectVisibility(projects), readCampaignProjectTitles(projects)]);
+  return filterCampaignPerformanceViewData(base, selectedAccountManager, syncHref, visibility, titles);
 }
 
 export async function CampaignPerformance(props: CampaignPerformanceProps) {
@@ -74,13 +80,14 @@ export async function CampaignPerformance(props: CampaignPerformanceProps) {
 }
 
 export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projects, unmatchedCampaigns, accountManagers, metaSync, syncHref,
-  selectedManager = "", totalProjects = projects.length, hiddenProjects = [], canDeleteProjects = false }: {
+  selectedManager = "", totalProjects = projects.length, hiddenProjects = [], canDeleteProjects = false, canRenameProjects = false }: {
   rows: CampaignPerformanceRow[]; message: string; facebookLinkCtr: LinkCtrSummary;
   projects: CampaignProjectRow[]; unmatchedCampaigns: UnmatchedProjectCampaign[];
   accountManagers: Record<string, ManagedProjectPage>;
   metaSync?: MetaAccountSync; syncHref?: string;
   managers?: [string, string][]; selectedManager?: string; totalProjects?: number;
   hiddenProjects?: CampaignProjectRow[]; canDeleteProjects?: boolean;
+  canRenameProjects?: boolean;
 }) {
   const projectSummary = summarizeFilteredCampaignProjects(projects);
   const cvr = projectSummary.conversionRate;
@@ -155,7 +162,8 @@ export function CampaignPerformanceView({ rows, message, facebookLinkCtr, projec
               visitors: project.visitors, leads: project.leads, appointments: project.appointments, cvr: project.cvr
             },
             content: <tr key={project.key} data-project-key={project.key} data-account-manager-id={manager?.accountManagerId ?? "unassigned"}>
-              <th scope="row"><a className="row-title" href={project.url} target="_blank" rel="noreferrer">{project.title}</a>
+              <th scope="row"><CampaignProjectTitle siteId={project.siteId} path={project.sourcePath} title={project.title}
+                url={project.url} disabled={!canRenameProjects} />
                 {manager?.accountManagerName ? <span className="cell-muted campaign-project-manager" title={[manager.reason, manager.clientName, manager.grippProjectName].filter(Boolean).join(" · ")}>Accountmanager: {manager.accountManagerName}</span>
                   : <a className="cell-muted campaign-project-manager" href="/dashboard?tab=data-management">Accountmanager: nog toe te wijzen</a>}
                 <span className="cell-muted">{project.siteName}</span><span className="cell-muted" title={project.sourcePaths?.join("\n")}>{project.sourcePaths ? "Samengevoegde projectpagina’s" : project.sourcePath}</span>

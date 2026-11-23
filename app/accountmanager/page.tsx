@@ -9,6 +9,7 @@ import {
 import { DashboardSidebarFooter, DashboardViewTabs } from "../dashboard/view-tabs.js";
 import { hasProjectPage } from "../../src/campaignProjects.js";
 import { readCampaignProjectVisibility } from "../../src/campaignProjectVisibility.js";
+import { readCampaignProjectTitles } from "../../src/campaignProjectTitles.js";
 import { getSiteAnalyticsDashboardData } from "../../src/siteAnalytics.js";
 import { loadBackgroundSnapshot } from "../../src/backgroundSnapshot.js";
 import { getProjectPageGroupRevision } from "../../src/projectPageGroupStore.js";
@@ -57,9 +58,10 @@ export default async function AccountManagerPage({ searchParams }: { searchParam
     dateStyle: "short", timeStyle: "short" }).format(new Date(snapshot.refreshedAt));
   const cleanHref = accountManagerHref({ params, days, customPeriod });
   const clearFilterHref = accountManagerHref({ params: { ...params, manager: undefined }, days, customPeriod });
-  const visibility = await readCampaignProjectVisibility(snapshot.data.performance.projects.filter(hasProjectPage));
+  const projects = snapshot.data.performance.projects.filter(hasProjectPage);
+  const [visibility, titles] = await Promise.all([readCampaignProjectVisibility(projects), readCampaignProjectTitles(projects)]);
   const performance = filterCampaignPerformanceViewData(snapshot.data.performance, selectedAccountManager,
-    accountManagerHref({ params, days, customPeriod, syncMeta: true }), visibility);
+    accountManagerHref({ params, days, customPeriod, syncMeta: true }), visibility, titles);
 
   return <AccountManagerLoadingProvider>
     <AccountManagerInitialLoadComplete />

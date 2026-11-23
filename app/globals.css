@@ -4422,6 +4422,16 @@ td .inline-bar {
 .campaign-project-row-action button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
 .campaign-project-row-action button:disabled { opacity: 0.5; cursor: not-allowed; }
 .campaign-project-row-error { max-width: 220px; color: var(--danger); font-size: 12px; white-space: normal; }
+.campaign-project-title-line { display: flex; align-items: flex-start; gap: 5px; }
+.campaign-project-title-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 26px; height: 26px; margin-top: -5px; padding: 0; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
+.campaign-project-title-button:hover { color: var(--ink); border-color: var(--border); background: var(--surface-muted); }
+.campaign-project-title-button:disabled, .campaign-project-title-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+.campaign-project-title-button:focus-visible, .campaign-project-title-form input:focus-visible, .campaign-project-title-controls button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.campaign-project-title-form { display: grid; gap: 6px; margin-top: 6px; }
+.campaign-project-title-form input { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink); font: inherit; }
+.campaign-project-title-controls { display: flex; flex-wrap: wrap; gap: 5px; }
+.campaign-project-title-controls button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink); font-size: 11px; cursor: pointer; }
+.campaign-project-title-controls button:hover { border-color: var(--ink); }
 .campaign-project-deleted { margin-top: 18px; color: var(--muted); }
 .campaign-project-deleted summary { cursor: pointer; font-weight: 740; }
 .campaign-project-deleted ul { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }

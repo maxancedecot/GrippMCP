@@ -1,7 +1,21 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath } from "next/cache.js";
 import { setCampaignProjectHidden } from "../../src/campaignProjectVisibility.js";
+import { saveCampaignProjectTitle } from "../../src/campaignProjectTitles.js";
+
+export async function saveCampaignProjectTitleAction(siteId: string, path: string, title: string): Promise<
+  { ok: true; title: string } | { ok: false; error: string }
+> {
+  try {
+    const savedTitle = await saveCampaignProjectTitle({ siteId, path, title });
+    revalidatePath("/accountmanager");
+    revalidatePath("/dashboard");
+    return { ok: true, title: savedTitle };
+  } catch {
+    return { ok: false, error: "De projectnaam kon niet worden opgeslagen. Gebruik 1 tot 180 tekens en probeer opnieuw." };
+  }
+}
 
 export async function setCampaignProjectHiddenAction(siteId: string, path: string, hidden: boolean): Promise<
   { ok: true } | { ok: false; error: string }
