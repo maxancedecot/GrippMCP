@@ -1950,7 +1950,7 @@ function stripeCrmRevenueCacheKeySegment() {
   const accountId = process.env.PM_STRIPE_ACCOUNT_ID?.trim();
   const accountScope = accountId ? `account:${safeCacheKeySegment(accountId)}` : "platform";
 
-  return `stripe:${stripeKeyMode(secretKey)}:${currency}:vat:${vatRate}:${accountScope}:excl-ad-credits`;
+  return `stripe:${stripeKeyMode(secretKey)}:${currency}:vat:${vatRate}:${accountScope}:excl-ad-credits-v2`;
 }
 
 function stripeKeyMode(secretKey: string) {

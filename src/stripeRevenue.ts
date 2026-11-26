@@ -397,6 +397,9 @@ function isStripeRevenueTransaction(transaction: StripeBalanceTransaction) {
 }
 
 function isAdvertisingCreditLabel(value: string | undefined) {
+  if (value?.toLowerCase().includes("advertentietegoed")) {
+    return true;
+  }
   const normalized = value?.toLowerCase().replace(/[^a-z0-9]+/g, " ");
   return Boolean(normalized && /\b(?:advertentie\s*(?:tegoed(?:en)?|budget(?:ten)?)|(?:ad|ads|advertising)\s*(?:credits?|budgets?)|media\s*budget(?:ten|s)?)\b/.test(normalized));
 }

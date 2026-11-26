@@ -81,6 +81,24 @@ test("summarizeStripeCrmRevenue excludes advertising credits and their refunds f
   assert.deepEqual(result.byMonth.map((month) => month.revenue), [100, 30]);
 });
 
+test("summarizeStripeCrmRevenue excludes every type when the description contains advertentietegoed anywhere", () => {
+  const types = ["charge", "payment", "refund", "payment_refund", "payment_failure_refund", "payment_reversal", "refund_failure"];
+  const transactions = types.map((type, index) => ({
+    ...transaction(`bt_ads_${type}`, index % 2 ? -12100 : 12100, "2026-01-05T12:00:00.000Z", "eur", type, "charge"),
+    description: index % 2 ? "Automatische ADVERTENTIETEGOEDopwaardering" : "Projectadvertentietegoed november"
+  }));
+  transactions.push({
+    ...transaction("bt_crm_subscription", 12100, "2026-02-05T12:00:00.000Z", "eur", "charge", "charge"),
+    description: "CRM abonnement"
+  });
+
+  const result = summarizeStripeCrmRevenue(transactions, period);
+
+  assert.equal(result.amount, 100);
+  assert.equal(result.transactionCount, 1);
+  assert.deepEqual(result.byMonth.map((month) => month.revenue), [0, 100]);
+});
+
 test("fetchStripeCrmRevenueForPeriod filters expanded payment sources and refunded charges", async () => {
   const result = await fetchStripeCrmRevenueForPeriod(period, {
     secretKey: "sk_test_123",
