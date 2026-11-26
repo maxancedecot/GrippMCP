@@ -46,6 +46,14 @@ export type StripeBalanceTransaction = {
   currency: string;
   type: string;
   reportingCategory?: string;
+  description?: string;
+  source?: StripeRevenueSource;
+};
+
+type StripeRevenueSource = {
+  description?: string;
+  metadata?: Record<string, unknown>;
+  charge?: StripeRevenueSource;
 };
 
 const STRIPE_BALANCE_TRANSACTIONS_URL = "https://api.stripe.com/v1/balance_transactions";
@@ -297,6 +305,10 @@ function stripeBalanceTransactionsUrl(
     "created[gte]": String(unixSecondsForDateStart(period.start)),
     "created[lte]": String(unixSecondsForDateEnd(period.end))
   });
+  params.append("expand[]", "data.source");
+  if (["refund", "payment_refund", "refund_failure"].includes(type)) {
+    params.append("expand[]", "data.source.charge");
+  }
   if (startingAfter) {
     params.set("starting_after", startingAfter);
   }
@@ -325,7 +337,20 @@ function toStripeBalanceTransaction(value: unknown): StripeBalanceTransaction | 
     created,
     currency,
     type,
-    reportingCategory: stringFrom(record.reporting_category)
+    reportingCategory: stringFrom(record.reporting_category),
+    description: stringFrom(record.description),
+    source: stripeRevenueSourceFromValue(record.source)
+  };
+}
+
+function stripeRevenueSourceFromValue(value: unknown): StripeRevenueSource | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const charge = asRecord(record.charge);
+  return {
+    description: stringFrom(record.description),
+    metadata: asRecord(record.metadata),
+    charge: charge ? { description: stringFrom(charge.description), metadata: asRecord(charge.metadata) } : undefined
   };
 }
 
@@ -355,11 +380,25 @@ function emptyStripeCrmRevenue(
 }
 
 function isStripeRevenueTransaction(transaction: StripeBalanceTransaction) {
+  const sources = [transaction.source, transaction.source?.charge];
+  const labels = [
+    transaction.description,
+    ...sources.flatMap((source) => [source?.description, ...Object.entries(source?.metadata ?? {}).map(([key, value]) => `${key} ${value}`)])
+  ];
+  if (labels.some((label) => isAdvertisingCreditLabel(label))) {
+    return false;
+  }
+
   if (!transaction.reportingCategory) {
     return true;
   }
 
   return STRIPE_REVENUE_REPORTING_CATEGORIES.has(transaction.reportingCategory) || STRIPE_REVENUE_REVERSAL_TYPES.has(transaction.type);
+}
+
+function isAdvertisingCreditLabel(value: string | undefined) {
+  const normalized = value?.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  return Boolean(normalized && /\b(?:advertentie\s*(?:tegoed(?:en)?|budget(?:ten)?)|(?:ad|ads|advertising)\s*(?:credits?|budgets?)|media\s*budget(?:ten|s)?)\b/.test(normalized));
 }
 
 function stripeCrmRevenueSourceMessage(revenue: StripeCrmRevenue, accountId: string, keyMode: StripeSecretKeyMode) {
@@ -368,7 +407,7 @@ function stripeCrmRevenueSourceMessage(revenue: StripeCrmRevenue, accountId: str
   const accountScope = accountId ? "connected account" : "platform account";
 
   if (revenue.transactionCount > 0) {
-    return `Stripe verbonden met ${keyModeLabel} op ${accountScope}; ${revenue.transactionCount} ${currency} omzetmutaties geladen, excl. ${formatVatRate(revenue.vatRate)}% btw.`;
+    return `Stripe verbonden met ${keyModeLabel} op ${accountScope}; ${revenue.transactionCount} ${currency} omzetmutaties geladen, excl. advertentietegoeden en ${formatVatRate(revenue.vatRate)}% btw.`;
   }
 
   if (revenue.fetchedTransactionCount > 0) {

@@ -54,6 +54,66 @@ test("summarizeStripeCrmRevenue uses a configurable VAT rate", () => {
   );
 });
 
+test("summarizeStripeCrmRevenue excludes advertising credits and their refunds from totals and months", () => {
+  const descriptions = [
+    "Maandelijks advertentietegoed",
+    "Extra advertentietegoed",
+    "Openstaand advertentietegoed",
+    "Automatische opwaardering advertentietegoed",
+    "AD CREDITS",
+    "Advertentie-budget",
+    "Ad budget"
+  ];
+  const transactions: StripeBalanceTransaction[] = descriptions.flatMap((description, index) => [
+    { ...transaction(`bt_ads_${index}`, 12100, "2026-01-05T12:00:00.000Z", "eur", "charge", "charge"), description },
+    { ...transaction(`bt_ads_refund_${index}`, -6050, "2026-02-05T12:00:00.000Z", "eur", "refund", "refund"), source: { charge: { description } } }
+  ]);
+  transactions.push(
+    { ...transaction("bt_crm", 12100, "2026-01-05T12:00:00.000Z", "eur", "charge", "charge"), description: "Subscription update" },
+    { ...transaction("bt_crm_credits", 6050, "2026-02-05T12:00:00.000Z", "eur", "charge", "charge"), description: "Credits Ledoux CRM" },
+    { ...transaction("bt_crm_refund", -2420, "2026-02-10T12:00:00.000Z", "eur", "refund", "refund"), description: "CRM refund" }
+  );
+
+  const result = summarizeStripeCrmRevenue(transactions, period);
+
+  assert.equal(result.amount, 130);
+  assert.equal(result.transactionCount, 3);
+  assert.deepEqual(result.byMonth.map((month) => month.revenue), [100, 30]);
+});
+
+test("fetchStripeCrmRevenueForPeriod filters expanded payment sources and refunded charges", async () => {
+  const result = await fetchStripeCrmRevenueForPeriod(period, {
+    secretKey: "sk_test_123",
+    currency: "eur",
+    vatRate: 21,
+    fetchImpl: async (url) => {
+      const params = new URL(url).searchParams;
+      assert.ok(params.getAll("expand[]").includes("data.source"));
+      const base = { amount: 12100, created: timestamp("2026-01-05T12:00:00.000Z"), currency: "eur", reporting_category: "charge" };
+      if (params.get("type") === "charge") {
+        return stripeListResponse({ data: [
+          { ...base, id: "bt_crm", type: "charge", description: "Subscription update", source: "ch_crm" },
+          { ...base, id: "bt_ads_description", type: "charge", description: "Extra advertentietegoed" },
+          { ...base, id: "bt_ads_source", type: "charge", source: { description: "Maandelijks advertentietegoed" } },
+          { ...base, id: "bt_ads_metadata", type: "charge", source: { metadata: { category: "ad_credits" } } }
+        ] });
+      }
+      if (params.get("type") === "refund") {
+        assert.ok(params.getAll("expand[]").includes("data.source.charge"));
+        return stripeListResponse({ data: [
+          { ...base, id: "bt_ads_refund", type: "refund", amount: -6050, reporting_category: "refund", source: { charge: { description: "Openstaand advertentietegoed" } } },
+          { ...base, id: "bt_crm_refund", type: "refund", amount: -2420, reporting_category: "refund", source: { charge: { description: "CRM abonnement" } } }
+        ] });
+      }
+      return stripeListResponse({ data: [] });
+    }
+  });
+
+  assert.equal(result.amount, 80);
+  assert.equal(result.transactionCount, 2);
+  assert.deepEqual(result.byMonth.map((month) => month.revenue), [80, 0]);
+});
+
 test("fetchStripeCrmRevenueForPeriod lists revenue transaction types with Stripe auth headers", async () => {
   const calls: { url: string; init: RequestInit }[] = [];
   const fetchImpl = (async (url: string, init: RequestInit) => {
@@ -127,7 +187,7 @@ test("fetchStripeCrmRevenueForPeriod lists revenue transaction types with Stripe
   assert.equal(result.vatRate, 21);
   assert.equal(result.source.mode, "live");
   assert.match(result.source.message, /Stripe verbonden met test key op connected account/);
-  assert.match(result.source.message, /excl\. 21% btw/);
+  assert.match(result.source.message, /excl\. advertentietegoeden en 21% btw/);
   assert.equal(calls.length, 8);
 
   const firstCall = calls[0];

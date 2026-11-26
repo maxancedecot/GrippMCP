@@ -694,7 +694,7 @@ function crmRevenueMetricDetail(crmRevenue: StripeCrmRevenue) {
       return crmRevenue.source.message;
     }
 
-    return `${crmRevenue.transactionCount} Stripe mutaties; excl. ${formatVatRate(crmRevenue.vatRate)}% btw`;
+    return `${crmRevenue.transactionCount} Stripe mutaties; excl. advertentietegoeden en ${formatVatRate(crmRevenue.vatRate)}% btw`;
   }
   if (crmRevenue.source.mode === "demo") {
     return "Demo uit Stripe balance transactions";
@@ -1950,7 +1950,7 @@ function stripeCrmRevenueCacheKeySegment() {
   const accountId = process.env.PM_STRIPE_ACCOUNT_ID?.trim();
   const accountScope = accountId ? `account:${safeCacheKeySegment(accountId)}` : "platform";
 
-  return `stripe:${stripeKeyMode(secretKey)}:${currency}:vat:${vatRate}:${accountScope}`;
+  return `stripe:${stripeKeyMode(secretKey)}:${currency}:vat:${vatRate}:${accountScope}:excl-ad-credits`;
 }
 
 function stripeKeyMode(secretKey: string) {
